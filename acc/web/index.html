@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ACC · Agent Command Center</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><div class="brand"><b>ACC</b><div>Agent Command Center<small id="project">Connect to your local workspace</small></div></div><div class="header-actions"><span id="connection" class="badge">Disconnected</span><button id="new-task">＋ New task</button></div></header>
+<section id="connect-panel" class="connect"><form id="connect-form"><label>Local session token<input id="token" type="password" autocomplete="off" required placeholder="Use the link printed by ACC, or paste its token"></label><button>Connect</button></form></section>
+<div id="error" role="alert" hidden></div>
+<div class="context"><span id="branch">Local Git</span><span>Local commands stream directly</span><span id="git-status">GitHub: not connected in v0.1</span><span id="counts"></span></div>
+<main>
+ <section class="work">
+  <div class="section-title"><h1>Work plan</h1><span class="muted">Local workspace · one writer</span></div>
+  <div id="tasks" class="tasks"><div class="empty">Connect to see tasks. No sample work is shown.</div></div>
+  <section class="git-panel"><div class="section-title"><h2>Local changes</h2><span class="muted">Observed every second</span></div><div id="changes" class="muted">Waiting for Git state.</div><details><summary>Recent local commits</summary><div id="commits"></div></details></section>
+ </section>
+ <aside id="detail"><div class="empty"><h2>Your instructions, clearly tracked.</h2><p>Create a task here or through the orchestrator bridge. Select it to inspect instructions, assignment, output, and evidence.</p></div></aside>
+</main>
+<section class="feed"><div class="section-title"><h2>Activity</h2><span class="muted">Observed operations and attributed reports</span></div><div id="events"><p class="muted">No events loaded.</p></div></section>
+<footer><span>ACC 0.1 · Local coordinator</span><span>Model adapters require host configuration · Automatic takeover and offline fallback are not enabled yet</span></footer>
+<dialog id="task-dialog"><form id="task-form"><div class="section-title"><h2>New task</h2><button type="button" id="close-dialog" aria-label="Close">×</button></div><p id="task-error" role="alert" hidden></p><label>Task title<input name="title" required maxlength="200" placeholder="Verify specialist staffing"></label><label>Your instruction<textarea name="instruction" required rows="5" placeholder="What should be done, preserved, and checked?"></textarea></label><label>Assigned worker<select name="agent" id="new-agent"></select></label><label id="argv-label">Command arguments (JSON array)<textarea name="argv" rows="3" placeholder='["python", "-m", "unittest", "discover", "-s", "tests"]'></textarea></label><p class="muted">Local command executes the exact argument list in this project folder. It does not call an AI model. Creating a task does not start it.</p><button class="primary">Create task</button></form></dialog>
+</body></html>

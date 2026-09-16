@@ -1,0 +1,9 @@
+{
+  "agents": [
+    {
+      "id": "configured-worker",
+      "name": "Your configured coding worker",
+      "argv": ["YOUR_WORKER_EXECUTABLE", "--task-file", "{prompt_file}", "--project", "{project}"]
+    }
+  ]
+}

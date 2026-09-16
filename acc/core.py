@@ -1,0 +1,502 @@
+"""Persistent task state and supervised local workers. Python standard library only."""
+from __future__ import annotations
+import codecs
+import contextlib
+import csv
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+import uuid
+
+
+def now():
+    return time.time()
+
+
+def identifier():
+    return uuid.uuid4().hex
+
+
+class Conflict(ValueError):
+    pass
+
+
+class Store:
+    def __init__(self, path):
+        self.path = str(path)
+        with self.connect() as db:
+            db.executescript('''
+            PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS events (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL,
+                task_id TEXT, kind TEXT NOT NULL, data TEXT NOT NULL);
+            ''')
+
+    @contextlib.contextmanager
+    def connect(self):
+        db = sqlite3.connect(self.path, timeout=10)
+        db.row_factory = sqlite3.Row
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    def tasks(self):
+        with self.connect() as db:
+            return [json.loads(r[0]) for r in db.execute('SELECT data FROM tasks ORDER BY rowid')]
+
+    def get(self, task_id):
+        with self.connect() as db:
+            row = db.execute('SELECT data FROM tasks WHERE id=?', (task_id,)).fetchone()
+        if row is None:
+            raise KeyError(task_id)
+        return json.loads(row[0])
+
+    def save(self, task, kind, details):
+        # State and its event are committed together, so reconnects see consistent state.
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO tasks VALUES (?,?)', (task['id'], json.dumps(task)))
+            db.execute('INSERT INTO events(at,task_id,kind,data) VALUES (?,?,?,?)',
+                       (now(), task['id'], kind, json.dumps(details)))
+
+    def event(self, kind, details, task_id=None):
+        with self.connect() as db:
+            db.execute('INSERT INTO events(at,task_id,kind,data) VALUES (?,?,?,?)',
+                       (now(), task_id, kind, json.dumps(details)))
+
+    def events(self, after=0, limit=200):
+        with self.connect() as db:
+            rows = db.execute('SELECT * FROM events WHERE seq>? ORDER BY seq LIMIT ?',
+                              (after, limit)).fetchall()
+        return [dict(r, data=json.loads(r['data'])) for r in rows]
+
+    def tail(self):
+        with self.connect() as db:
+            seq = db.execute('SELECT COALESCE(MAX(seq),0) FROM events').fetchone()[0]
+        return seq
+
+
+class StateLock:
+    """One coordinator per state directory. Released by the OS after process exit."""
+    def __init__(self, path):
+        self.file = open(path, 'a+b')
+        self.file.seek(0)
+        self.file.write(b'0')
+        self.file.flush()
+        self.file.seek(0)
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(self.file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.file.close()
+            raise Conflict('Another ACC coordinator owns this state directory.')
+
+    def close(self):
+        if not self.file.closed:
+            if os.name == 'nt':
+                import msvcrt
+                self.file.seek(0)
+                msvcrt.locking(self.file.fileno(), msvcrt.LK_UNLCK, 1)
+            self.file.close()
+
+
+def git_snapshot(project):
+    def git(*args):
+        return subprocess.run(['git', '-C', str(project), *args], capture_output=True,
+                              timeout=8, env={**os.environ, 'GIT_OPTIONAL_LOCKS': '0'})
+    status = git('status', '--porcelain=v1', '-z', '--untracked-files=all')
+    if status.returncode:
+        return {'available': False, 'message': 'This folder is not a readable Git worktree.'}
+    records = status.stdout.decode('utf-8', 'replace').split('\0')
+    files, i = [], 0
+    while i < len(records):
+        row = records[i]
+        i += 1
+        if not row:
+            continue
+        state, name = row[:2], row[3:]
+        if 'R' in state or 'C' in state:
+            i += 1  # porcelain -z puts the old name after the new name
+        path = project / name
+        try:
+            stamp = path.stat().st_mtime_ns
+        except OSError:
+            stamp = None
+        files.append({'status': state, 'path': name, 'modified_ns': stamp})
+    branch = git('branch', '--show-current').stdout.decode().strip() or '(detached HEAD)'
+    head = git('rev-parse', '--verify', 'HEAD')
+    commit = head.stdout.decode().strip() if head.returncode == 0 else None
+    log = git('log', '-8', '--format=%h%x00%s%x00%ct')
+    commits = []
+    for line in log.stdout.decode('utf-8', 'replace').splitlines():
+        fields = line.split('\0', 2)
+        if len(fields) == 3:
+            commits.append(dict(zip(('sha', 'subject', 'time'), fields)))
+    return {'available': True, 'branch': branch, 'head': commit, 'files': files, 'commits': commits}
+
+
+def stop_tree(proc):
+    """Do not transfer ownership until the supervised process has ended."""
+    if os.name == 'nt':
+        # Full job-object isolation is required before enabling Windows takeover.
+        result = subprocess.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'],
+                                capture_output=True, timeout=15)
+        if result.returncode and proc.poll() is None:
+            raise Conflict('Windows could not confirm the runner stopped.')
+        proc.wait(timeout=5)
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        # Always kill remaining group members, even if the parent exited first.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait(timeout=5)
+
+
+class Coordinator:
+    def __init__(self, project, state, config=None):
+        self.project = Path(project).resolve()
+        if not self.project.is_dir():
+            raise ValueError('Project folder does not exist.')
+        self.state = Path(state).resolve()
+        self.state.mkdir(parents=True, exist_ok=True)
+        try:
+            self.state.chmod(0o700)
+        except OSError:
+            pass
+        self.ownership = StateLock(self.state / 'coordinator.lock')
+        workspace_locks = Path.home() / '.acc' / 'workspace-locks'
+        workspace_locks.mkdir(parents=True, exist_ok=True)
+        lock_name = hashlib.sha256(os.path.normcase(str(self.project)).encode()).hexdigest()
+        try:
+            self.project_ownership = StateLock(workspace_locks / lock_name)
+        except Exception:
+            self.ownership.close()
+            raise
+        self.lock = threading.RLock()
+        self.store = Store(self.state / 'acc.sqlite3')
+        with self.store.connect() as db:
+            row = db.execute("SELECT value FROM meta WHERE key='project'").fetchone()
+            if row and row[0] != str(self.project):
+                self.ownership.close()
+                self.project_ownership.close()
+                raise Conflict('State directory belongs to a different project.')
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('project',?)", (str(self.project),))
+        self.process = None
+        self.running_task = None
+        self.worker_thread = None
+        self.deadline = None
+        self.halt = threading.Event()
+        self.git = {'available': False, 'message': 'Inspecting local Git…'}
+        self.agents = {'local-command': {'id': 'local-command', 'name': 'Local command',
+                       'kind': 'tool', 'available': True, 'description': 'Runs an explicit argv command; no AI inference.'}}
+        for key, name in [('deepseek', 'DeepSeek'), ('claude', 'Claude'), ('grok', 'Grok'), ('local-model', 'Local model')]:
+            self.agents[key] = {'id': key, 'name': name, 'kind': 'model', 'available': False,
+                                'description': 'Not configured on this computer.'}
+        if config:
+            for agent in json.loads(Path(config).read_text(encoding='utf-8')).get('agents', []):
+                key, argv = agent['id'], agent['argv']
+                if key == 'local-command' or not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', key):
+                    raise ValueError('Invalid agent id.')
+                if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+                    raise ValueError('Agent argv must be a nonempty string array.')
+                available = bool(shutil.which(argv[0]))
+                self.agents[key] = {**agent, 'kind': 'model', 'available': available,
+                                    'description': 'Configured command adapter; provider readiness not verified.' if available else 'Executable missing.'}
+        # An old live process could still be writing. Require explicit inspection on restart.
+        self.recovery_required = False
+        for task in self.store.tasks():
+            if task['status'] in ('running', 'stopping'):
+                task['status'] = 'interrupted'
+                task['activity'] = 'Coordinator restarted. Inspect previous PID before releasing workspace.'
+                self.store.save(task, 'interrupted', {'message': task['activity']})
+            if task['status'] == 'interrupted':
+                self.recovery_required = True
+        self.observer = threading.Thread(target=self._observe, daemon=True)
+        self.observer.start()
+
+    def public_agents(self):
+        return [{k: a.get(k) for k in ('id', 'name', 'kind', 'available', 'description')} for a in self.agents.values()]
+
+    def snapshot(self):
+        with self.lock:
+            seq = self.store.tail()
+            return {'project': str(self.project), 'tasks': self.store.tasks(),
+                    'agents': self.public_agents(), 'git': self.git, 'cursor': seq,
+                    'events': self.store.events(max(0, seq - 100)),
+                    'recovery_required': self.recovery_required,
+                    'capabilities': {'github': False, 'automatic_offline': False, 'safe_takeover': False}}
+
+    def create(self, payload):
+        title, instruction = payload.get('title', '').strip(), payload.get('instruction', '').strip()
+        if not title or not instruction or len(title) > 200 or len(instruction) > 50000:
+            raise ValueError('Provide a title (up to 200 characters) and instruction (up to 50,000).')
+        agent = payload.get('agent', 'local-command')
+        if agent not in self.agents:
+            raise ValueError('Unknown agent.')
+        argv = payload.get('argv', [])
+        if not isinstance(argv, list) or not all(isinstance(x, str) and '\0' not in x for x in argv):
+            raise ValueError('Command must be a JSON array of strings, not a shell string.')
+        timeout = payload.get('timeout_seconds', 900)
+        if type(timeout) is not int or not 1 <= timeout <= 86400:
+            raise ValueError('Timeout must be an integer between 1 and 86400 seconds.')
+        task = {'id': identifier(), 'title': title, 'instruction': instruction, 'revision': 1,
+                'requirements_history': [], 'delivered_revision': None, 'agent': agent, 'active_agent': None,
+                'argv': argv, 'status': 'queued', 'activity': 'Ready to start.', 'next_step': 'Run assigned worker',
+                'created': now(), 'run_id': None, 'pid': None, 'exit_code': None, 'evidence': [], 'runs': [],
+                'review': None, 'timeout_seconds': timeout, 'timed_out': False}
+        with self.lock:
+            self.store.save(task, 'task_created', {'message': title, 'revision': 1})
+        return task
+
+    def assign(self, task_id, agent):
+        with self.lock:
+            task = self.store.get(task_id)
+            if agent not in self.agents or not self.agents[agent]['available']:
+                raise ValueError('That agent is not configured and available.')
+            if task['status'] in ('running', 'stopping', 'interrupted'):
+                raise Conflict('Active takeover is not enabled yet. Stop the runner and inspect its handoff before reassigning.')
+            task['agent'] = agent
+            self.store.save(task, 'assigned', {'message': 'Assigned to ' + self.agents[agent]['name']})
+            return task
+
+    def revise(self, task_id, instruction):
+        if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 50000:
+            raise ValueError('Instruction must contain 1–50,000 characters.')
+        with self.lock:
+            task = self.store.get(task_id)
+            if task['status'] in ('running', 'stopping', 'interrupted'):
+                raise Conflict('Stop and inspect this run before changing its instructions in v0.1.')
+            task['requirements_history'].append({'revision': task['revision'], 'instruction': task['instruction']})
+            task['revision'] += 1
+            task['instruction'] = instruction.strip()
+            task['review'] = None
+            task['status'] = 'queued'
+            self.store.save(task, 'requirements_updated', {'message': 'Requirements revised.', 'revision': task['revision']})
+            return task
+
+    def _packet(self, task):
+        return {'task': task, 'project': str(self.project), 'git': self.git,
+                'rules': ['Read applicable project instructions before editing.',
+                          'Use the task requirements; preserve unrelated work.',
+                          'Report actual checks and remaining work. Do not claim review approval.']}
+
+    def start(self, task_id):
+        with self.lock:
+            task = self.store.get(task_id)
+            if self.recovery_required:
+                raise Conflict('Interrupted run needs manual process inspection before new work can start.')
+            if self.running_task:
+                raise Conflict('Another runner owns this workspace. Wait or stop it first.')
+            if task['status'] in ('running', 'stopping', 'interrupted', 'accepted'):
+                raise Conflict('This task cannot be started in its current state.')
+            agent = self.agents[task['agent']]
+            if not agent['available']:
+                raise ValueError('Configure this worker on the host first.')
+            run_id = identifier()
+            folder = self.state / 'runs' / run_id
+            folder.mkdir(parents=True)
+            prompt = folder / 'task.json'
+            prompt.write_text(json.dumps(self._packet(task), indent=2), encoding='utf-8')
+            argv = task['argv'] if agent['id'] == 'local-command' else [
+                a.replace('{prompt_file}', str(prompt)).replace('{project}', str(self.project)) for a in agent['argv']]
+            if not argv:
+                raise ValueError('Local command requires an explicit argv array.')
+            opts = {'start_new_session': True} if os.name != 'nt' else {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
+            try:
+                proc = subprocess.Popen(argv, cwd=self.project, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **opts)
+            except OSError as exc:
+                self.store.event('launch_failed', {'message': str(exc)}, task_id)
+                raise ValueError('Worker failed to launch: ' + str(exc))
+            self.process, self.running_task = proc, task_id
+            task.update(status='running', active_agent=agent['id'], run_id=run_id, pid=proc.pid,
+                        exit_code=None, activity='Runner started; waiting for output.',
+                        delivered_revision=task['revision'], next_step='Inspect worker result', review=None, timed_out=False)
+            task['runs'].append({'id': run_id, 'pid': proc.pid, 'agent': agent['id'],
+                                 'revision': task['revision'], 'started': now(), 'folder': str(folder)})
+            self.store.save(task, 'run_started', {'message': 'Started ' + agent['name'], 'run_id': run_id,
+                                                'pid': proc.pid, 'revision': task['revision']})
+            self.worker_thread = threading.Thread(target=self._collect, args=(proc, task_id, run_id, folder), daemon=True)
+            self.deadline = threading.Timer(task['timeout_seconds'], self._timeout, args=(task_id, run_id))
+            self.deadline.daemon = True
+            self.deadline.start()
+            self.worker_thread.start()
+            return task
+
+    def _timeout(self, task_id, run_id):
+        with self.lock:
+            task = self.store.get(task_id)
+            if self.running_task != task_id or task['run_id'] != run_id:
+                return
+            task['timed_out'] = True
+            self.store.save(task, 'timeout', {'message': 'Run deadline exceeded; stopping worker.'})
+        try:
+            self.stop(task_id)
+        except (Conflict, OSError, subprocess.TimeoutExpired):
+            pass  # Existing run remains owned; the user can inspect or stop it.
+
+    def _collect(self, proc, task_id, run_id, folder):
+        decoder = codecs.getincrementaldecoder('utf-8')('replace')
+        try:
+            with (folder / 'output.log').open('w', encoding='utf-8') as log:
+                while True:
+                    raw = os.read(proc.stdout.fileno(), 4096)
+                    if not raw:
+                        break
+                    chunk = decoder.decode(raw)
+                    log.write(chunk)
+                    log.flush()
+                    with self.lock:
+                        task = self.store.get(task_id)
+                        task['activity'] = chunk.strip()[-240:] or 'Worker output received.'
+                        self.store.save(task, 'output', {'message': chunk, 'run_id': run_id})
+            code = proc.wait()
+            # Stop leftover children before making this workspace available again.
+            if os.name != 'nt':
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            with self.lock:
+                if self.deadline:
+                    self.deadline.cancel()
+                task = self.store.get(task_id)
+                stopped = task['status'] == 'stopping'
+                task.update(status='failed' if task['timed_out'] else ('paused' if stopped else ('awaiting_review' if code == 0 else 'failed')),
+                            exit_code=code, active_agent=None,
+                            activity='Run timed out; inspect retained changes.' if task['timed_out'] else ('Stopped; inspect retained files before continuing.' if stopped else f'Runner exited with code {code}.'),
+                            next_step='Inspect changes and evidence')
+                task['runs'][-1].update(ended=now(), exit_code=code)
+                (folder / 'handoff.json').write_text(json.dumps(self._packet(task), indent=2), encoding='utf-8')
+                self.store.save(task, 'run_ended', {'message': task['activity'], 'run_id': run_id, 'exit_code': code})
+                self.process, self.running_task = None, None
+        except Exception as exc:
+            with self.lock:
+                task = self.store.get(task_id)
+                task.update(status='interrupted', activity='Runner supervision failed; inspect process before resuming.')
+                self.recovery_required = True
+                self.store.save(task, 'supervisor_error', {'message': str(exc)})
+        finally:
+            proc.stdout.close()
+
+    def stop(self, task_id):
+        with self.lock:
+            if self.running_task != task_id:
+                raise Conflict('This task has no supervised active runner.')
+            task = self.store.get(task_id)
+            if task['status'] == 'stopping':
+                return task
+            task.update(status='stopping', activity='Stopping runner and child processes…')
+            self.store.save(task, 'stop_requested', {'message': task['activity']})
+            proc = self.process
+        stop_tree(proc)
+        return self.store.get(task_id)
+
+    def report(self, task_id, payload):
+        with self.lock:
+            task = self.store.get(task_id)
+            message = payload.get('message', '')
+            if not isinstance(message, str) or not message.strip() or len(message) > 20000:
+                raise ValueError('Report needs a message of at most 20,000 characters.')
+            entry = {'id': identifier(), 'at': now(), 'message': message,
+                     'source': 'orchestrator report', 'revision': task['revision'],
+                     'reference': str(payload.get('reference', ''))[:1000]}
+            task['evidence'].append(entry)
+            self.store.save(task, 'report', entry)
+            return task
+
+    def review(self, task_id, payload):
+        with self.lock:
+            task = self.store.get(task_id)
+            if task['status'] != 'awaiting_review':
+                raise Conflict('Only completed runs awaiting review can be accepted.')
+            if payload.get('revision') != task['revision'] or payload.get('run_id') != task['run_id']:
+                raise Conflict('Review does not match the current run and requirement revision.')
+            if not payload.get('message') or not payload.get('reference'):
+                raise ValueError('Review requires findings and a code snapshot/commit reference.')
+            task['review'] = {'at': now(), 'message': str(payload['message'])[:20000],
+                              'reference': str(payload['reference'])[:1000], 'revision': task['revision'],
+                              'run_id': task['run_id'], 'source': 'reported review'}
+            task.update(status='accepted', next_step='Publish under project policy', activity='Review acceptance recorded.')
+            self.store.save(task, 'review_recorded', task['review'])
+            return task
+
+    def recover(self, task_id):
+        with self.lock:
+            task = self.store.get(task_id)
+            if task['status'] != 'interrupted':
+                raise Conflict('Task is not interrupted.')
+            pid = task.get('pid')
+            if pid:
+                if os.name == 'nt':
+                    result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'],
+                                            capture_output=True, text=True, timeout=10)
+                    if result.returncode:
+                        raise Conflict('Cannot inspect the previous Windows process.')
+                    if any(len(row) > 1 and row[1] == str(pid) for row in csv.reader(result.stdout.splitlines())):
+                        raise Conflict('Previous PID still exists; inspect and stop it outside ACC first.')
+                else:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        pass
+                    except OSError:
+                        raise Conflict('Cannot establish whether the previous runner is alive.')
+                    else:
+                        raise Conflict('Previous PID still exists; inspect and stop it outside ACC first.')
+            task.update(status='paused', active_agent=None, activity='Operator confirmed previous process tree inspected.')
+            self.store.save(task, 'recovery_acknowledged', {'message': task['activity']})
+            self.recovery_required = any(t['status'] == 'interrupted' for t in self.store.tasks())
+            self.running_task, self.process = None, None
+            return task
+
+    def _observe(self):
+        while not self.halt.is_set():
+            try:
+                snap = git_snapshot(self.project)
+                with self.lock:
+                    if snap != self.git:
+                        self.git = snap
+                        self.store.event('git_changed', {'message': 'Local Git state changed.', 'git': snap})
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                with self.lock:
+                    self.git = {'available': False, 'message': str(exc)}
+            self.halt.wait(1)
+
+    def close(self):
+        self.halt.set()
+        if self.process:
+            try:
+                self.stop(self.running_task)
+            except (OSError, Conflict, subprocess.TimeoutExpired):
+                pass
+        if self.worker_thread:
+            self.worker_thread.join(timeout=8)
+        self.observer.join(timeout=10)
+        self.ownership.close()
+        self.project_ownership.close()
