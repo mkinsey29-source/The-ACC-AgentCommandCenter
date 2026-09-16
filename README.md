@@ -1,5 +1,7 @@
 # ACC — Agent Command Center
 
+**Continuing in a new chat:** start with [the detailed handoff](docs/HANDOFF-2026-09-16.md) for current implementation, evidence, laptop constraints and next steps.
+
 A local project window for instructions, agent assignments, live worker output, local Git changes, and review records. Windows and Linux are the intended targets; this first implementation was exercised on Linux.
 
 **v0.4 adds saved laptop setup, GitHub activity and reviewed publication, agent switches after the current step, and task prerequisites.** Use the [laptop setup guide](docs/LAPTOP-SETUP.md) for Omarchy/Linux or Windows. Models become usable after their host profiles are configured. No sample tasks are loaded.
