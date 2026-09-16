@@ -1,9 +1,62 @@
 {
   "agents": [
-    {"id": "deepseek", "name": "DeepSeek implementation", "driver": "hermes", "profile": "acc-deepseek", "local": false},
-    {"id": "claude", "name": "Claude review", "driver": "hermes", "profile": "acc-claude", "local": false},
-    {"id": "hermes-coordinator", "name": "Hermes local coordinator", "driver": "hermes", "profile": "acc-coordinator", "local": true},
-    {"id": "local-builder", "name": "Local implementation", "driver": "hermes", "profile": "acc-local-builder", "local": true},
-    {"id": "local-reviewer", "name": "Local review", "driver": "hermes", "profile": "acc-local-reviewer", "local": true}
-  ]
+    {
+      "id": "online-orchestrator",
+      "name": "Preferred online orchestrator",
+      "driver": "hermes",
+      "profile": "acc-online",
+      "local": false
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek implementation",
+      "driver": "hermes",
+      "profile": "acc-deepseek",
+      "local": false
+    },
+    {
+      "id": "claude",
+      "name": "Claude review",
+      "driver": "hermes",
+      "profile": "acc-claude",
+      "local": false
+    },
+    {
+      "id": "hermes-coordinator",
+      "name": "Hermes local coordinator",
+      "driver": "hermes",
+      "profile": "acc-coordinator",
+      "local": true
+    },
+    {
+      "id": "local-builder",
+      "name": "Local implementation",
+      "driver": "hermes",
+      "profile": "acc-local-builder",
+      "local": true
+    },
+    {
+      "id": "local-reviewer",
+      "name": "Local review",
+      "driver": "hermes",
+      "profile": "acc-local-reviewer",
+      "local": true
+    }
+  ],
+  "conversation": {
+    "enabled": true,
+    "preferred_agent": "online-orchestrator",
+    "local_agent": "hermes-coordinator",
+    "mode": "online",
+    "workflow": {
+      "implementer": "deepseek",
+      "reviewer": "claude",
+      "coordinator": "hermes-coordinator",
+      "fallbacks": {
+        "implementer": "local-builder",
+        "reviewer": "local-reviewer",
+        "coordinator": "hermes-coordinator"
+      }
+    }
+  }
 }

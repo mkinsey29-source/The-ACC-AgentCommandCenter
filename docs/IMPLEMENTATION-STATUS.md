@@ -1,6 +1,14 @@
 # Implementation status — September 16, 2026
 
-## Current follow-up: Hermes coordination
+## Current follow-up: conversation and offline handoff
+
+ACC 0.3 adds a conversation-first UI, persistent original messages, an IndexedDB browser outbox, external MCP claim/renew/complete/release tools, fenced turn ownership, and transactional reply/task/message acknowledgement. Configured online planners can fall back to local planners; new turns return to the preferred online adapter. Generated work uses the existing implementation/independent-review pipeline and retains source-message links. Technical task controls remain available as an advanced option.
+
+Local audio capture saves recordings before a supervised transcription command. The optional faster-whisper adapter uses predownloaded model files. Interrupted internal runs are visible and recoverable. See [conversation workflow](CONVERSATION-WORKFLOW.md) for actual behavior and setup.
+
+Verification is recorded in `docs/evidence/conversation-tests.json`. Scripted adapters exercise real process, persistence, MCP/HTTP, review, and reconnection paths. This does not claim live speech/model quality or browser/desktop host verification.
+
+## Previous follow-up: Hermes coordination
 
 Implemented `acc/hermes.py` with Hermes profile support, file-based one-shot prompts, streaming CLI output, terminal result validation, and MCP config generation. Added persistent managed workflow stages, independent review snapshots, bound results, corrections with limits, pause/resume, visible role changes, explicit offline mode, and configured local coordinator fallback. See [Hermes setup](HERMES-CONNECTOR.md).
 
@@ -33,9 +41,9 @@ Stage A is partially demonstrated with actual local command workers and a tested
 
 1. Configure Hermes profiles on the user's machine and execute a small live-model handoff. Validate provider login, tool permissions, model context, output contract, and cancellation.
 2. Verify dashboard controls and responsive layout in a browser; validate native Windows process containment and scheduled startup.
-3. Add connectivity-aware automatic switching/return and safe active reassignment. Current offline selection happens between runs; a failed coordinator can use a permitted fallback.
+3. Validate the new conversation fallback/return with live providers. Safe active worker reassignment and automatic recovery from partially edited failed worker runs remain separate work.
 4. Add task dependencies, native pipeline evidence, larger asset-aware review scope, and task-linked commit/remote PR actions.
-5. Add general idempotency keys, retention quotas, and stronger execution isolation as needed.
+5. Extend idempotency beyond the conversation/recording endpoints, add retention quotas and stronger execution isolation as needed.
 
 Live requirement injection, automatic internet detection, remote GitHub state, pushes, PR creation, and direct Unity/Blender control are not implemented by ACC itself. Continue using the existing game pipeline under its coordinator.
 

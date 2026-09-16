@@ -217,8 +217,10 @@ class Coordinator:
         for key, name in [('deepseek', 'DeepSeek'), ('claude', 'Claude'), ('grok', 'Grok'), ('local-model', 'Local model')]:
             self.agents[key] = {'id': key, 'name': name, 'kind': 'model', 'available': False,
                                 'description': 'Not configured on this computer.'}
-        if config:
-            for agent in json.loads(Path(config).read_text(encoding='utf-8')).get('agents', []):
+        settings = json.loads(Path(config).read_text(encoding='utf-8')) if config else {}
+        for_config = settings.get('agents', [])
+        if for_config:
+            for agent in for_config:
                 key = agent['id']
                 if agent.get('driver') == 'hermes':
                     executable = agent.get('executable', 'hermes')
@@ -250,6 +252,10 @@ class Coordinator:
         self.observer.start()
         from .workflow import Workflows
         self.workflows = Workflows(self)
+        from .conversation import Conversation
+        self.conversation = Conversation(self, settings.get('conversation'), settings.get('transcription'))
+        from .voice import Voice
+        self.voice = Voice(self, settings.get('transcription'))
         self.workflows.thread.start()
 
     def public_agents(self):
@@ -258,13 +264,14 @@ class Coordinator:
     def snapshot(self):
         with self.lock:
             seq = self.store.tail()
-            return {'project': str(self.project), 'tasks': self.store.tasks(),
+            return {'project': str(self.project), 'tasks': [t for t in self.store.tasks() if not t.get('internal')],
+                    'conversation': self.conversation.state(),
                     'agents': self.public_agents(), 'git': self.git, 'cursor': seq,
                     'events': self.store.events(max(0, seq - 100)),
                     'recovery_required': self.recovery_required,
-                    'capabilities': {'github': False, 'automatic_offline': False, 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True}}
+                    'capabilities': {'github': False, 'automatic_offline': bool(self.conversation.settings.get('local_agent')), 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True}}
 
-    def create(self, payload):
+    def build_task(self, payload):
         title, instruction = payload.get('title', '').strip(), payload.get('instruction', '').strip()
         if not title or not instruction or len(title) > 200 or len(instruction) > 50000:
             raise ValueError('Provide a title (up to 200 characters) and instruction (up to 50,000).')
@@ -282,15 +289,21 @@ class Coordinator:
                 'argv': argv, 'status': 'queued', 'activity': 'Ready to start.', 'next_step': 'Run assigned worker',
                 'created': now(), 'run_id': None, 'pid': None, 'exit_code': None, 'evidence': [], 'runs': [],
                 'review': None, 'timeout_seconds': timeout, 'timed_out': False}
-        with self.lock:
-            self.store.save(task, 'task_created', {'message': title, 'revision': 1})
         return task
+
+    def create(self, payload):
+        with self.lock:
+            task = self.build_task(payload)
+            self.store.save(task, 'task_created', {'message': task['title'], 'revision': 1})
+            return task
 
     def assign(self, task_id, agent):
         with self.lock:
             task = self.store.get(task_id)
             if agent not in self.agents or not self.agents[agent]['available']:
                 raise ValueError('That agent is not configured and available.')
+            if task.get('internal'):
+                raise Conflict('Use conversation routing to assign internal work.')
             if task['status'] in ('launching', 'running', 'stopping', 'interrupted'):
                 raise Conflict('Active takeover is not enabled yet. Stop the runner and inspect its handoff before reassigning.')
             if task.get('workflow'):
@@ -304,6 +317,8 @@ class Coordinator:
             raise ValueError('Instruction must contain 1–50,000 characters.')
         with self.lock:
             task = self.store.get(task_id)
+            if task.get('internal'):
+                raise Conflict('Send a new conversation message instead of revising internal work.')
             if task['status'] in ('launching', 'running', 'stopping', 'interrupted'):
                 raise Conflict('Stop and inspect this run before changing its instructions in v0.1.')
             if task.get('workflow'):
@@ -327,15 +342,20 @@ class Coordinator:
                           'Use the task requirements; preserve unrelated work.',
                           'Report actual checks and remaining work. Only the assigned reviewer gives its own verdict; never claim approval on behalf of another role.']}
 
-    def start(self, task_id, _managed=False):
+    def start(self, task_id, _managed=False, _internal=False):
         with self.lock:
             task = self.store.get(task_id)
+            if task.get('internal') and not _internal:
+                raise Conflict('Use the conversation or transcription retry controls for internal work.')
             if self.halt.is_set():
                 raise Conflict('Coordinator is shutting down.')
             if task.get('workflow') and not _managed:
                 raise Conflict('Use Resume workflow for managed tasks.')
             if self.recovery_required:
                 raise Conflict('Interrupted run needs manual process inspection before new work can start.')
+            lease = self.conversation._expire()
+            if lease and lease['kind'] == 'external':
+                raise Conflict('Release the external orchestration turn before starting a worker.')
             if self.running_task:
                 raise Conflict('Another runner owns this workspace. Wait or stop it first.')
             if task['status'] in ('launching', 'running', 'stopping', 'interrupted', 'accepted'):
@@ -353,6 +373,8 @@ class Coordinator:
             prompt = folder / 'task.json'
             packet = self._packet(task)
             packet['result_file'] = str(folder / 'result.json')
+            if task.get('internal') == 'conversation':
+                packet['conversation'] = self.conversation.packet(task, run_id)
             if workflow:
                 packet['workflow'] = self.workflows.packet(task, run_id)
             prompt.write_text(json.dumps(packet, indent=2), encoding='utf-8')
@@ -364,7 +386,7 @@ class Coordinator:
             # Persist intent BEFORE spawn: a crash in the spawn/save gap blocks recovery.
             task.update(status='launching', run_id=run_id, pid=None, active_agent=agent['id'])
             self.store.save(task, 'launching', {'message': 'Launching ' + agent['name'], 'run_id': run_id})
-            cwd = self.project
+            cwd = folder if task.get('internal') else self.project
             if workflow:
                 workflow['phase'] = 'running'
                 if workflow['stage'] == 'review':
@@ -439,7 +461,7 @@ class Coordinator:
                             activity='Run timed out; inspect retained changes.' if task['timed_out'] else ('Stopped; inspect retained files before continuing.' if stopped else f'Runner exited with code {code}.'),
                             next_step='Inspect changes and evidence')
                 task['runs'][-1].update(ended=now(), exit_code=code)
-                if task.get('workflow'):
+                if task.get('workflow') or task.get('internal'):
                     # A crash before the next persisted transition must surface in recovery.
                     task['status'] = 'processing_result'
                 (folder / 'handoff.json').write_text(json.dumps(self._packet(task), indent=2), encoding='utf-8')
@@ -449,6 +471,18 @@ class Coordinator:
                         self.workflows.finish(task, folder, code, stopped)
                     except Exception as exc:
                         self.workflows.hold(task, str(exc))
+                if task.get('internal'):
+                    try:
+                        if task['internal'] == 'transcription':
+                            self.voice.finish(task, folder, code, stopped)
+                        else:
+                            self.conversation.finish(task, folder, code, stopped)
+                    except Exception as exc:
+                        if task['internal'] == 'transcription':
+                            task.update(status='paused', activity=str(exc))
+                            self.store.save(task, 'transcription_held', {'message': str(exc)})
+                        else:
+                            self.conversation.fail(task, str(exc), retry=False)
                 self.process, self.running_task = None, None
         except Exception as exc:
             with self.lock:
@@ -528,6 +562,8 @@ class Coordinator:
                         raise Conflict('Previous PID still exists; inspect and stop it outside ACC first.')
             task.update(status='paused', active_agent=None, activity='Operator confirmed previous process tree inspected.')
             self.store.save(task, 'recovery_acknowledged', {'message': task['activity']})
+            if task.get('internal') == 'conversation':
+                self.conversation.fail(task, 'Previous process inspected. Retry the saved conversation when ready.', retry=False)
             self.recovery_required = any(t['status'] == 'interrupted' for t in self.store.tasks())
             self.running_task, self.process = None, None
             return task

@@ -59,6 +59,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(401, {'error': 'Connect with the local session token.'})
             if url.path == '/api/state':
                 return self.reply(200, self.server.coordinator.snapshot())
+            if url.path == '/api/conversation':
+                try:
+                    after = int(parse_qs(url.query).get('after', ['0'])[0])
+                    return self.reply(200, {'messages': self.server.coordinator.conversation.messages(after)})
+                except ValueError as exc:
+                    return self.reply(400, {'error': str(exc)})
             if url.path == '/api/events':
                 try:
                     cursor = int(parse_qs(url.query).get('after', ['0'])[0])
@@ -102,7 +108,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {'error': 'Local session authorization required.'})
         try:
             length = int(self.headers.get('Content-Length', '0'))
-            if not 0 < length <= 100000:
+            limit = 15 * 1024 * 1024 if self.path == '/api/voice/save' else 100000
+            if not 0 < length <= limit:
                 raise ValueError('Request size must be between 1 and 100,000 bytes.')
             if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                 raise ValueError('JSON content type required.')
@@ -111,6 +118,18 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('JSON object required.')
             parts = urlsplit(self.path).path.strip('/').split('/')
             c = self.server.coordinator
+            if parts == ['api', 'voice', 'save']:
+                return self.reply(200, c.voice.save(payload))
+            if parts == ['api', 'voice', 'retry']:
+                return self.reply(200, c.voice.retry(payload))
+            if len(parts) == 3 and parts[:2] == ['api', 'conversation']:
+                routes = {'send': c.conversation.append, 'configure': c.conversation.configure,
+                          'claim': c.conversation.claim, 'renew': c.conversation.renew,
+                          'complete': c.conversation.complete, 'release': c.conversation.release,
+                          'retry': lambda _: c.conversation.retry()}
+                if parts[2] not in routes:
+                    return self.reply(404, {'error': 'Unknown conversation operation.'})
+                return self.reply(200, routes[parts[2]](payload))
             if parts == ['api', 'tasks']:
                 return self.reply(201, c.create(payload))
             if len(parts) != 4 or parts[:2] != ['api', 'tasks']:

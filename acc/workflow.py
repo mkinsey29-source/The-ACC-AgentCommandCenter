@@ -12,6 +12,36 @@ class Workflows:
         self.wake = threading.Event()
         self.thread = threading.Thread(target=self._loop, daemon=True)
 
+    def specification(self, payload, old=None):
+        c = self.c
+        if c.state.is_relative_to(c.project):
+            raise ValueError('Managed workflows require the state directory outside the project.')
+        roles = {role: payload.get(role, (old or {}).get(role)) for role in ('implementer', 'reviewer', 'coordinator')}
+        for role, agent in roles.items():
+            if agent not in c.agents or agent == 'local-command':
+                raise ValueError('Configure a command adapter for ' + role + '.')
+        if roles['implementer'] == roles['reviewer']:
+            raise ValueError('Use a separate reviewer adapter.')
+        rounds = payload.get('max_rounds', (old or {}).get('max_rounds', 3))
+        if type(rounds) is not int or not 1 <= rounds <= 10:
+            raise ValueError('Correction limit must be 1–10 rounds.')
+        mode = payload.get('mode', (old or {}).get('mode', 'online'))
+        if mode not in ('online', 'offline'):
+            raise ValueError('Mode must be online or offline.')
+        fallback = payload.get('fallbacks', (old or {}).get('fallbacks', {}))
+        if not isinstance(fallback, dict) or set(fallback) - set(roles):
+            raise ValueError('Fallbacks must map workflow roles to configured local adapters.')
+        for agent in fallback.values():
+            if agent not in c.agents or c.agents[agent].get('local') is not True:
+                raise ValueError('Fallback adapters must explicitly declare local: true.')
+        return {**roles, 'max_rounds': rounds, 'mode': mode, 'fallbacks': fallback}
+
+    @staticmethod
+    def initial(spec):
+        return {**spec, 'enabled': True, 'stage': 'implement', 'phase': 'queued', 'round': 1,
+                'snapshot': None, 'implementation': None, 'review_result': None,
+                'fallback_used': False, 'history': []}
+
     def configure(self, task_id, payload):
         c = self.c
         with c.lock:
@@ -26,27 +56,10 @@ class Workflows:
                 raise Conflict('Stop and inspect the active runner before changing its workflow.')
             if task['status'] == 'accepted' and payload.get('restart') is not True:
                 raise Conflict('Task is already accepted. Select Restart implementation to begin another cycle.')
-            if c.state.is_relative_to(c.project):
-                raise ValueError('Managed workflows require the state directory outside the project.')
             old = task.get('workflow')
-            roles = {role: payload.get(role, (old or {}).get(role)) for role in ('implementer', 'reviewer', 'coordinator')}
-            for role, agent in roles.items():
-                if agent not in c.agents or agent == 'local-command':
-                    raise ValueError('Configure a command adapter for ' + role + '.')
-            if roles['implementer'] == roles['reviewer']:
-                raise ValueError('Use a separate reviewer adapter.')
-            rounds = payload.get('max_rounds', (old or {}).get('max_rounds', 3))
-            if type(rounds) is not int or not 1 <= rounds <= 10:
-                raise ValueError('Correction limit must be 1–10 rounds.')
-            mode = payload.get('mode', (old or {}).get('mode', 'online'))
-            if mode not in ('online', 'offline'):
-                raise ValueError('Mode must be online or offline.')
-            fallback = payload.get('fallbacks', (old or {}).get('fallbacks', {}))
-            if not isinstance(fallback, dict) or set(fallback) - set(roles):
-                raise ValueError('Fallbacks must map workflow roles to configured local adapters.')
-            for agent in fallback.values():
-                if agent not in c.agents or c.agents[agent].get('local') is not True:
-                    raise ValueError('Fallback adapters must explicitly declare local: true.')
+            spec = self.specification(payload, old)
+            roles = {r: spec[r] for r in ('implementer', 'reviewer', 'coordinator')}
+            rounds, mode, fallback = spec['max_rounds'], spec['mode'], spec['fallbacks']
             if old and task['status'] != 'accepted' and payload.get('restart') is not True:
                 if old['reviewer'] != roles['reviewer'] or old['fallbacks'].get('reviewer') != fallback.get('reviewer'):
                     old['review_result'] = None
@@ -187,6 +200,11 @@ class Workflows:
             with c.lock:
                 if c.halt.is_set() or c.running_task or c.recovery_required:
                     continue
+                try:
+                    if c.conversation.tick():
+                        continue
+                except Exception as exc:
+                    c.conversation.scheduler_error(str(exc))
                 for task in c.store.tasks():
                     w = task.get('workflow')
                     if w and w['enabled'] and w['phase'] == 'queued':

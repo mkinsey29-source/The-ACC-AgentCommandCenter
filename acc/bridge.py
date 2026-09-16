@@ -33,6 +33,30 @@ TOOLS = [
 ]
 
 
+CONVERSATION_TOOLS = [
+    ('acc_conversation_read', 'Read original conversation messages in sequence. Call after reconnecting; also read acc_state for task outcomes. Paginate using the last message seq.',
+     {'after': {'type': 'integer', 'minimum': 0}}, []),
+    ('acc_conversation_send', "Save the user's exact words with a stable id. Retry with the same id to avoid duplication. Claim before sending a remote request, then renew to capture it.",
+     {'id': {'type': 'string'}, 'text': {'type': 'string'}, 'source': {'type': 'string'}}, ['id', 'text']),
+    ('acc_conversation_claim', 'Reserve the next conversation decision for this orchestrator for 120 seconds. Returns shared history, pending requests, tasks, and result contract. Never start another writer during the lease.',
+     {'owner': {'type': 'string'}}, ['owner']),
+    ('acc_conversation_renew', 'Extend your lease by 120 seconds and refresh the pending message batch. Renew while reasoning; expired owners cannot commit.',
+     {'token': {'type': 'string'}}, ['token']),
+    ('acc_conversation_complete', 'Atomically save your reply and requested task actions, mark the captured messages handled, and release ownership. Execution uses configured roles. Retrying the identical result is idempotent.',
+     {'token': {'type': 'string'}, 'reply': {'type': 'string'},
+      'intent': {'type': 'string', 'enum': ['discussion', 'clarification', 'request']},
+      'actions': {'type': 'array', 'items': {'type': 'object', 'properties': {
+          'type': {'type': 'string', 'enum': ['create', 'revise']}, 'title': {'type': 'string'},
+          'instruction': {'type': 'string'}, 'source_ids': {'type': 'array', 'items': {'type': 'string'}},
+          'task_id': {'type': 'string'}, 'revision': {'type': 'integer'}},
+          'required': ['type', 'instruction', 'source_ids'], 'additionalProperties': False}}},
+     ['token', 'reply', 'intent', 'actions']),
+    ('acc_conversation_release', 'Release your external lease without consuming pending messages.', {'token': {'type': 'string'}}, ['token']),
+    ('acc_conversation_retry', 'Retry retained messages after inspecting a held conversation. Does not bypass interrupted process recovery.', {}, []),
+]
+TOOLS.extend(CONVERSATION_TOOLS)
+
+
 def dispatch(message, url, token):
     method, request_id = message.get('method'), message.get('id')
     if request_id is None:
@@ -43,7 +67,7 @@ def dispatch(message, url, token):
         supported = ('2024-11-05', '2025-03-26', '2025-06-18')
         requested = message.get('params', {}).get('protocolVersion')
         return result({'protocolVersion': requested if requested in supported else supported[-1],
-                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.2.0'}})
+                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.3.0'}})
     if method == 'ping':
         return result({})
     if method == 'tools/list':
@@ -60,6 +84,13 @@ def dispatch(message, url, token):
             raise ValueError('Unknown tool')
         if name == 'acc_state':
             path, data = '/api/state', None
+        elif name == 'acc_conversation_read':
+            after = args.get('after', 0)
+            if type(after) is not int or after < 0:
+                raise ValueError('Invalid conversation cursor')
+            path, data = '/api/conversation?after=' + str(after), None
+        elif name.startswith('acc_conversation_'):
+            path, data = '/api/conversation/' + name.removeprefix('acc_conversation_'), args
         elif name == 'acc_create_task':
             path, data = '/api/tasks', args
         else:

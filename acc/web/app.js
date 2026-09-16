@@ -22,6 +22,7 @@ async function refresh() {
   render();
 }
 function render() {
+  renderConversation();
   $('project').textContent = state.project;
   $('branch').textContent = 'Branch: ' + (state.git.branch || 'unavailable');
   const active = state.tasks.filter(t=>t.status==='running').length;
@@ -36,8 +37,14 @@ function render() {
   if (!$('detail').contains(document.activeElement) || document.activeElement.tagName === 'BUTTON') renderDetail();
 }
 function renderDetail() {
-  const t = state.tasks.find(t=>t.id===selected);
-  if (!t) return;
+  const t = [...state.tasks,...(state.conversation?.background_runs||[])].find(t=>t.id===selected);
+  if (!t) { $('detail').innerHTML='<div class="empty">Select a task or an active background run to inspect it.</div>'; return; }
+  if(t.internal){
+    $('detail').innerHTML=`<h2>${escapeHTML(t.title)}</h2><p>${escapeHTML(t.activity)}</p><p>Agent: ${escapeHTML(name(t.active_agent||t.agent))} · PID: ${escapeHTML(t.pid)}</p><p>Run: ${escapeHTML(t.run_id)}</p><button id="stop-internal" ${['running','stopping'].includes(t.status)?'':'disabled'}>Stop this run</button>${t.status==='interrupted'?'<p>Inspect the old process and descendants on this computer before recovery.</p><label><span><input type="checkbox" id="inspected"> I inspected the previous process tree and retained files.</span></label><button id="recover">Release interrupted run</button>':''}`;
+    $('stop-internal').onclick=()=>action('stop',{});
+    if($('recover'))$('recover').onclick=()=>action('recover',{process_tree_inspected:$('inspected').checked});
+    return;
+  }
   const busy = ['launching','running','stopping','interrupted'].includes(t.status);
   const w = t.workflow;
   const available = state.agents.find(a=>a.id===t.agent)?.available;
@@ -89,6 +96,8 @@ async function stream() {
       const response = await fetch('/api/events?after='+cursor, {headers:{Authorization:'Bearer '+token},signal:controller.signal});
       if (!response.ok) throw new Error('Activity stream unavailable');
       $('connection').textContent='Live local events';
+      await refresh();
+      flushOutbox();
       const reader=response.body.getReader(), decoder=new TextDecoder(); let pending='';
       while (true) {
         const {value,done}=await reader.read(); if(done) throw new Error('Disconnected');
@@ -108,7 +117,7 @@ async function stream() {
   }
 }
 async function connect() {
-  try { error('');await refresh();cursor=state.cursor;sessionStorage.setItem('acc-token',token);$('connect-panel').hidden=true;stream(); }
+  try { error('');await refresh();cursor=state.cursor;sessionStorage.setItem('acc-token',token);$('connect-panel').hidden=true;restoreDraft();stream(); }
   catch(e){$('connect-panel').hidden=false;error(e.message);}
 }
 $('tasks').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;render();renderDetail();}};
@@ -116,4 +125,122 @@ $('connect-form').onsubmit=e=>{e.preventDefault();token=$('token').value.trim();
 $('new-task').onclick=()=>{if(!state){error('Connect to the local coordinator first.');return;} $('task-dialog').showModal();};
 $('close-dialog').onclick=()=>$('task-dialog').close();
 $('task-form').onsubmit=async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(e.target));data.argv=data.argv.trim()?JSON.parse(data.argv):[];const t=await api('tasks',data);selected=t.id;$('task-dialog').close();e.target.reset();error('');await refresh();}catch(err){error(err.message);}};
+
+
+
+// Durable browser outbox: network retries reuse ids, including recorded audio.
+let outboxDB, flushing = false, recorder = null, recordingTimer = null, routingDirty = false, sendingMessage = false;
+const messageHistory = new Map();
+function openOutbox() {
+  if (!outboxDB) outboxDB = new Promise((resolve,reject)=>{
+    const r=indexedDB.open('acc-conversation',1);
+    r.onupgradeneeded=()=>r.result.createObjectStore('outbox',{keyPath:'id'});
+    r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+  });
+  return outboxDB;
+}
+async function outboxOperation(mode, operation) {
+  const db=await openOutbox();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('outbox',mode), request=operation(tx.objectStore('outbox'));
+    let result; request.onsuccess=()=>{result=request.result;};
+    tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+}
+async function outboxCount() {
+  const entries=await outboxOperation('readonly',s=>s.getAll());
+  const count=entries.filter(e=>e.project===state?.project).length;
+  $('outbox-status').textContent=count ? `${count} message or recording saved on this browser, waiting to send.` : '';
+}
+async function flushOutbox() {
+  if(flushing || !state) return;
+  flushing=true;
+  try {
+    const entries=await outboxOperation('readonly',s=>s.getAll());
+    entries.sort((a,b)=>a.at-b.at);
+    for(const entry of entries) {
+      if(entry.project!==state.project) continue;
+      if(entry.kind==='audio') {
+        const audio=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=()=>reject(r.error);r.readAsDataURL(entry.blob);});
+        await api('voice/save',{id:entry.id,mime:entry.blob.type,audio});
+      } else await api('conversation/send',{id:entry.id,text:entry.text,source:'acc'});
+      await outboxOperation('readwrite',s=>s.delete(entry.id));
+    }
+    await outboxCount();
+  } catch(e) {await outboxCount();error('Saved on this browser. '+e.message);}
+  finally {flushing=false;}
+}
+function draftKey(){return 'acc-draft:'+state.project;}
+function restoreDraft(){if(!$('message').value) $('message').value=localStorage.getItem(draftKey())||'';}
+$('message').oninput=()=>{if(state) localStorage.setItem(draftKey(),$('message').value);};
+$('message').onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){$('conversation-form').requestSubmit();e.preventDefault();}};
+$('conversation-form').onsubmit=async e=>{
+  e.preventDefault();if(!state){error('Connect to ACC first. Your text is still here.');return;}
+  const text=$('message').value;if(!text.trim()||sendingMessage)return;
+  sendingMessage=true;$('send-message').disabled=true;
+  try {
+    await outboxOperation('readwrite',s=>s.put({id:crypto.randomUUID(),kind:'text',text,project:state.project,at:Date.now()}));
+    if($('message').value===text){$('message').value='';localStorage.removeItem(draftKey());}
+    error('');await flushOutbox();await refresh();
+  } catch(e){error(e.message);}
+  finally{sendingMessage=false;$('send-message').disabled=false;}
+};
+$('load-history').onclick=async()=>{
+  if(!state)return;
+  $('load-history').disabled=true;
+  try{let after=0;while(true){const page=await api('conversation?after='+after);for(const m of page.messages)messageHistory.set(m.id,m);if(page.messages.length<100)break;after=page.messages.at(-1).seq;}renderConversation();}catch(e){error(e.message);}finally{$('load-history').disabled=false;}
+};
+$('retry-conversation').onclick=async()=>{try{await api('conversation/retry',{});await refresh();}catch(e){error(e.message);}};
+function modelOptions(selected, localOnly=false, emptyLabel='None'){
+  return `<option value="">${emptyLabel}</option>`+state.agents.filter(a=>a.kind==='model'&&(!localOnly||a.local)).map(a=>`<option value="${escapeHTML(a.id)}" ${a.id===selected?'selected':''}>${escapeHTML(a.name)}${a.available?'':' · not installed'}</option>`).join('');
+}
+function renderConversation(){
+  const c=state.conversation;if(!c)return;
+  const owner=c.owner?.owner;
+  $('orchestrator-status').textContent=c.held ? 'Needs attention: '+c.held : owner ? `${name(owner)} is handling your messages.` : c.pending ? `${c.pending} saved message(s) waiting for an orchestrator.` : 'Ready for your next message. Ideas remain discussion; requested work appears in the work plan.';
+  const box=$('messages'), nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
+  for(const m of c.messages)messageHistory.set(m.id,m);
+  const html=[...messageHistory.values()].sort((a,b)=>a.seq-b.seq).map(m=>`<article class="message ${m.role}"><small>${m.role==='user'?'You':escapeHTML(name(m.source))} · ${new Date(m.at*1000).toLocaleTimeString()}${m.status==='pending'?' · saved, waiting':''}</small><div>${escapeHTML(m.text)}</div>${m.data?.task_ids?.length?`<small>Linked tasks: ${m.data.task_ids.map(id=>`<button class="task-link" data-task="${escapeHTML(id)}">${escapeHTML(state.tasks.find(t=>t.id===id)?.title||id)}</button>`).join(' ')}</small>`:''}</article>`).join('');
+  if(box.innerHTML!==html){box.innerHTML=html||'<p class="muted">Your conversation starts here. Messages from the desktop orchestrator appear here when it saves them through MCP.</p>';if(nearBottom)box.scrollTop=box.scrollHeight;}
+  $('background-runs').innerHTML=(c.background_runs||[]).map(t=>`<button data-task="${escapeHTML(t.id)}">${escapeHTML(t.title)} · ${escapeHTML(t.status)} · inspect / stop</button>`).join('');
+  $('retry-conversation').hidden=!c.held;
+  $('record-voice').disabled=!c.voice_available||!navigator.mediaDevices||typeof MediaRecorder==='undefined';
+  if(!recorder)$('voice-status').textContent=c.voice_available?'Transcribed on this computer.':'Voice needs a local transcription command in host settings.';
+  $('recordings').innerHTML=(c.recordings||[]).slice(-5).map(r=>`<div class="muted">Recording: ${escapeHTML(r.activity)}${r.status==='paused'?` <button data-retry-voice="${escapeHTML(r.id)}">Retry transcription</button>`:''}</div>`).join('');
+  if(!routingDirty&&!$('routing-form').contains(document.activeElement)){
+    const s=c.settings||{},w=s.workflow||{};
+    $('routing-fields').innerHTML=`<label>Preferred online orchestrator<select name="preferred_agent">${modelOptions(s.preferred_agent,false,'External session or local agent')}</select></label><label>Always-available local agent<select name="local_agent">${modelOptions(s.local_agent,true,'Save for later until configured')}</select></label><label>Connection preference<select name="mode"><option value="online" ${s.mode!=='offline'?'selected':''}>Try online, fall back locally</option><option value="offline" ${s.mode==='offline'?'selected':''}>Local only</option></select></label><label><span><input type="checkbox" name="enabled" ${s.enabled!==false?'checked':''}> Handle saved messages automatically</span></label><p class="muted">Default assignments for work requested in conversation</p>`+['implementer','reviewer','coordinator'].map(role=>`<label>${role}<select name="${role}">${modelOptions(w[role])}</select></label><label>Local ${role}<select name="fallback_${role}">${modelOptions(w.fallbacks?.[role],true)}</select></label>`).join('');
+  }
+}
+$('messages').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;render();$('detail').scrollIntoView({behavior:'smooth'});}};
+$('background-runs').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;renderDetail();$('detail').scrollIntoView({behavior:'smooth'});}};
+$('routing-form').oninput=()=>{routingDirty=true;};
+$('routing-form').onsubmit=async e=>{
+  e.preventDefault();const data=Object.fromEntries(new FormData(e.target));
+  const payload={preferred_agent:data.preferred_agent||null,local_agent:data.local_agent||null,mode:data.mode,enabled:data.enabled==='on'};
+  if(['implementer','reviewer','coordinator'].some(r=>data[r])){
+    const w={fallbacks:{}};for(const role of ['implementer','reviewer','coordinator']){w[role]=data[role];if(data['fallback_'+role])w.fallbacks[role]=data['fallback_'+role];}payload.workflow=w;
+  }else payload.workflow=null;
+  try{await api('conversation/configure',payload);routingDirty=false;error('');await refresh();}catch(e){error(e.message);}
+};
+$('recordings').onclick=async e=>{const b=e.target.closest('[data-retry-voice]');if(b)try{await api('voice/retry',{task_id:b.dataset.retryVoice});await refresh();}catch(e){error(e.message);}};
+$('record-voice').onclick=async()=>{
+  if(recorder){recorder.stop();return;}
+  let media;
+  try {
+    media=await navigator.mediaDevices.getUserMedia({audio:true});
+    const mime=['audio/webm','audio/ogg','audio/mp4'].find(m=>MediaRecorder.isTypeSupported(m));
+    if(!mime)throw new Error('This browser has no supported recording format.');
+    const current=new MediaRecorder(media,{mimeType:mime}),parts=[];let size=0;
+    recorder=current;$('record-voice').textContent='Stop recording';$('voice-status').textContent='Recording… up to 2 minutes.';
+    current.ondataavailable=e=>{parts.push(e.data);size+=e.data.size;if(size>9*1024*1024&&current.state==='recording')current.stop();};
+    current.onstop=async()=>{
+      clearTimeout(recordingTimer);media.getTracks().forEach(t=>t.stop());recorder=null;$('record-voice').textContent='Record voice';
+      try{await outboxOperation('readwrite',s=>s.put({id:crypto.randomUUID(),kind:'audio',blob:new Blob(parts,{type:mime}),project:state.project,at:Date.now()}));await flushOutbox();await refresh();}catch(e){error(e.message);}
+    };
+    current.start(1000);recordingTimer=setTimeout(()=>{if(current.state==='recording')current.stop();},120000);
+  }catch(e){media?.getTracks().forEach(t=>t.stop());error(e.message);}
+};
+window.addEventListener('online',()=>flushOutbox());
+setInterval(()=>{if(state)flushOutbox();},5000);
 if(token) connect();

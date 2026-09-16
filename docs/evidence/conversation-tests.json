@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-16",
+  "suite": "ACC conversation-first workflow",
+  "environment": "Linux, Python 3.12, optional MCP SDK installed in a separate test environment",
+  "command": "python -m unittest discover -s tests -q",
+  "tests_run": 48,
+  "passed": 48,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "additional_checks": [
+    "node --check acc/web/app.js",
+    "python -m compileall -q acc",
+    "git diff --check"
+  ],
+  "exercise": [
+    "Actual subprocesses with scripted online/local planner responses",
+    "Online failure to local planning and local implementation/review",
+    "Returning desktop session sees accepted work, then next turn tries online again",
+    "SQLite atomic rollback and duplicate-delivery receipts",
+    "MCP authenticated HTTP conversation lifecycle and external SDK stdio interoperability",
+    "Exact original messages, lease expiry, revision rejection, restart recovery",
+    "Recording persistence and local transcription-command execution",
+    "Optional faster-whisper wrapper contract with a stub module"
+  ],
+  "not_verified": [
+    "Live Hermes or provider inference quality",
+    "Human speech recognition accuracy",
+    "Browser microphone and click/layout behavior (Chromium unavailable)",
+    "Native Windows process behavior",
+    "User desktop MCP registration and Remote session"
+  ],
+  "paid_model_calls": 0
+}

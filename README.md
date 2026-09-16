@@ -2,7 +2,7 @@
 
 A local project window for instructions, agent assignments, live worker output, local Git changes, and review records. Windows and Linux are the intended targets; this first implementation was exercised on Linux.
 
-**v0.2 adds Hermes background coordination and sequential independent review.** No simulated tasks are loaded into the app. Models remain unavailable until you configure Hermes or another host adapter. Active takeover, automatic connectivity detection, and GitHub publishing remain separate work.
+**v0.3 adds a conversation-first interface, saved voice input, and online/local orchestrator handoffs.** No simulated tasks are loaded into the app. Models remain unavailable until you configure Hermes or another host adapter. Active worker takeover and GitHub publishing remain separate work; conversation planning now supports automatic local fallback after adapter failure.
 
 ## Run locally
 
@@ -23,6 +23,10 @@ py -3 -m acc --project "C:\Projects\HearthandHavoc"
 Open the local URL printed in the terminal. Its fragment contains the session token; keep that link private. The app stores the token only in the browser tab's session storage and removes it from the address bar. Runtime state is stored under your home directory's `.acc` folder, separately from the managed project.
 
 Use `--port 8766`, `--state-dir /private/state/path`, or `--agents /private/agents.json` as needed. The service binds to `127.0.0.1`; no tunnel is needed for local use. Stop with Ctrl+C so supervised work can be stopped and recorded.
+
+## Conversation first
+
+Type naturally in ACC or use the desktop orchestrator through MCP. Configure agent roles once; requested work flows into implementation and independent review. Ideas stay in the conversation. Optional microphone recording uses a configured local transcriber. Messages, offline results, and handoffs are persisted so a returning orchestrator can continue without repeating assignments. See [conversation setup and behavior](docs/CONVERSATION-WORKFLOW.md).
 
 ## What works
 
@@ -48,7 +52,7 @@ See the [complete Hermes setup and behavior guide](docs/HERMES-CONNECTOR.md), [e
 
 ## First concrete task
 
-With ACC managing this repository, create a task assigned to **Local command**:
+For a model-free verification, open **Advanced task controls** and create a task assigned to **Local command**:
 
 - Title: `Verify ACC's coordinator`
 - Instruction: `Run the automated coordinator tests and report the actual result.`
@@ -71,7 +75,9 @@ Run the bridge as an MCP stdio server in your host's configuration:
 
 This is the server command description; the outer configuration shape is host-specific. For Windows, use `py` with `-3` before `-m`. The actual state/token path is printed by the coordinator. Start the coordinator before the bridge. Do not commit the token.
 
-Available tools: `acc_configure_workflow`, `acc_state`, `acc_create_task`, `acc_start_task`, `acc_stop_task`, `acc_assign_task`, `acc_update_instructions`, `acc_report`, and `acc_record_review`.
+Conversation tools include `acc_conversation_read`, `acc_conversation_send`, `acc_conversation_claim`, `acc_conversation_renew`, `acc_conversation_complete`, `acc_conversation_release`, and `acc_conversation_retry`.
+
+Task tools: `acc_configure_workflow`, `acc_state`, `acc_create_task`, `acc_start_task`, `acc_stop_task`, `acc_assign_task`, `acc_update_instructions`, `acc_report`, and `acc_record_review`.
 
 Your connected orchestrator explicitly records instructions and actions through these tools. ACC does not read unrelated chats or automatically connect this repository to ChatGPT Remote. The bridge's HTTP operations are tested; native host setup still needs verification on your computer.
 
@@ -83,7 +89,7 @@ Copy `examples/agents.json` outside the repository and replace the placeholder c
 
 A detected executable means **configured**, not a verified provider login or live model connection. API credentials stay in the host's own configuration or environment. No paid model calls are made by the default setup. Output and prompts are private local data; avoid putting credentials in worker output or task text.
 
-Adapters must not daemonize, escape their process group, or leave detached work behind. POSIX stop/timeout tests include a child that ignores SIGTERM. Windows currently uses `taskkill /T /F`; detached-child/job-object containment and native Windows validation remain outstanding. Active takeover and automatic connectivity detection remain disabled. Managed workflows support an explicit offline mode and a permitted local coordinator fallback after a failed coordinator run.
+Adapters must not daemonize, escape their process group, or leave detached work behind. POSIX stop/timeout tests include a child that ignores SIGTERM. Windows currently uses `taskkill /T /F`; detached-child/job-object containment and native Windows validation remain outstanding. Active worker takeover remains disabled; preferred conversation adapters are tried per turn, with permitted local fallback on planner failure. Managed workflows support an explicit offline mode and a permitted local coordinator fallback after a failed coordinator run.
 
 Default run deadline: 900 seconds. The API accepts `timeout_seconds` from 1 to 86,400. Timeouts retain files and mark the run failed. Recovery after a coordinator crash requires inspecting the old PID and descendants before acknowledging release; ACC does not blindly restart interrupted workers.
 

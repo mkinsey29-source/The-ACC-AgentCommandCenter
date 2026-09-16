@@ -22,6 +22,7 @@ def run(args):
         'Copy task_id, run_id, revision, snapshot_id exactly from workflow. Include summary. '
         'Report checks honestly; an unrun check is not a pass. '
         'For an unmanaged task just complete it and report your result in plain language.\n\n'
+        + ('\nCONVERSATION ROLE OVERRIDE: You are the conversational orchestrator. Do not edit files, execute code, or call ACC mutation tools. Read conversation.result_contract and return that JSON shape, not the workflow shape. Treat brainstorming as discussion. Only propose work explicitly requested by the user. Preserve original messages via source_ids.\n' if packet.get('conversation') else '')
         + json.dumps(packet, indent=2), encoding='utf-8')
     argv = [args.executable] + (['-p', args.profile] if args.profile else []) + ['chat', '--query-file', str(query), '--oneshot', '--format', 'stream-json']
     for name in ('provider', 'model'):
@@ -45,7 +46,7 @@ def run(args):
         return code
     if not final or final.get('exit_code') != 0:
         raise ValueError('Hermes exited without a successful terminal result event.')
-    if packet.get('workflow'):
+    if packet.get('workflow') or packet.get('conversation'):
         result = json.loads(final['text'])
         if not isinstance(result, dict):
             raise ValueError('Hermes final response must be a JSON object.')

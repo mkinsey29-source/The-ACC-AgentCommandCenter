@@ -44,3 +44,23 @@ A coordinator may request review, request changes following review, accept an ap
 Runtime files: `acc.sqlite3`, `token`, lock files, and `runs/{run_id}/task.json`, `output.log`, `handoff.json`. Task and event changes commit together. Manual-task handoff packets contain current instructions, history, run/evidence metadata, and a local Git snapshot; **they are not full backups of edited files**. Existing files remain in place. Managed workflows additionally save a hash-verified review copy and manifest; scope and limits are in HERMES-CONNECTOR.md. Active takeover remains disabled.
 
 Output is streamed as reported chunks, not inferred model thinking. Avoid secrets in prompts/output. Full process output is stored locally. Log rotation, output quotas, richer structured model events, and automatic secret filtering are not yet implemented.
+
+
+## Conversation and recording endpoints (v0.3)
+
+All routes use the existing loopback bearer-token/origin checks.
+
+- `GET /api/conversation?after=0`: up to 100 original messages, ordered by persistent sequence. Continue with the last `seq`.
+- `POST /api/conversation/send`: `{id, text, source?}`; stable ID makes identical retries idempotent. Original text is preserved.
+- `POST /api/conversation/configure`: persistent `{enabled, preferred_agent, local_agent, mode, workflow}` defaults. `workflow` uses the managed workflow role/fallback schema.
+- `POST /api/conversation/claim`: `{owner}`; returns token, expiry, and context.
+- `POST /api/conversation/renew`: `{token}`; refreshes pending batch and lease.
+- `POST /api/conversation/complete`: `{token, reply, intent, actions}`. Intent is `discussion`, `clarification`, or `request`; only requests can contain actions. Action type `create` requires title/instruction/source_ids; `revise` requires task_id/current revision/instruction/source_ids. IDs must refer to the captured pending messages. All changes and reply are committed together. Identical retries return the saved receipt.
+- `POST /api/conversation/release`: `{token}`; external session yields without consuming messages.
+- `POST /api/conversation/retry`: `{}`; resumes a held inbox after inspection, without bypassing runner recovery.
+- `POST /api/voice/save`: `{id, mime, audio}` with base64-encoded audio. Maximum 15 MiB request / 10 MiB decoded audio. Requires host transcription configuration. Saves before scheduling; same ID/content is idempotent.
+- `POST /api/voice/retry`: `{task_id}`; retries a paused transcription.
+
+`GET /api/state` adds `conversation`: recent messages, pending count, current owner (without lease token), routing settings, held reason, internal active/interrupted runs, and recording status. Internal planner/transcription tasks are omitted from the ordinary work plan.
+
+Conversation leases last 120 seconds for external sessions. The supervised local turn remains owned until its runner ends or is recovered. Stale ownership and revision conflicts return HTTP 409. The complete flow, model contracts, and offline behavior are documented in `CONVERSATION-WORKFLOW.md`.
