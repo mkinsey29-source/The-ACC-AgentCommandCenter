@@ -34,3 +34,7 @@ Automatic active takeover, live requirement injection into running workers, auto
 ## Repository workflow
 
 `main` contains only the bootstrap README until the implementation PR is merged. Initial implementation source: reusable `temporary`. Preserve it after merge. Do not merge without user instruction. The full agreed direction is in `PROJECT-PLAN.md`.
+
+## Follow-up: real sub-agent handoff exercise
+
+A separate implementation agent and reviewer have now exercised a manually coordinated handoff, with actual ACC stdio/HTTP validation runs. The implementation's 16 tests and the reviewer's 10 methods (428 calls) passed. A deliberately broken variant failed; stale review approvals were rejected. See [the executed simulation](REVIEW-HANDOFF-SIMULATION.md) and its replay artifacts. Model-session delegation and snapshot integrity were handled externally by the orchestrator; automatic routing is still pending.

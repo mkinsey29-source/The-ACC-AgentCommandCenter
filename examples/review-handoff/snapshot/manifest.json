@@ -1,0 +1,9 @@
+{
+  "snapshot_id": "sha256:edcbb60e68b29865a261387e8beac3bdf8ac5cb44917aeccf6c86ca5b79b4765",
+  "files": {
+    "HANDOFF.md": "4e474697e8e52bfae96ab689b8d54c1ff39a54734a0c3732485a2187a5701b15",
+    "REQUIREMENTS.md": "7097459827bb4832aca22db610f54945d4f6bc197820012eeecc413c4fbf2881",
+    "job_progress.py": "57610dc9c56708f3580783c25c0e8deebe3fe762499b117904007b09e814ccc3",
+    "test_job_progress.py": "f583f11e2c82e54da285e6bbafccf990d895d959828d6c2e82d85842759dda7d"
+  }
+}
