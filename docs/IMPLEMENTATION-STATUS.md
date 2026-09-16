@@ -1,6 +1,14 @@
 # Implementation status — September 16, 2026
 
-## Current follow-up: conversation and offline handoff
+## Current follow-up: laptop readiness (v0.4)
+
+Saved Linux/Windows launchers, setup diagnostics and MCP configuration generation are implemented. The dashboard now shows GitHub PR/commit activity, stale connection state, and a publication preview. Reviewed managed tasks can be committed and pushed to the configured source branch, with a PR created or reused. No automatic merge is provided. Local Git remains observed every second; GitHub refresh defaults to every 30 seconds and supports manual refresh.
+
+Managed role changes are persisted and applied after the current step. The replacement gets retained files/history; replacing a reviewer invalidates the previous verdict. Priority and dependency scheduling are implemented. Interrupted process recovery requires inspection and cancels pending switches. These controls are available through both the UI and MCP.
+
+See [laptop setup](LAPTOP-SETUP.md), [API controls](API.md), and [readiness evidence](evidence/laptop-readiness.json). Host authentication, real model runtimes, voice hardware, native Windows execution, and browser interaction are not established by Python tests.
+
+## Previous follow-up: conversation and offline handoff
 
 ACC 0.3 adds a conversation-first UI, persistent original messages, an IndexedDB browser outbox, external MCP claim/renew/complete/release tools, fenced turn ownership, and transactional reply/task/message acknowledgement. Configured online planners can fall back to local planners; new turns return to the preferred online adapter. Generated work uses the existing implementation/independent-review pipeline and retains source-message links. Technical task controls remain available as an advanced option.
 
@@ -46,10 +54,10 @@ Stage A is partially demonstrated with actual local command workers and a tested
 1. Configure Hermes profiles on the user's machine and execute a small live-model handoff. Validate provider login, tool permissions, model context, output contract, and cancellation.
 2. Verify dashboard controls and responsive layout in a browser; validate native Windows process containment and scheduled startup.
 3. Validate the new conversation fallback/return with live providers. Safe active worker reassignment and automatic recovery from partially edited failed worker runs remain separate work.
-4. Add task dependencies, native pipeline evidence, larger asset-aware review scope, and task-linked commit/remote PR actions.
+4. Add native Unity/Blender pipeline evidence and larger asset-aware review scope. Task dependencies and reviewed GitHub publication are implemented in v0.4.
 5. Extend idempotency beyond the conversation/recording endpoints, add retention quotas and stronger execution isolation as needed.
 
-Live requirement injection, automatic internet detection, remote GitHub state, pushes, PR creation, and direct Unity/Blender control are not implemented by ACC itself. Continue using the existing game pipeline under its coordinator.
+Live mid-run requirement injection, automatic recovery from partial failed edits, and direct Unity/Blender control are not implemented by ACC itself. Continue using the existing game pipeline under its coordinator.
 
 ## Repository workflow
 
@@ -58,3 +66,7 @@ Live requirement injection, automatic internet detection, remote GitHub state, p
 ## Follow-up: real sub-agent handoff exercise
 
 A separate implementation agent and reviewer have now exercised a manually coordinated handoff, with actual ACC stdio/HTTP validation runs. The implementation's 16 tests and the reviewer's 10 methods (428 calls) passed. A deliberately broken variant failed; stale review approvals were rejected. See [the executed simulation](REVIEW-HANDOFF-SIMULATION.md) and its replay artifacts. Model-session delegation and snapshot integrity were handled externally by the orchestrator; automatic routing was pending at that point and is implemented in the Hermes follow-up above.
+
+## Laptop readiness validation
+
+87 tests passed with the optional MCP SDK installed. A live independent session reviewer approved the frozen changes for Linux laptop setup and host validation, including separate CRLF reproduction and GitHub regression checks. Saved setup launched the actual authenticated server. See [the evidence record](evidence/laptop-readiness.json) for the reviewed file hashes, test boundaries, and outstanding host checks. This paragraph and evidence record were added after the frozen implementation review.

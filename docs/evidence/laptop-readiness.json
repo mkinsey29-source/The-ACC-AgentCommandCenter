@@ -1,0 +1,67 @@
+{
+  "date": "2026-09-16",
+  "base_commit": "a09eacba334d11a96ff69394bbf89aa01ec40593",
+  "suite": {
+    "command": "python -m unittest discover -s tests -q",
+    "tests": 87,
+    "result": "passed",
+    "optional_mcp_sdk": "installed; actual stdio subprocess interoperability passed"
+  },
+  "checks": [
+    "Saved setup -> launcher -> actual authenticated HTTP server and dashboard passed in an isolated project",
+    "Python compileall passed",
+    "JavaScript syntax passed",
+    "Bash syntax passed",
+    "git diff --check passed"
+  ],
+  "live_independent_review": {
+    "agent": "laptop_readiness_review",
+    "verdict": "Approve for Linux laptop setup and host validation; no remaining blocker found in frozen changes",
+    "checks": [
+      "39 relevant tests passed including actual MCP SDK",
+      "21 GitHub tests rerun after final fix, all passed",
+      "Independent original CRLF reproduction now passed",
+      "21 frozen manifest hashes verified before and after review"
+    ]
+  },
+  "reviewed_manifest": {
+    "README.md": "e06cead269333bd009a0e063a9d8f6b470b99257f5a439a59e5c6719b4d8b6b1",
+    "acc/bridge.py": "b1f5c1f5a6c4b3d14ebe3be9be6dd369c04484659fdcc73cc3eb95cee858d6db",
+    "acc/controls.py": "5d204b6b5ba27f96041d5a10b0b36479001a6a6083a718e40187eb31a2c43de5",
+    "acc/conversation.py": "a4ede56c66a2e496e62d2afeddcbe192a852ef46cb9993c97ba7e1918b77afeb",
+    "acc/core.py": "4cf8a1c4115abbcb2fc78d6facf5ad9aa8d1beb6913bee9a220d458e530531df",
+    "acc/github.py": "c6ea6aeb59a896876c42ac4dd8c182b69a5ac87051455f87c9ff9b37e100d04f",
+    "acc/server.py": "b33c3d2b241b5fc1c9499a89bf7c4d49dbdc0e5c7e5ab754405c806f1d4f0c6b",
+    "acc/setup.py": "a1b5a1107677eb32f71b1d8673b39d8dec80e8dcbd6035b16690acb1f69180a2",
+    "acc/web/app.js": "2d71495b122e78fcf6236817ec87f354c21532910cd2e5b463d3fe07c4d66b6e",
+    "acc/web/index.html": "1dc0c5da5d1e8c9f0acfa4d345b2680e1f6f122f643c5590669b05b1c1d97a90",
+    "acc/workflow.py": "4175435fb24e8268b646d15c8d0cda09d4d3c18c4e4655dac93daa61604a2191",
+    "docs/API.md": "5f62f94a241ee5966308642cbbc84294f9ec497186c4e4d7ce7afbf972b56097",
+    "docs/IMPLEMENTATION-STATUS.md": "29f0cd35760daca658be1e181019a03ab5eed362f605d2f1c6645e6740820955",
+    "docs/LAPTOP-SETUP.md": "9d2836d381ae1936c1f41ce649baae24bfe83320e04dc63a36dcf7dbc70415e2",
+    "start-acc.ps1": "c5daf08a35b9877b627c40f9e2647aa642ebdb8a0647cb1faca3cee25f87a344",
+    "start-acc.sh": "50ff4a33e34308d98f4e28c4bd73c9c881e7374a9b2d502279a31203cbf95cd6",
+    "tests/test_acc.py": "e34d9e66b19cf52cd994f84a5abb8beed0f76a04cfa842f77d1304a9a0545bf9",
+    "tests/test_controls.py": "e85373a2e18f013fb9ee2a76ba6dbf27aff9db66bf09d5ee3bd151b76771619e",
+    "tests/test_github.py": "9b037bb180d92cb47484f751dd1c914623a7b3abbc02cd39b075a237714a89e2",
+    "tests/test_readiness_review.py": "ae5ebfd80d51d044a5895689bed25c950dcced7a2debc26f361e68787d1624b3",
+    "tests/test_setup.py": "029700638b637e9b5910e54c861826ad513f0316330c187ce44faf0d2ae58fcc"
+  },
+  "scope": {
+    "local_git": "real repositories, commits, hooks, normalization, executable mode checks",
+    "remote_github": "simulated transport in tests; no claim of actual laptop authentication",
+    "model_decisions_in_regressions": "scripted fixtures; independent code review uses a live session agent",
+    "actual_user_host": "not accessible"
+  },
+  "remaining_host_checks": [
+    "Provider login and Hermes profiles",
+    "CPU local-model inference and offline fallback",
+    "Browser controls and microphone capture",
+    "Desktop MCP integration",
+    "Native Windows process containment"
+  ],
+  "publication_limits": [
+    "Arbitrary clean filters including LFS require manual publication",
+    "Review snapshots limited to 10000 files and 100 MiB"
+  ]
+}

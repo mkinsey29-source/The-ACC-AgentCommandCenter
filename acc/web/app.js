@@ -4,7 +4,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 let token = new URLSearchParams(location.hash.slice(1)).get('token') || sessionStorage.getItem('acc-token') || '';
 history.replaceState(null, '', location.pathname);
 let state = null, selected = null, cursor = 0, refreshTimer = null, streamController = null, eventHistory = new Map();
-const labels = {launching:'Launching', queued:'Queued', running:'Working', stopping:'Stopping', interrupted:'Needs inspection', paused:'Paused', failed:'Failed', awaiting_review:'Needs review', accepted:'Accepted'};
+const labels = {launching:'Launching', queued:'Queued', running:'Working', stopping:'Stopping', interrupted:'Needs inspection', paused:'Paused', failed:'Failed', awaiting_review:'Needs review', accepted:'Accepted', publishing:'Publishing'};
 function error(message) { for (const id of ['error','task-error']) { $(id).textContent = message || ''; $(id).hidden = !message; } }
 async function api(path, body) {
   const response = await fetch('/api/' + path, {method: body === undefined ? 'GET' : 'POST', headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
@@ -23,6 +23,7 @@ async function refresh() {
 }
 function render() {
   renderConversation();
+  renderGitHub();
   $('project').textContent = state.project;
   $('branch').textContent = 'Branch: ' + (state.git.branch || 'unavailable');
   const active = state.tasks.filter(t=>t.status==='running').length;
@@ -45,15 +46,17 @@ function renderDetail() {
     if($('recover'))$('recover').onclick=()=>action('recover',{process_tree_inspected:$('inspected').checked});
     return;
   }
-  const busy = ['launching','running','stopping','interrupted'].includes(t.status);
+  const busy = ['launching','running','stopping','processing_result','publishing','interrupted'].includes(t.status);
   const w = t.workflow;
   const available = state.agents.find(a=>a.id===t.agent)?.available;
   $('detail').innerHTML = `<small>REQUIREMENTS REVISION ${t.revision} · ${escapeHTML(labels[t.status])}</small><h2>${escapeHTML(t.title)}</h2><div class="instruction">${escapeHTML(t.instruction)}</div>
   <label>Assigned worker<select id="assigned" ${busy||w?'disabled':''}>${options(t.agent)}</select></label>
   <div class="current"><strong>Active: ${escapeHTML(name(t.active_agent))}</strong><small>${escapeHTML(t.activity)}</small><small>Next: ${escapeHTML(t.next_step)}</small></div>
-  ${busy?'<div class="notice">Assignments change after the current runner stops. Stop this runner, inspect its retained work, then reassign.</div>':''}
+  ${t.pending_switch?`<div class="notice">Waiting for the current step to finish, then switching ${escapeHTML(t.pending_switch.role)} to ${escapeHTML(name(t.pending_switch.agent))}.</div>`:''}
   ${state.recovery_required?'<div class="notice">An interrupted runner needs process-tree inspection before this workspace can run new work.</div>':''}
   <div class="actions"><button id="start" ${busy||w||!available||t.status==='accepted'||state.recovery_required?'disabled':''}>${t.runs.length?'Run again':'Start task'}</button><button id="stop" ${!['running','stopping'].includes(t.status)?'disabled':''}>Stop now</button></div>
+  ${w && !['accepted','publishing','interrupted'].includes(t.status)?`<form id="switch-form"><label>Change role<select name="role"><option value="implementer">Implementation</option><option value="reviewer">Review</option><option value="coordinator">Coordination</option></select></label><label>Use agent<select name="agent">${options(w.implementer)}</select></label><button ${t.pending_switch?'disabled':''}>Switch after current step</button><p class="muted">The current step finishes first. Its files and reports stay available to the next agent.</p></form>`:''}
+  <details><summary>Priority and prerequisites</summary><form id="schedule-form"><label>Priority (higher runs first)<input name="priority" type="number" min="0" max="100" value="${t.priority??50}" ${busy?'disabled':''}></label><label>Wait for accepted tasks<select name="depends_on" multiple ${busy?'disabled':''}>${state.tasks.filter(x=>x.id!==t.id).map(x=>`<option value="${x.id}" ${(t.depends_on||[]).includes(x.id)?'selected':''}>${escapeHTML(x.title)}</option>`).join('')}</select></label><button ${busy?'disabled':''}>Save schedule</button></form></details>
   <details ${w?'open':''}><summary>Background coordination${w?' · '+escapeHTML(w.phase):''}</summary>
   ${w?`<p><strong>${escapeHTML(w.stage)} · round ${w.round}/${w.max_rounds}</strong><br>${w.enabled?'Enabled':'Paused or complete'} · ${escapeHTML(w.mode)}</p><small>Snapshot: ${escapeHTML(w.snapshot?.id || 'Not captured yet')}</small>`:''}
   <form id="workflow-form">
@@ -73,7 +76,10 @@ function renderDetail() {
   <form id="report-form"><label>Result or review findings<textarea name="message" required rows="3"></textarea></label><label>Evidence / snapshot reference<input name="reference" placeholder="Commit, snapshot ID, or evidence path"></label><div class="actions"><button>Record report</button><button type="button" id="accept" ${w||t.status!=='awaiting_review'?'disabled':''}>Record review acceptance</button></div></form></details>
   <details><summary>Run history (${t.runs.length})</summary>${t.runs.map(r=>`<div class="evidence"><small>${escapeHTML(name(r.agent))} · PID ${r.pid} · revision ${r.revision}</small><code>${escapeHTML(r.id)}</code><small>${escapeHTML(r.folder)}</small><small>${r.ended?'Exited '+r.exit_code:'No terminal result recorded'}</small></div>`).join('')}</details>
   ${t.status==='interrupted'?'<details><summary>Recover interrupted task</summary><p class="notice">Inspect the recorded PID and every descendant outside ACC. Confirm none can still write to this workspace.</p><label><span><input type="checkbox" id="inspected"> I inspected the old process tree and retained files.</span></label><button id="recover">Release interrupted task</button></details>':''}
-  <div class="notice">Publishing is not connected yet. Local commits and remote PRs are separate states.</div>`;
+  <div class="notice">${t.publication?`Publication: ${escapeHTML(t.publication.status)} ${t.publication.url?githubLink(t.publication.url,'Open PR'):''}${t.publication.error?`<p>${escapeHTML(t.publication.error)}</p>`:''}`:'Accepted managed work can be published after inspecting its preview.'}</div><button id="publish-preview" ${t.status==='accepted'&&w?'':'disabled'}>Preview commit and PR</button>`;
+  if($('switch-form')) $('switch-form').onsubmit=e=>{e.preventDefault();action('switch',{...Object.fromEntries(new FormData(e.target)),request_id:crypto.randomUUID()});};
+  $('schedule-form').onsubmit=e=>{e.preventDefault();const data=new FormData(e.target);action('schedule',{priority:Number(data.get('priority')),depends_on:data.getAll('depends_on')});};
+  $('publish-preview').onclick=()=>publicationPreview(t.id);
   $('workflow-form').onsubmit = e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));const fallbacks={};for(const role of ['implementer','reviewer','coordinator']){if(data['fallback_'+role]) fallbacks[role]=data['fallback_'+role];delete data['fallback_'+role];}action('workflow',{...data,enabled:true,restart:data.restart==='on',max_rounds:Number(data.max_rounds),fallbacks});};
   $('pause-workflow').onclick = ()=>action('workflow',{enabled:false});
   $('assigned').onchange = e => action('assign',{agent:e.target.value});
@@ -244,3 +250,28 @@ $('record-voice').onclick=async()=>{
 window.addEventListener('online',()=>flushOutbox());
 setInterval(()=>{if(state)flushOutbox();},5000);
 if(token) connect();
+
+
+function githubLink(url, label) {
+  try { const parsed=new URL(url); if(parsed.protocol==='https:' && parsed.hostname==='github.com') return `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(label)}</a>`; } catch(_) {}
+  return escapeHTML(label);
+}
+function renderGitHub() {
+  const g=state.github || {};
+  $('git-status').textContent='GitHub: '+(g.connected?'connected':g.stale?'cached / unavailable':'checking');
+  $('github-activity').innerHTML=`<p>${escapeHTML(g.message)}</p><small>${g.last_success?'Last successful refresh: '+new Date(g.last_success*1000).toLocaleString():'No successful remote refresh yet.'} ${g.stale?'· May be out of date':''}</small>${(g.pull_requests||[]).map(p=>`<div class="commit">${githubLink(p.url,'#'+p.number+' '+p.title)}<small>${escapeHTML(p.state)} · ${escapeHTML(p.headRefName)} → ${escapeHTML(p.baseRefName)} · ${escapeHTML(p.reviewDecision||'No review verdict')}</small></div>`).join('')}<details><summary>Recent remote commits</summary>${(g.commits||[]).map(c=>`<div class="commit">${githubLink(c.url,c.sha.slice(0,8)+' '+c.subject)}</div>`).join('')}</details>`;
+  if (!$('github-settings').contains(document.activeElement) && g.settings) for(const [key,value] of Object.entries(g.settings)){const input=$('github-settings').elements.namedItem(key);if(input){if(input.type==='checkbox')input.checked=value;else input.value=value;}}
+}
+$('github-refresh').onclick=async()=>{try{await api('github/refresh',{});await refresh();}catch(e){error(e.message);}};
+$('github-settings').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));try{await api('github/configure',{...d,enabled:d.enabled==='on',interval:Number(d.interval)});await refresh();}catch(e){error(e.message);}};
+let publication=null;
+async function publicationPreview(taskId) {
+  try{
+    const p=await api(`tasks/${taskId}/publish-preview`,{});
+    publication={taskId,preview_id:p.id,request_id:crypto.randomUUID()};
+    $('publish-content').innerHTML=`<h2>Publish reviewed work</h2><p>${escapeHTML(p.repository)} · ${escapeHTML(p.branch)} → ${escapeHTML(p.base)}</p><p>${escapeHTML(p.title)}</p><p>Files to commit:</p><pre>${escapeHTML(p.paths.join('\n')||'Already committed; no new local commit needed.')}</pre><p>Existing outgoing commits:</p><pre>${escapeHTML(JSON.stringify(p.outgoing_commits||[],null,2))}</pre><p>Full PR commit history:</p><pre>${escapeHTML(JSON.stringify(p.pr_commits||[],null,2))}</pre><details><summary>PR description</summary><pre>${escapeHTML(p.body)}</pre></details><p>The source branch will be pushed and a PR created or reused. Merging remains a separate action.</p>`;
+    $('publish-confirm').disabled=false;$('publish-dialog').showModal();
+  }catch(e){error(e.message);}
+}
+$('publish-close').onclick=()=>$('publish-dialog').close();
+$('publish-confirm').onclick=async()=>{if(!publication)return;$('publish-confirm').disabled=true;try{await api(`tasks/${publication.taskId}/publish`,{preview_id:publication.preview_id,request_id:publication.request_id});$('publish-dialog').close();await refresh();}catch(e){$('publish-confirm').disabled=false;error(e.message);}};

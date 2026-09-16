@@ -55,6 +55,19 @@ CONVERSATION_TOOLS = [
     ('acc_conversation_retry', 'Retry retained messages after inspecting a held conversation. Does not bypass interrupted process recovery.', {}, []),
 ]
 TOOLS.extend(CONVERSATION_TOOLS)
+TOOLS.extend([
+    ('acc_switch_agent', 'Request a role change after the current step ends. Completed files and reports are retained; does not interrupt the runner.',
+     {'task_id': {'type': 'string'}, 'role': {'type': 'string', 'enum': ['implementer', 'reviewer', 'coordinator']}, 'agent': {'type': 'string'}, 'request_id': {'type': 'string'}}, ['task_id', 'role', 'agent', 'request_id']),
+    ('acc_schedule_task', 'Set priority (higher first) and tasks that must be accepted before this task runs. Rejects dependency cycles.',
+     {'task_id': {'type': 'string'}, 'priority': {'type': 'integer', 'minimum': 0, 'maximum': 100}, 'depends_on': {'type': 'array', 'items': {'type': 'string'}}}, ['task_id']),
+    ('acc_github_refresh', 'Request a remote GitHub refresh. Read acc_state for timestamped cached results.', {}, []),
+    ('acc_github_configure', 'Configure GitHub remote, source branch, base branch, and polling interval.',
+     {'enabled': {'type': 'boolean'}, 'remote': {'type': 'string'}, 'source': {'type': 'string'}, 'base': {'type': 'string'}, 'interval': {'type': 'integer'}}, []),
+    ('acc_publish_preview', 'Read the exact publication target and changed paths for accepted, independently reviewed work. Does not publish.',
+     {'task_id': {'type': 'string'}}, ['task_id']),
+    ('acc_publish_task', 'Publish a reviewed preview under existing user authorization: commit, non-force push, and create or reuse a PR. Never merges.',
+     {'task_id': {'type': 'string'}, 'preview_id': {'type': 'string'}, 'request_id': {'type': 'string'}}, ['task_id', 'preview_id', 'request_id']),
+])
 
 
 def dispatch(message, url, token):
@@ -67,7 +80,7 @@ def dispatch(message, url, token):
         supported = ('2024-11-05', '2025-03-26', '2025-06-18')
         requested = message.get('params', {}).get('protocolVersion')
         return result({'protocolVersion': requested if requested in supported else supported[-1],
-                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.3.0'}})
+                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.4.0'}})
     if method == 'ping':
         return result({})
     if method == 'tools/list':
@@ -91,6 +104,8 @@ def dispatch(message, url, token):
             path, data = '/api/conversation?after=' + str(after), None
         elif name.startswith('acc_conversation_'):
             path, data = '/api/conversation/' + name.removeprefix('acc_conversation_'), args
+        elif name.startswith('acc_github_'):
+            path, data = '/api/github/' + name.removeprefix('acc_github_'), args
         elif name == 'acc_create_task':
             path, data = '/api/tasks', args
         else:
@@ -99,7 +114,8 @@ def dispatch(message, url, token):
                 raise ValueError('Invalid task ID')
             action = {'acc_start_task': 'start', 'acc_stop_task': 'stop', 'acc_assign_task': 'assign',
                       'acc_update_instructions': 'instructions', 'acc_report': 'report', 'acc_record_review': 'review',
-                      'acc_configure_workflow': 'workflow'}[name]
+                      'acc_configure_workflow': 'workflow', 'acc_switch_agent': 'switch', 'acc_schedule_task': 'schedule',
+                      'acc_publish_preview': 'publish-preview', 'acc_publish_task': 'publish'}[name]
             path, data = f'/api/tasks/{task_id}/{action}', args
         request = urllib.request.Request(url + path, data=None if data is None else json.dumps(data).encode(),
                                          headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})

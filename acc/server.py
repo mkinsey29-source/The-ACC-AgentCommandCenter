@@ -130,12 +130,21 @@ class Handler(BaseHTTPRequestHandler):
                 if parts[2] not in routes:
                     return self.reply(404, {'error': 'Unknown conversation operation.'})
                 return self.reply(200, routes[parts[2]](payload))
+            if len(parts) == 3 and parts[:2] == ['api', 'github']:
+                routes = {'configure': c.github.configure, 'refresh': lambda _: c.github.refresh()}
+                if parts[2] not in routes:
+                    return self.reply(404, {'error': 'Unknown GitHub operation.'})
+                return self.reply(200, routes[parts[2]](payload))
             if parts == ['api', 'tasks']:
                 return self.reply(201, c.create(payload))
             if len(parts) != 4 or parts[:2] != ['api', 'tasks']:
                 return self.reply(404, {'error': 'Unknown endpoint.'})
             task, action = parts[2:]
             routes = {
+                'switch': lambda: c.controls.switch(task, payload),
+                'schedule': lambda: c.controls.schedule(task, payload),
+                'publish-preview': lambda: c.github.preview(task),
+                'publish': lambda: c.github.publish(task, payload),
                 'start': lambda: c.start(task), 'stop': lambda: c.stop(task),
                 'assign': lambda: c.assign(task, payload.get('agent')),
                 'instructions': lambda: c.revise(task, payload.get('instruction')),
@@ -164,6 +173,7 @@ def main():
     parser.add_argument('--state-dir')
     parser.add_argument('--agents', help='Local JSON adapter configuration')
     parser.add_argument('--port', type=int, default=8765)
+    parser.add_argument('--open-browser', action='store_true')
     args = parser.parse_args()
     project = Path(args.project).resolve()
     suffix = hashlib.sha256(str(project).encode()).hexdigest()[:12]
@@ -180,6 +190,9 @@ def main():
     server = Server(('127.0.0.1', args.port), coordinator, token)
     print(f'ACC: http://127.0.0.1:{server.server_port}/#token={token}', flush=True)
     print(f'State: {state}\nUse the token file for the orchestrator bridge. Do not share it.', flush=True)
+    if args.open_browser:
+        import webbrowser
+        threading.Thread(target=webbrowser.open, args=(f'http://127.0.0.1:{server.server_port}/#token={token}',), daemon=True).start()
     def terminate(*_):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)

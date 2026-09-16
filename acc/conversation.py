@@ -114,7 +114,7 @@ class Conversation:
             lease = self._expire()
             if lease:
                 raise Conflict('A conversation turn already belongs to ' + lease['owner'] + '. Renew it or wait for its handoff.')
-            if self.c.running_task or self.c.recovery_required:
+            if self.c.running_task or self.c.recovery_required or self.c.github.busy:
                 raise Conflict('Wait for the current runner to finish or recover before claiming orchestration.')
             lease = {'token': identifier(), 'kind': 'external', 'owner': owner, 'expires': now() + 120,
                      'message_ids': [], 'offline': False}
@@ -219,7 +219,7 @@ class Conversation:
                     task = self.c.store.get(action.get('task_id'))
                     if task.get('internal') or type(action.get('revision')) is not int or task['revision'] != action['revision']:
                         raise Conflict('Revision does not match the current task.')
-                    if task['status'] in ('running', 'launching', 'stopping', 'processing_result', 'interrupted'):
+                    if task['status'] in ('running', 'launching', 'stopping', 'processing_result', 'publishing', 'interrupted'):
                         raise Conflict('An active task cannot be revised until its runner finishes.')
                     instruction = action.get('instruction')
                     if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 50000:
@@ -345,7 +345,7 @@ class Conversation:
 
     def retry(self):
         with self.c.lock:
-            if self.c.running_task or self.c.recovery_required:
+            if self.c.running_task or self.c.recovery_required or self.c.github.busy:
                 raise Conflict('Wait for or recover the active runner first.')
             lease = self._expire()
             if lease and lease['kind'] == 'external':

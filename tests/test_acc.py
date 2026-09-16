@@ -113,7 +113,7 @@ class CoreTests(unittest.TestCase):
         task = self.task()
         cursor = self.c.store.tail()
         self.c.report(task['id'], {'message': 'Explicit report'})
-        events = self.c.store.events(cursor)
+        events = [e for e in self.c.store.events(cursor) if e['task_id'] == task['id']]
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]['kind'], 'report')
         self.c.close()
@@ -208,10 +208,17 @@ class HttpTests(unittest.TestCase):
         self.c.store.event('fixture', {'message':'second'})
         request = urllib.request.Request(self.url + '/api/events?after=' + str(cursor), headers={'Authorization':'Bearer test-token'})
         with urllib.request.urlopen(request, timeout=3) as response:
-            line = response.readline().decode()
-            self.assertEqual(line.strip(), 'id: ' + str(cursor + 1))
-            event = json.loads(response.readline().decode()[6:])
-            self.assertEqual(event['data']['message'], 'second')
+            previous = cursor
+            while True:
+                line = response.readline().decode()
+                if not line.startswith('data: '):
+                    continue
+                event = json.loads(line[6:])
+                self.assertEqual(event['seq'], previous + 1)
+                previous = event['seq']
+                if event['kind'] == 'fixture':
+                    self.assertEqual(event['data']['message'], 'second')
+                    break
 
 
 if __name__ == '__main__':

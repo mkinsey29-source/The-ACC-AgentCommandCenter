@@ -242,20 +242,25 @@ class Coordinator:
         # An old live process could still be writing. Require explicit inspection on restart.
         self.recovery_required = False
         for task in self.store.tasks():
-            if task['status'] in ('launching', 'running', 'stopping', 'processing_result'):
+            if task['status'] in ('launching', 'running', 'stopping', 'processing_result', 'publishing'):
                 task['status'] = 'interrupted'
                 task['activity'] = 'Coordinator restarted. Inspect previous PID before releasing workspace.'
                 self.store.save(task, 'interrupted', {'message': task['activity']})
             if task['status'] == 'interrupted':
                 self.recovery_required = True
         self.observer = threading.Thread(target=self._observe, daemon=True)
-        self.observer.start()
         from .workflow import Workflows
         self.workflows = Workflows(self)
         from .conversation import Conversation
         self.conversation = Conversation(self, settings.get('conversation'), settings.get('transcription'))
         from .voice import Voice
         self.voice = Voice(self, settings.get('transcription'))
+        from .controls import Controls
+        self.controls = Controls(self)
+        from .github import GitHub
+        self.github = GitHub(self, settings.get('github'))
+        self.observer.start()
+        self.github.thread.start()
         self.workflows.thread.start()
 
     def public_agents(self):
@@ -265,11 +270,11 @@ class Coordinator:
         with self.lock:
             seq = self.store.tail()
             return {'project': str(self.project), 'tasks': [t for t in self.store.tasks() if not t.get('internal')],
-                    'conversation': self.conversation.state(),
+                    'conversation': self.conversation.state(), 'github': self.github.snapshot(),
                     'agents': self.public_agents(), 'git': self.git, 'cursor': seq,
                     'events': self.store.events(max(0, seq - 100)),
                     'recovery_required': self.recovery_required,
-                    'capabilities': {'github': False, 'automatic_offline': bool(self.conversation.settings.get('local_agent')), 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True}}
+                    'capabilities': {'github': True, 'switch_after_step': True, 'automatic_offline': bool(self.conversation.settings.get('local_agent')), 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True}}
 
     def build_task(self, payload):
         title, instruction = payload.get('title', '').strip(), payload.get('instruction', '').strip()
@@ -304,7 +309,7 @@ class Coordinator:
                 raise ValueError('That agent is not configured and available.')
             if task.get('internal'):
                 raise Conflict('Use conversation routing to assign internal work.')
-            if task['status'] in ('launching', 'running', 'stopping', 'interrupted'):
+            if task['status'] in ('launching', 'running', 'stopping', 'processing_result', 'publishing', 'interrupted'):
                 raise Conflict('Active takeover is not enabled yet. Stop the runner and inspect its handoff before reassigning.')
             if task.get('workflow'):
                 raise Conflict('Use workflow assignments to change a managed worker.')
@@ -319,7 +324,7 @@ class Coordinator:
             task = self.store.get(task_id)
             if task.get('internal'):
                 raise Conflict('Send a new conversation message instead of revising internal work.')
-            if task['status'] in ('launching', 'running', 'stopping', 'interrupted'):
+            if task['status'] in ('launching', 'running', 'stopping', 'processing_result', 'publishing', 'interrupted'):
                 raise Conflict('Stop and inspect this run before changing its instructions in v0.1.')
             if task.get('workflow'):
                 task['workflow'] = None  # New requirements need a fresh, explicitly enabled workflow.
@@ -333,6 +338,8 @@ class Coordinator:
 
     def _packet(self, task):
         packet_task = json.loads(json.dumps(task))
+        if packet_task.get('baseline'):
+            packet_task['baseline'].pop('entries', None)
         if packet_task.get('workflow'):
             if packet_task['workflow'].get('snapshot'):
                 packet_task['workflow']['snapshot'].pop('entries', None)
@@ -356,9 +363,13 @@ class Coordinator:
             lease = self.conversation._expire()
             if lease and lease['kind'] == 'external':
                 raise Conflict('Release the external orchestration turn before starting a worker.')
+            if self.github.busy:
+                raise Conflict('GitHub publication owns the project.')
+            if self.controls.blocked(task):
+                raise Conflict('Waiting for prerequisite tasks to be accepted.')
             if self.running_task:
                 raise Conflict('Another runner owns this workspace. Wait or stop it first.')
-            if task['status'] in ('launching', 'running', 'stopping', 'interrupted', 'accepted'):
+            if task['status'] in ('launching', 'running', 'stopping', 'processing_result', 'publishing', 'interrupted', 'accepted'):
                 raise Conflict('This task cannot be started in its current state.')
             workflow = task.get('workflow') if _managed else None
             agent_id = self.workflows.agent_for(workflow) if workflow else task['agent']
@@ -367,6 +378,11 @@ class Coordinator:
             agent = self.agents[agent_id]
             if not agent['available']:
                 raise ValueError('Configure this worker on the host first.')
+            if workflow and workflow['stage'] == 'implement' and (task.get('baseline') or {}).get('revision') != task['revision']:
+                from .snapshots import inventory
+                before = git_snapshot(self.project)
+                task['baseline'] = {'revision': task['revision'], 'entries': inventory(self.project),
+                                    'dirty_paths': [f['path'] for f in before.get('files', [])], 'head': before.get('head')}
             run_id = identifier()
             folder = self.state / 'runs' / run_id
             folder.mkdir(parents=True)
@@ -483,6 +499,7 @@ class Coordinator:
                             self.store.save(task, 'transcription_held', {'message': str(exc)})
                         else:
                             self.conversation.fail(task, str(exc), retry=False)
+                self.controls.apply(task_id)
                 self.process, self.running_task = None, None
         except Exception as exc:
             with self.lock:
@@ -560,7 +577,17 @@ class Coordinator:
                         raise Conflict('Cannot establish whether the previous runner is alive.')
                     else:
                         raise Conflict('Previous PID still exists; inspect and stop it outside ACC first.')
-            task.update(status='paused', active_agent=None, activity='Operator confirmed previous process tree inspected.')
+            publication = task.get('publication')
+            task.update(status='accepted' if publication and task.get('review') else 'paused', active_agent=None,
+                        activity='Operator confirmed previous process tree inspected.')
+            if publication:
+                publication.update(status='needs_attention', error='Interrupted publication inspected. Preview again to reconcile Git and PR state.')
+                if self.github.busy == task_id:
+                    self.github.busy = None
+                    self.github.unsafe_process = False
+            if task.get('pending_switch'):
+                task['pending_switch'] = None  # Restart recovery requires an explicit new assignment.
+
             self.store.save(task, 'recovery_acknowledged', {'message': task['activity']})
             if task.get('internal') == 'conversation':
                 self.conversation.fail(task, 'Previous process inspected. Retry the saved conversation when ready.', retry=False)
@@ -595,5 +622,6 @@ class Coordinator:
         self.observer.join(timeout=10)
         if self.process or (self.worker_thread and self.worker_thread.is_alive()):
             raise Conflict('Runner termination is unconfirmed; workspace lock is retained until process exit.')
+        self.github.close()
         self.ownership.close()
         self.project_ownership.close()

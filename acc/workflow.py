@@ -46,13 +46,17 @@ class Workflows:
         c = self.c
         with c.lock:
             task = c.store.get(task_id)
+            if task['status'] == 'publishing':
+                raise Conflict('Wait for publication to finish.')
+            if task.get('pending_switch'):
+                raise Conflict('Wait for the requested role switch to finish.')
             if payload.get('enabled') is False:
                 if task.get('workflow'):
                     task['workflow']['enabled'] = False
                     task['next_step'] = 'Pause after the current run; resume when ready'
                 c.store.save(task, 'workflow_paused', {'message': 'Background coordination paused; current runner may finish.'})
                 return task
-            if task['status'] in ('launching', 'running', 'stopping', 'interrupted'):
+            if task['status'] in ('launching', 'running', 'stopping', 'processing_result', 'publishing', 'interrupted'):
                 raise Conflict('Stop and inspect the active runner before changing its workflow.')
             if task['status'] == 'accepted' and payload.get('restart') is not True:
                 raise Conflict('Task is already accepted. Select Restart implementation to begin another cycle.')
@@ -75,6 +79,7 @@ class Workflows:
                                     'snapshot': None, 'implementation': None, 'review_result': None,
                                     'fallback_used': False, 'history': []}
                 task['review'] = None
+                task.pop('baseline', None)
             task['agent'] = roles['implementer']
             task.update(status='queued', next_step='Background coordinator will run ' + task['workflow']['stage'])
             c.store.save(task, 'workflow_configured', {'message': task['next_step'], 'roles': roles, 'mode': mode})
@@ -198,14 +203,16 @@ class Workflows:
             self.wake.wait(.5)
             self.wake.clear()
             with c.lock:
-                if c.halt.is_set() or c.running_task or c.recovery_required:
+                if c.halt.is_set() or c.running_task or c.recovery_required or c.github.busy:
                     continue
                 try:
                     if c.conversation.tick():
                         continue
                 except Exception as exc:
                     c.conversation.scheduler_error(str(exc))
-                for task in c.store.tasks():
+                for task in sorted(c.store.tasks(), key=lambda t: (-t.get('priority', 50), t['created'])):
+                    if c.controls.blocked(task):
+                        continue
                     w = task.get('workflow')
                     if w and w['enabled'] and w['phase'] == 'queued':
                         try:
