@@ -8,6 +8,10 @@ Local audio capture saves recordings before a supervised transcription command. 
 
 Verification is recorded in `docs/evidence/conversation-tests.json`. Scripted adapters exercise real process, persistence, MCP/HTTP, review, and reconnection paths. This does not claim live speech/model quality or browser/desktop host verification.
 
+## Follow-up: live model responses through ACC
+
+Three live session subagents supplied planning, implementation, and independent review, with the planner returning for coordination decisions. Their five actual responses passed through a transport-only relay into ACC's normal conversation/workflow engine. The task was accepted after independent review, and reconnect/replay checks preserved one completed task. See [live-agent evidence](LIVE-AGENT-HANDOFF.md). This tests live reasoning and handoffs, while provider-specific and disconnected inference remain unverified.
+
 ## Previous follow-up: Hermes coordination
 
 Implemented `acc/hermes.py` with Hermes profile support, file-based one-shot prompts, streaming CLI output, terminal result validation, and MCP config generation. Added persistent managed workflow stages, independent review snapshots, bound results, corrections with limits, pause/resume, visible role changes, explicit offline mode, and configured local coordinator fallback. See [Hermes setup](HERMES-CONNECTOR.md).
