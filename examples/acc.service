@@ -1,0 +1,17 @@
+[Unit]
+Description=ACC local agent coordination
+After=network.target
+
+[Service]
+Type=simple
+# Copy to ~/.config/systemd/user/acc.service and replace these absolute paths.
+WorkingDirectory=/REPLACE/ACC
+ExecStart=/REPLACE/python3 -m acc --project /REPLACE/project --agents /REPLACE/hermes-agents.json --state-dir /REPLACE/private-acc-state
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=default.target

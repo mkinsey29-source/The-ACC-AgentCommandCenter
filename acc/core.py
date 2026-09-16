@@ -219,18 +219,28 @@ class Coordinator:
                                 'description': 'Not configured on this computer.'}
         if config:
             for agent in json.loads(Path(config).read_text(encoding='utf-8')).get('agents', []):
-                key, argv = agent['id'], agent['argv']
+                key = agent['id']
+                if agent.get('driver') == 'hermes':
+                    executable = agent.get('executable', 'hermes')
+                    argv = [sys.executable, str(Path(__file__).with_name('hermes.py')), 'run',
+                            '--executable', executable, '--packet', '{prompt_file}']
+                    for option in ('provider', 'model', 'profile'):
+                        if agent.get(option):
+                            argv += ['--' + option, agent[option]]
+                    agent['argv'] = argv
+                else:
+                    argv = agent['argv']
                 if key == 'local-command' or not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', key):
                     raise ValueError('Invalid agent id.')
                 if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
                     raise ValueError('Agent argv must be a nonempty string array.')
-                available = bool(shutil.which(argv[0]))
+                available = bool(shutil.which(agent.get('executable', 'hermes') if agent.get('driver') == 'hermes' else argv[0]))
                 self.agents[key] = {**agent, 'kind': 'model', 'available': available,
                                     'description': 'Configured command adapter; provider readiness not verified.' if available else 'Executable missing.'}
         # An old live process could still be writing. Require explicit inspection on restart.
         self.recovery_required = False
         for task in self.store.tasks():
-            if task['status'] in ('running', 'stopping'):
+            if task['status'] in ('launching', 'running', 'stopping', 'processing_result'):
                 task['status'] = 'interrupted'
                 task['activity'] = 'Coordinator restarted. Inspect previous PID before releasing workspace.'
                 self.store.save(task, 'interrupted', {'message': task['activity']})
@@ -238,9 +248,12 @@ class Coordinator:
                 self.recovery_required = True
         self.observer = threading.Thread(target=self._observe, daemon=True)
         self.observer.start()
+        from .workflow import Workflows
+        self.workflows = Workflows(self)
+        self.workflows.thread.start()
 
     def public_agents(self):
-        return [{k: a.get(k) for k in ('id', 'name', 'kind', 'available', 'description')} for a in self.agents.values()]
+        return [{k: a.get(k) for k in ('id', 'name', 'kind', 'available', 'description', 'local', 'driver')} for a in self.agents.values()]
 
     def snapshot(self):
         with self.lock:
@@ -249,7 +262,7 @@ class Coordinator:
                     'agents': self.public_agents(), 'git': self.git, 'cursor': seq,
                     'events': self.store.events(max(0, seq - 100)),
                     'recovery_required': self.recovery_required,
-                    'capabilities': {'github': False, 'automatic_offline': False, 'safe_takeover': False}}
+                    'capabilities': {'github': False, 'automatic_offline': False, 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True}}
 
     def create(self, payload):
         title, instruction = payload.get('title', '').strip(), payload.get('instruction', '').strip()
@@ -278,8 +291,10 @@ class Coordinator:
             task = self.store.get(task_id)
             if agent not in self.agents or not self.agents[agent]['available']:
                 raise ValueError('That agent is not configured and available.')
-            if task['status'] in ('running', 'stopping', 'interrupted'):
+            if task['status'] in ('launching', 'running', 'stopping', 'interrupted'):
                 raise Conflict('Active takeover is not enabled yet. Stop the runner and inspect its handoff before reassigning.')
+            if task.get('workflow'):
+                raise Conflict('Use workflow assignments to change a managed worker.')
             task['agent'] = agent
             self.store.save(task, 'assigned', {'message': 'Assigned to ' + self.agents[agent]['name']})
             return task
@@ -289,8 +304,10 @@ class Coordinator:
             raise ValueError('Instruction must contain 1–50,000 characters.')
         with self.lock:
             task = self.store.get(task_id)
-            if task['status'] in ('running', 'stopping', 'interrupted'):
+            if task['status'] in ('launching', 'running', 'stopping', 'interrupted'):
                 raise Conflict('Stop and inspect this run before changing its instructions in v0.1.')
+            if task.get('workflow'):
+                task['workflow'] = None  # New requirements need a fresh, explicitly enabled workflow.
             task['requirements_history'].append({'revision': task['revision'], 'instruction': task['instruction']})
             task['revision'] += 1
             task['instruction'] = instruction.strip()
@@ -300,45 +317,75 @@ class Coordinator:
             return task
 
     def _packet(self, task):
-        return {'task': task, 'project': str(self.project), 'git': self.git,
+        packet_task = json.loads(json.dumps(task))
+        if packet_task.get('workflow'):
+            if packet_task['workflow'].get('snapshot'):
+                packet_task['workflow']['snapshot'].pop('entries', None)
+            packet_task['workflow']['history'] = packet_task['workflow']['history'][-6:]
+        return {'task': packet_task, 'project': str(self.project), 'git': self.git,
                 'rules': ['Read applicable project instructions before editing.',
                           'Use the task requirements; preserve unrelated work.',
-                          'Report actual checks and remaining work. Do not claim review approval.']}
+                          'Report actual checks and remaining work. Only the assigned reviewer gives its own verdict; never claim approval on behalf of another role.']}
 
-    def start(self, task_id):
+    def start(self, task_id, _managed=False):
         with self.lock:
             task = self.store.get(task_id)
+            if self.halt.is_set():
+                raise Conflict('Coordinator is shutting down.')
+            if task.get('workflow') and not _managed:
+                raise Conflict('Use Resume workflow for managed tasks.')
             if self.recovery_required:
                 raise Conflict('Interrupted run needs manual process inspection before new work can start.')
             if self.running_task:
                 raise Conflict('Another runner owns this workspace. Wait or stop it first.')
-            if task['status'] in ('running', 'stopping', 'interrupted', 'accepted'):
+            if task['status'] in ('launching', 'running', 'stopping', 'interrupted', 'accepted'):
                 raise Conflict('This task cannot be started in its current state.')
-            agent = self.agents[task['agent']]
+            workflow = task.get('workflow') if _managed else None
+            agent_id = self.workflows.agent_for(workflow) if workflow else task['agent']
+            if workflow and workflow['stage'] == 'review' and agent_id == workflow.get('implementation_agent'):
+                raise Conflict('The same adapter cannot implement and independently review this snapshot.')
+            agent = self.agents[agent_id]
             if not agent['available']:
                 raise ValueError('Configure this worker on the host first.')
             run_id = identifier()
             folder = self.state / 'runs' / run_id
             folder.mkdir(parents=True)
             prompt = folder / 'task.json'
-            prompt.write_text(json.dumps(self._packet(task), indent=2), encoding='utf-8')
+            packet = self._packet(task)
+            packet['result_file'] = str(folder / 'result.json')
+            if workflow:
+                packet['workflow'] = self.workflows.packet(task, run_id)
+            prompt.write_text(json.dumps(packet, indent=2), encoding='utf-8')
             argv = task['argv'] if agent['id'] == 'local-command' else [
                 a.replace('{prompt_file}', str(prompt)).replace('{project}', str(self.project)) for a in agent['argv']]
             if not argv:
                 raise ValueError('Local command requires an explicit argv array.')
             opts = {'start_new_session': True} if os.name != 'nt' else {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
+            # Persist intent BEFORE spawn: a crash in the spawn/save gap blocks recovery.
+            task.update(status='launching', run_id=run_id, pid=None, active_agent=agent['id'])
+            self.store.save(task, 'launching', {'message': 'Launching ' + agent['name'], 'run_id': run_id})
+            cwd = self.project
+            if workflow:
+                workflow['phase'] = 'running'
+                if workflow['stage'] == 'review':
+                    cwd = Path(workflow['snapshot']['path'])
+                elif workflow['stage'] == 'coordinate':
+                    cwd = folder
             try:
-                proc = subprocess.Popen(argv, cwd=self.project, stdin=subprocess.DEVNULL,
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **opts)
+                proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                        env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}, **opts)
             except OSError as exc:
-                self.store.event('launch_failed', {'message': str(exc)}, task_id)
+                task.update(status='failed', active_agent=None, activity='Worker failed to launch.')
+                self.store.save(task, 'launch_failed', {'message': str(exc)})
                 raise ValueError('Worker failed to launch: ' + str(exc))
             self.process, self.running_task = proc, task_id
             task.update(status='running', active_agent=agent['id'], run_id=run_id, pid=proc.pid,
                         exit_code=None, activity='Runner started; waiting for output.',
                         delivered_revision=task['revision'], next_step='Inspect worker result', review=None, timed_out=False)
             task['runs'].append({'id': run_id, 'pid': proc.pid, 'agent': agent['id'],
-                                 'revision': task['revision'], 'started': now(), 'folder': str(folder)})
+                                 'revision': task['revision'], 'started': now(), 'folder': str(folder),
+                                 'stage': workflow['stage'] if workflow else 'command'})
             self.store.save(task, 'run_started', {'message': 'Started ' + agent['name'], 'run_id': run_id,
                                                 'pid': proc.pid, 'revision': task['revision']})
             self.worker_thread = threading.Thread(target=self._collect, args=(proc, task_id, run_id, folder), daemon=True)
@@ -392,8 +439,16 @@ class Coordinator:
                             activity='Run timed out; inspect retained changes.' if task['timed_out'] else ('Stopped; inspect retained files before continuing.' if stopped else f'Runner exited with code {code}.'),
                             next_step='Inspect changes and evidence')
                 task['runs'][-1].update(ended=now(), exit_code=code)
+                if task.get('workflow'):
+                    # A crash before the next persisted transition must surface in recovery.
+                    task['status'] = 'processing_result'
                 (folder / 'handoff.json').write_text(json.dumps(self._packet(task), indent=2), encoding='utf-8')
                 self.store.save(task, 'run_ended', {'message': task['activity'], 'run_id': run_id, 'exit_code': code})
+                if task.get('workflow'):
+                    try:
+                        self.workflows.finish(task, folder, code, stopped)
+                    except Exception as exc:
+                        self.workflows.hold(task, str(exc))
                 self.process, self.running_task = None, None
         except Exception as exc:
             with self.lock:
@@ -409,8 +464,8 @@ class Coordinator:
             if self.running_task != task_id:
                 raise Conflict('This task has no supervised active runner.')
             task = self.store.get(task_id)
-            if task['status'] == 'stopping':
-                return task
+            if task.get('workflow'):
+                task['workflow']['enabled'] = False
             task.update(status='stopping', activity='Stopping runner and child processes…')
             self.store.save(task, 'stop_requested', {'message': task['activity']})
             proc = self.process
@@ -433,6 +488,8 @@ class Coordinator:
     def review(self, task_id, payload):
         with self.lock:
             task = self.store.get(task_id)
+            if task.get('workflow'):
+                raise Conflict('Managed acceptance requires the bound reviewer result and coordinator decision.')
             if task['status'] != 'awaiting_review':
                 raise Conflict('Only completed runs awaiting review can be accepted.')
             if payload.get('revision') != task['revision'] or payload.get('run_id') != task['run_id']:
@@ -497,6 +554,10 @@ class Coordinator:
                 pass
         if self.worker_thread:
             self.worker_thread.join(timeout=8)
+        self.workflows.wake.set()
+        self.workflows.thread.join(timeout=10)
         self.observer.join(timeout=10)
+        if self.process or (self.worker_thread and self.worker_thread.is_alive()):
+            raise Conflict('Runner termination is unconfirmed; workspace lock is retained until process exit.')
         self.ownership.close()
         self.project_ownership.close()

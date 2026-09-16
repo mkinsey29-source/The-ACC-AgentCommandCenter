@@ -1,0 +1,9 @@
+{
+  "agents": [
+    {"id": "deepseek", "name": "DeepSeek implementation", "driver": "hermes", "profile": "acc-deepseek", "local": false},
+    {"id": "claude", "name": "Claude review", "driver": "hermes", "profile": "acc-claude", "local": false},
+    {"id": "hermes-coordinator", "name": "Hermes local coordinator", "driver": "hermes", "profile": "acc-coordinator", "local": true},
+    {"id": "local-builder", "name": "Local implementation", "driver": "hermes", "profile": "acc-local-builder", "local": true},
+    {"id": "local-reviewer", "name": "Local review", "driver": "hermes", "profile": "acc-local-reviewer", "local": true}
+  ]
+}

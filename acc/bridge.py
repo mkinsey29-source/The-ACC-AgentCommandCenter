@@ -10,6 +10,11 @@ from urllib.parse import urlsplit
 
 
 TOOLS = [
+    ('acc_configure_workflow', 'Configure or resume sequential implementation, coordinator, and independent review. Starts approved work in the background; use enabled:false to pause between runs.',
+     {'task_id': {'type': 'string'}, 'enabled': {'type': 'boolean'}, 'restart': {'type': 'boolean'},
+      'implementer': {'type': 'string'}, 'reviewer': {'type': 'string'}, 'coordinator': {'type': 'string'},
+      'max_rounds': {'type': 'integer'}, 'mode': {'type': 'string', 'enum': ['online', 'offline']},
+      'fallbacks': {'type': 'object', 'properties': {r: {'type': 'string'} for r in ('implementer', 'reviewer', 'coordinator')}, 'additionalProperties': False}}, ['task_id']),
     ('acc_state', 'Read tasks, workers, local Git state, and current event cursor.', {}, []),
     ('acc_create_task', 'Record an instruction and optional explicit local command. Does not start it.',
      {'title': {'type': 'string'}, 'instruction': {'type': 'string'}, 'agent': {'type': 'string'},
@@ -38,7 +43,7 @@ def dispatch(message, url, token):
         supported = ('2024-11-05', '2025-03-26', '2025-06-18')
         requested = message.get('params', {}).get('protocolVersion')
         return result({'protocolVersion': requested if requested in supported else supported[-1],
-                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.1.0'}})
+                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.2.0'}})
     if method == 'ping':
         return result({})
     if method == 'tools/list':
@@ -62,7 +67,8 @@ def dispatch(message, url, token):
             if not isinstance(task_id, str) or not task_id.isalnum():
                 raise ValueError('Invalid task ID')
             action = {'acc_start_task': 'start', 'acc_stop_task': 'stop', 'acc_assign_task': 'assign',
-                      'acc_update_instructions': 'instructions', 'acc_report': 'report', 'acc_record_review': 'review'}[name]
+                      'acc_update_instructions': 'instructions', 'acc_report': 'report', 'acc_record_review': 'review',
+                      'acc_configure_workflow': 'workflow'}[name]
             path, data = f'/api/tasks/{task_id}/{action}', args
         request = urllib.request.Request(url + path, data=None if data is None else json.dumps(data).encode(),
                                          headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})

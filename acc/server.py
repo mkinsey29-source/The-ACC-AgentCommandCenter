@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import signal
 import threading
 from urllib.parse import parse_qs, urlsplit
 from .core import Coordinator, Conflict
@@ -120,6 +121,7 @@ class Handler(BaseHTTPRequestHandler):
                 'assign': lambda: c.assign(task, payload.get('agent')),
                 'instructions': lambda: c.revise(task, payload.get('instruction')),
                 'report': lambda: c.report(task, payload), 'review': lambda: c.review(task, payload),
+                'workflow': lambda: c.workflows.configure(task, payload),
                 'recover': lambda: c.recover(task) if payload.get('process_tree_inspected') is True else
                            (_ for _ in ()).throw(ValueError('Explicit process-tree inspection acknowledgement required.')),
             }
@@ -159,6 +161,9 @@ def main():
     server = Server(('127.0.0.1', args.port), coordinator, token)
     print(f'ACC: http://127.0.0.1:{server.server_port}/#token={token}', flush=True)
     print(f'State: {state}\nUse the token file for the orchestrator bridge. Do not share it.', flush=True)
+    def terminate(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, terminate)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

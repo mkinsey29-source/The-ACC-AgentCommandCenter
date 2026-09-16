@@ -2,7 +2,7 @@
 
 A local project window for instructions, agent assignments, live worker output, local Git changes, and review records. Windows and Linux are the intended targets; this first implementation was exercised on Linux.
 
-**v0.1 is a working local foundation, not the complete orchestration system.** No simulated tasks are loaded. Cloud models are unavailable until you configure their host commands. Automatic agent takeover, offline fallback, and GitHub publishing remain planned.
+**v0.2 adds Hermes background coordination and sequential independent review.** No simulated tasks are loaded into the app. Models remain unavailable until you configure Hermes or another host adapter. Active takeover, automatic connectivity detection, and GitHub publishing remain separate work.
 
 ## Run locally
 
@@ -38,7 +38,13 @@ Use `--port 8766`, `--state-dir /private/state/path`, or `--agents /private/agen
 - Expose task controls through a local stdio MCP bridge for a connected orchestrator.
 - Label unavailable providers, failed runs, interrupted processes, and pending review honestly.
 
-An exit code of zero means **Needs review**, not approved. Reported acceptance records its run ID, requirement revision, and a supplied code snapshot reference. ACC does not independently prove that an external reviewer inspected that reference.
+For manual tasks, an exit code of zero means **Needs review**, not approved. Managed workflows advance only with a valid structured result and use the stronger snapshot-bound acceptance checks described below. Reported acceptance records its run ID, requirement revision, and a supplied code snapshot reference. ACC does not independently prove that an external reviewer inspected that reference.
+
+## Hermes background coordination
+
+Use the included Hermes connector to run implementation → coordinator → independent review → coordinator, with bounded correction rounds. The dashboard has workflow assignments, pause/resume, online/offline mode, and permitted local fallbacks. ACC preserves a code snapshot and rejects stale results, modified snapshots, and acceptance without an approving review. A local coordinator can supervise cloud workers; fully offline work requires configured local workers too.
+
+See the [complete Hermes setup and behavior guide](docs/HERMES-CONNECTOR.md), [example agent profiles](examples/hermes-agents.json), and [Linux background service template](examples/acc.service). The guide includes Windows startup, MCP setup, the actual verification performed, and remaining host checks.
 
 ## First concrete task
 
@@ -65,7 +71,7 @@ Run the bridge as an MCP stdio server in your host's configuration:
 
 This is the server command description; the outer configuration shape is host-specific. For Windows, use `py` with `-3` before `-m`. The actual state/token path is printed by the coordinator. Start the coordinator before the bridge. Do not commit the token.
 
-Available tools: `acc_state`, `acc_create_task`, `acc_start_task`, `acc_stop_task`, `acc_assign_task`, `acc_update_instructions`, `acc_report`, and `acc_record_review`.
+Available tools: `acc_configure_workflow`, `acc_state`, `acc_create_task`, `acc_start_task`, `acc_stop_task`, `acc_assign_task`, `acc_update_instructions`, `acc_report`, and `acc_record_review`.
 
 Your connected orchestrator explicitly records instructions and actions through these tools. ACC does not read unrelated chats or automatically connect this repository to ChatGPT Remote. The bridge's HTTP operations are tested; native host setup still needs verification on your computer.
 
@@ -77,7 +83,7 @@ Copy `examples/agents.json` outside the repository and replace the placeholder c
 
 A detected executable means **configured**, not a verified provider login or live model connection. API credentials stay in the host's own configuration or environment. No paid model calls are made by the default setup. Output and prompts are private local data; avoid putting credentials in worker output or task text.
 
-Adapters must not daemonize, escape their process group, or leave detached work behind. POSIX stop/timeout tests include a child that ignores SIGTERM. Windows currently uses `taskkill /T /F`; detached-child/job-object containment and native Windows validation remain outstanding. Active takeover and automatic offline transitions are disabled on all platforms in this version.
+Adapters must not daemonize, escape their process group, or leave detached work behind. POSIX stop/timeout tests include a child that ignores SIGTERM. Windows currently uses `taskkill /T /F`; detached-child/job-object containment and native Windows validation remain outstanding. Active takeover and automatic connectivity detection remain disabled. Managed workflows support an explicit offline mode and a permitted local coordinator fallback after a failed coordinator run.
 
 Default run deadline: 900 seconds. The API accepts `timeout_seconds` from 1 to 86,400. Timeouts retain files and mark the run failed. Recovery after a coordinator crash requires inspecting the old PID and descendants before acknowledging release; ACC does not blindly restart interrupted workers.
 

@@ -1,6 +1,14 @@
 # Implementation status — September 16, 2026
 
-## Delivered in the initial PR
+## Current follow-up: Hermes coordination
+
+Implemented `acc/hermes.py` with Hermes profile support, file-based one-shot prompts, streaming CLI output, terminal result validation, and MCP config generation. Added persistent managed workflow stages, independent review snapshots, bound results, corrections with limits, pause/resume, visible role changes, explicit offline mode, and configured local coordinator fallback. See [Hermes setup](HERMES-CONNECTOR.md).
+
+Launch intent and result-processing state are now recovery-visible. Failed stops can be retried; shutdown retains locks if termination is unconfirmed. The dashboard retains received stream events across snapshot refreshes instead of dropping bursts outside the last 100 events.
+
+Test evidence is recorded in `docs/evidence/hermes-connector-tests.json`. Actual subprocess/HTTP/stdio execution is tested with scripted model responses. Hermes installation, provider inference, model quality, browser interaction, and native Windows operation are not claimed verified.
+
+## Historical: delivered in the initial PR
 
 The local coordinator, persistent task/event database, browser dashboard, command runner, local Git observer, and stdio orchestrator bridge are implemented. The application has no third-party runtime dependency and no fake preloaded activity.
 
@@ -21,15 +29,15 @@ The planned TypeScript interface is initially dependency-free JavaScript to make
 
 Stage A is partially demonstrated with actual local command workers and a tested bridge contract. It is not fully accepted until the user's orchestrator host and one real coding-model adapter are connected and exercised.
 
-## Next work, in order
+## Remaining work
 
-1. Run the interface on the user's Windows or Linux machine and verify keyboard, responsive layout, task creation, live updates, reconnect, and controls.
-2. Configure the actual orchestrator MCP connection and one real coding-worker host. Verify credentials, packet handling, tool events, cancellation, and a real bounded coding task.
-3. Add immutable change snapshots, idempotent control commands, explicit worker acknowledgement, and verified Windows process containment. Then implement safe active reassignment to a second model.
-4. Add task dependencies, native pipeline evidence, automated fixed-snapshot review, and task-linked local commit/remote PR actions.
-5. Add a prepared local-model fallback, connectivity-aware ownership transfer, and tested online return.
+1. Configure Hermes profiles on the user's machine and execute a small live-model handoff. Validate provider login, tool permissions, model context, output contract, and cancellation.
+2. Verify dashboard controls and responsive layout in a browser; validate native Windows process containment and scheduled startup.
+3. Add connectivity-aware automatic switching/return and safe active reassignment. Current offline selection happens between runs; a failed coordinator can use a permitted fallback.
+4. Add task dependencies, native pipeline evidence, larger asset-aware review scope, and task-linked commit/remote PR actions.
+5. Add general idempotency keys, retention quotas, and stronger execution isolation as needed.
 
-Automatic active takeover, live requirement injection into running workers, automatic offline fallback, remote GitHub state, pushes, PR creation, and direct Unity/Blender control are not implemented by this PR. The UI labels these limits. Continue using the user's existing pipeline under its single coordinator.
+Live requirement injection, automatic internet detection, remote GitHub state, pushes, PR creation, and direct Unity/Blender control are not implemented by ACC itself. Continue using the existing game pipeline under its coordinator.
 
 ## Repository workflow
 
@@ -37,4 +45,4 @@ Automatic active takeover, live requirement injection into running workers, auto
 
 ## Follow-up: real sub-agent handoff exercise
 
-A separate implementation agent and reviewer have now exercised a manually coordinated handoff, with actual ACC stdio/HTTP validation runs. The implementation's 16 tests and the reviewer's 10 methods (428 calls) passed. A deliberately broken variant failed; stale review approvals were rejected. See [the executed simulation](REVIEW-HANDOFF-SIMULATION.md) and its replay artifacts. Model-session delegation and snapshot integrity were handled externally by the orchestrator; automatic routing is still pending.
+A separate implementation agent and reviewer have now exercised a manually coordinated handoff, with actual ACC stdio/HTTP validation runs. The implementation's 16 tests and the reviewer's 10 methods (428 calls) passed. A deliberately broken variant failed; stale review approvals were rejected. See [the executed simulation](REVIEW-HANDOFF-SIMULATION.md) and its replay artifacts. Model-session delegation and snapshot integrity were handled externally by the orchestrator; automatic routing was pending at that point and is implemented in the Hermes follow-up above.

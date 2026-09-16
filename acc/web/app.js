@@ -3,8 +3,8 @@ const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let token = new URLSearchParams(location.hash.slice(1)).get('token') || sessionStorage.getItem('acc-token') || '';
 history.replaceState(null, '', location.pathname);
-let state = null, selected = null, cursor = 0, refreshTimer = null, streamController = null;
-const labels = {queued:'Queued', running:'Working', stopping:'Stopping', interrupted:'Needs inspection', paused:'Paused', failed:'Failed', awaiting_review:'Needs review', accepted:'Accepted'};
+let state = null, selected = null, cursor = 0, refreshTimer = null, streamController = null, eventHistory = new Map();
+const labels = {launching:'Launching', queued:'Queued', running:'Working', stopping:'Stopping', interrupted:'Needs inspection', paused:'Paused', failed:'Failed', awaiting_review:'Needs review', accepted:'Accepted'};
 function error(message) { for (const id of ['error','task-error']) { $(id).textContent = message || ''; $(id).hidden = !message; } }
 async function api(path, body) {
   const response = await fetch('/api/' + path, {method: body === undefined ? 'GET' : 'POST', headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
@@ -16,6 +16,8 @@ function name(id) { return state?.agents.find(a => a.id === id)?.name || id || '
 function options(value) { return state.agents.map(a => `<option value="${escapeHTML(a.id)}" ${a.id===value?'selected':''} ${!a.available?'disabled':''}>${escapeHTML(a.name)}${a.available?'':' · not configured'}</option>`).join(''); }
 async function refresh() {
   state = await api('state');
+  for (const e of state.events) eventHistory.set(e.seq, e);
+  state.events = [...eventHistory.values()].sort((a,b)=>a.seq-b.seq);
   if (!selected && state.tasks.length) selected = state.tasks[0].id;
   render();
 }
@@ -36,21 +38,37 @@ function render() {
 function renderDetail() {
   const t = state.tasks.find(t=>t.id===selected);
   if (!t) return;
-  const busy = ['running','stopping','interrupted'].includes(t.status);
+  const busy = ['launching','running','stopping','interrupted'].includes(t.status);
+  const w = t.workflow;
   const available = state.agents.find(a=>a.id===t.agent)?.available;
   $('detail').innerHTML = `<small>REQUIREMENTS REVISION ${t.revision} · ${escapeHTML(labels[t.status])}</small><h2>${escapeHTML(t.title)}</h2><div class="instruction">${escapeHTML(t.instruction)}</div>
-  <label>Assigned worker<select id="assigned" ${busy?'disabled':''}>${options(t.agent)}</select></label>
+  <label>Assigned worker<select id="assigned" ${busy||w?'disabled':''}>${options(t.agent)}</select></label>
   <div class="current"><strong>Active: ${escapeHTML(name(t.active_agent))}</strong><small>${escapeHTML(t.activity)}</small><small>Next: ${escapeHTML(t.next_step)}</small></div>
-  ${busy?'<div class="notice">Active takeover is not enabled in v0.1. Stop this runner, inspect its retained work, then reassign.</div>':''}
+  ${busy?'<div class="notice">Assignments change after the current runner stops. Stop this runner, inspect its retained work, then reassign.</div>':''}
   ${state.recovery_required?'<div class="notice">An interrupted runner needs process-tree inspection before this workspace can run new work.</div>':''}
-  <div class="actions"><button id="start" ${busy||!available||t.status==='accepted'||state.recovery_required?'disabled':''}>${t.runs.length?'Run again':'Start task'}</button><button id="stop" ${t.status!=='running'?'disabled':''}>Stop now</button></div>
+  <div class="actions"><button id="start" ${busy||w||!available||t.status==='accepted'||state.recovery_required?'disabled':''}>${t.runs.length?'Run again':'Start task'}</button><button id="stop" ${!['running','stopping'].includes(t.status)?'disabled':''}>Stop now</button></div>
+  <details ${w?'open':''}><summary>Background coordination${w?' · '+escapeHTML(w.phase):''}</summary>
+  ${w?`<p><strong>${escapeHTML(w.stage)} · round ${w.round}/${w.max_rounds}</strong><br>${w.enabled?'Enabled':'Paused or complete'} · ${escapeHTML(w.mode)}</p><small>Snapshot: ${escapeHTML(w.snapshot?.id || 'Not captured yet')}</small>`:''}
+  <form id="workflow-form">
+  <label>Implementation<select name="implementer" ${busy?'disabled':''}>${options(w?.implementer || t.agent)}</select></label>
+  <label>Independent review<select name="reviewer" ${busy?'disabled':''}>${options(w?.reviewer || 'claude')}</select></label>
+  <label>Coordinator<select name="coordinator" ${busy?'disabled':''}>${options(w?.coordinator || 'hermes-coordinator')}</select></label>
+  <label>Connection mode<select name="mode" ${busy?'disabled':''}><option value="online" ${w?.mode!=='offline'?'selected':''}>Online · preferred agents</option><option value="offline" ${w?.mode==='offline'?'selected':''}>Offline · permitted local agents</option></select></label>
+  ${['implementer','reviewer','coordinator'].map(role=>`<label>Permitted local fallback: ${role}<select name="fallback_${role}" ${busy?'disabled':''}><option value="">Wait if unavailable</option>${state.agents.filter(a=>a.local).map(a=>`<option value="${escapeHTML(a.id)}" ${w?.fallbacks?.[role]===a.id?'selected':''}>${escapeHTML(a.name)}</option>`).join('')}</select></label>`).join('')}
+  <label>Maximum implementation rounds<input type="number" name="max_rounds" min="1" max="10" value="${w?.max_rounds || 3}" ${busy?'disabled':''}></label>
+  <label><span><input type="checkbox" name="restart" ${busy?'disabled':''}> Restart implementation and discard previous approval</span></label><div class="actions"><button ${busy?'disabled':''}>${w?'Save and resume workflow':'Enable workflow'}</button><button type="button" id="pause-workflow" ${!w?.enabled?'disabled':''}>Pause workflow</button></div>
+  </form>
+  ${w?.history?.length?`<details><summary>Handoff reports (${w.history.length})</summary>${w.history.map(h=>`<div class="evidence"><small>${escapeHTML(h.stage)} · ${escapeHTML(name(h.agent))}</small><strong>${escapeHTML(h.result.summary)}</strong><small>${escapeHTML(h.result.verdict || h.result.action || '')}</small>${(h.result.findings || []).map(f=>`<p>${escapeHTML(typeof f==='string'?f:JSON.stringify(f))}</p>`).join('')}<small>Checks: ${escapeHTML(JSON.stringify(h.result.checks || []))}</small></div>`).join('')}</details>`:''}
+  <p class="muted">Assignments change between runs. Use Stop now to interrupt a runner; inspect retained work before resuming. Local adapters require setup.</p></details>
   <p class="muted">${t.exit_code===null?'No completed exit result.':'Last exit code: '+t.exit_code+' · Completion alone is not approval.'}</p>
   <details><summary>Instructions and history</summary><form id="instructions-form"><label>Current instruction<textarea name="instruction" rows="5" ${busy?'disabled':''}>${escapeHTML(t.instruction)}</textarea></label><button ${busy?'disabled':''}>Save revision</button></form>${t.requirements_history.map(r=>`<div class="evidence"><small>Revision ${r.revision}</small>${escapeHTML(r.instruction)}</div>`).join('')}</details>
   <details><summary>Evidence and review (${t.evidence.length})</summary>${t.evidence.map(e=>`<div class="evidence"><small>${escapeHTML(e.source)} · revision ${e.revision}</small>${escapeHTML(e.message)}<small>${escapeHTML(e.reference)}</small></div>`).join('')}
-  <form id="report-form"><label>Result or review findings<textarea name="message" required rows="3"></textarea></label><label>Evidence / snapshot reference<input name="reference" placeholder="Commit, snapshot ID, or evidence path"></label><div class="actions"><button>Record report</button><button type="button" id="accept" ${t.status!=='awaiting_review'?'disabled':''}>Record review acceptance</button></div></form></details>
+  <form id="report-form"><label>Result or review findings<textarea name="message" required rows="3"></textarea></label><label>Evidence / snapshot reference<input name="reference" placeholder="Commit, snapshot ID, or evidence path"></label><div class="actions"><button>Record report</button><button type="button" id="accept" ${w||t.status!=='awaiting_review'?'disabled':''}>Record review acceptance</button></div></form></details>
   <details><summary>Run history (${t.runs.length})</summary>${t.runs.map(r=>`<div class="evidence"><small>${escapeHTML(name(r.agent))} · PID ${r.pid} · revision ${r.revision}</small><code>${escapeHTML(r.id)}</code><small>${escapeHTML(r.folder)}</small><small>${r.ended?'Exited '+r.exit_code:'No terminal result recorded'}</small></div>`).join('')}</details>
   ${t.status==='interrupted'?'<details><summary>Recover interrupted task</summary><p class="notice">Inspect the recorded PID and every descendant outside ACC. Confirm none can still write to this workspace.</p><label><span><input type="checkbox" id="inspected"> I inspected the old process tree and retained files.</span></label><button id="recover">Release interrupted task</button></details>':''}
   <div class="notice">Publishing is not connected yet. Local commits and remote PRs are separate states.</div>`;
+  $('workflow-form').onsubmit = e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));const fallbacks={};for(const role of ['implementer','reviewer','coordinator']){if(data['fallback_'+role]) fallbacks[role]=data['fallback_'+role];delete data['fallback_'+role];}action('workflow',{...data,enabled:true,restart:data.restart==='on',max_rounds:Number(data.max_rounds),fallbacks});};
+  $('pause-workflow').onclick = ()=>action('workflow',{enabled:false});
   $('assigned').onchange = e => action('assign',{agent:e.target.value});
   $('start').onclick = ()=>action('start',{});
   $('stop').onclick = ()=>action('stop',{});
@@ -79,7 +97,7 @@ async function stream() {
         while((end=pending.indexOf('\n\n'))!==-1) {
           const frame=pending.slice(0,end);pending=pending.slice(end+2);
           const line=frame.split('\n').find(l=>l.startsWith('data: '));
-          if(line) {const event=JSON.parse(line.slice(6));cursor=Math.max(cursor,event.seq);if(!refreshTimer) refreshTimer=setTimeout(()=>{refreshTimer=null;refresh().catch(e=>error(e.message));},100);}
+          if(line) {const event=JSON.parse(line.slice(6));eventHistory.set(event.seq,event);cursor=Math.max(cursor,event.seq);if(!refreshTimer) refreshTimer=setTimeout(()=>{refreshTimer=null;refresh().catch(e=>error(e.message));},100);}
         }
       }
     } catch(e) {
