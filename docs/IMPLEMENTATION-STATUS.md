@@ -1,5 +1,11 @@
 # Implementation status — September 16, 2026
 
+## Current product work: task identity and command-center views
+
+User-visible tasks now receive permanent ACC-wide sequential numbers while retaining UUID API keys. Existing state databases migrate in creation order, and internal planner/transcription runs do not consume numbers. The dashboard has linked Tasks and Agents views; selecting a task from either opens the same task detail and history. Task numbers also appear in conversation links, dependency choices, events, publication titles, PR descriptions, and commit trailers.
+
+Searchable archive/export, globally numbered child/recovery tasks, the project-level Online/Offline switch, and the full replacement dialog remain follow-up work.
+
 ## Current follow-up: laptop readiness (v0.4)
 
 Saved Linux/Windows launchers, setup diagnostics and MCP configuration generation are implemented. The dashboard now shows GitHub PR/commit activity, stale connection state, and a publication preview. Reviewed managed tasks can be committed and pushed to the configured source branch, with a PR created or reused. No automatic merge is provided. Local Git remains observed every second; GitHub refresh defaults to every 30 seconds and supports manual refresh.

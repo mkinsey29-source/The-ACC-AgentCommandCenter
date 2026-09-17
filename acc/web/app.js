@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let token = new URLSearchParams(location.hash.slice(1)).get('token') || sessionStorage.getItem('acc-token') || '';
 history.replaceState(null, '', location.pathname);
-let state = null, selected = null, cursor = 0, refreshTimer = null, streamController = null, eventHistory = new Map();
+let state = null, selected = null, workView = 'tasks', cursor = 0, refreshTimer = null, streamController = null, eventHistory = new Map();
 const labels = {launching:'Launching', queued:'Queued', running:'Working', stopping:'Stopping', interrupted:'Needs inspection', paused:'Paused', failed:'Failed', awaiting_review:'Needs review', accepted:'Accepted', publishing:'Publishing'};
 function error(message) { for (const id of ['error','task-error']) { $(id).textContent = message || ''; $(id).hidden = !message; } }
 async function api(path, body) {
@@ -13,6 +13,7 @@ async function api(path, body) {
   return data;
 }
 function name(id) { return state?.agents.find(a => a.id === id)?.name || id || 'None'; }
+function taskLabel(t) { return `Task ${t.task_number}`; }
 function options(value) { return state.agents.map(a => `<option value="${escapeHTML(a.id)}" ${a.id===value?'selected':''} ${!a.available?'disabled':''}>${escapeHTML(a.name)}${a.available?'':' · not configured'}</option>`).join(''); }
 async function refresh() {
   state = await api('state');
@@ -29,13 +30,26 @@ function render() {
   const active = state.tasks.filter(t=>t.status==='running').length;
   const accepted = state.tasks.filter(t=>t.status==='accepted').length;
   $('counts').textContent = `${state.tasks.length} tasks · ${active} working · ${accepted} accepted`;
-  $('tasks').innerHTML = state.tasks.length ? state.tasks.map(t => `<button class="task ${selected===t.id?'selected':''}" data-task="${t.id}"><div class="top"><strong>${escapeHTML(t.title)}</strong><span class="badge">${labels[t.status] || escapeHTML(t.status)}</span></div><small>Assigned: ${escapeHTML(name(t.agent))} · Active: ${escapeHTML(name(t.active_agent))}</small><small>${escapeHTML(t.activity)}</small></button>`).join('') : '<div class="empty">No tasks yet. Add your first instruction, or connect the orchestrator bridge.</div>';
+  renderWorkList();
   $('changes').innerHTML = !state.git.available ? escapeHTML(state.git.message) : state.git.files.length ? state.git.files.map(f=>`<div class="file"><code>${escapeHTML(f.status)}</code> ${escapeHTML(f.path)} <span class="muted">· origin not inferred</span></div>`).join('') : '<p class="muted">Working tree is clean.</p>';
   $('commits').innerHTML = (state.git.commits || []).map(c=>`<div class="commit"><code>${escapeHTML(c.sha)}</code> ${escapeHTML(c.subject)}</div>`).join('') || '<p class="muted">No commits.</p>';
   $('events').innerHTML = state.events.length ? [...state.events].reverse().map(e=>`<div class="event"><time>${new Date(e.at*1000).toLocaleTimeString()}</time><span class="kind">${escapeHTML(e.kind.replaceAll('_',' '))}</span><pre>${escapeHTML(e.data.message || '')}</pre></div>`).join('') : '<p class="muted">No events yet.</p>';
   $('new-agent').innerHTML = options($('new-agent').value || 'local-command');
   // Preserve open input fields while events continue arriving.
   if (!$('detail').contains(document.activeElement) || document.activeElement.tagName === 'BUTTON') renderDetail();
+}
+function renderWorkList() {
+  $('view-tasks').classList.toggle('selected',workView==='tasks');
+  $('view-agents').classList.toggle('selected',workView==='agents');
+  if(workView==='tasks') {
+    $('tasks').innerHTML = state.tasks.length ? [...state.tasks].sort((a,b)=>b.task_number-a.task_number).map(t => `<button class="task ${selected===t.id?'selected':''}" data-task="${t.id}"><div class="top"><strong><span class="task-number">${escapeHTML(taskLabel(t))}</span> ${escapeHTML(t.title)}</strong><span class="badge">${labels[t.status] || escapeHTML(t.status)}</span></div><small>Assigned: ${escapeHTML(name(t.agent))} · Active: ${escapeHTML(name(t.active_agent))}</small><small>${escapeHTML(t.activity)}</small></button>`).join('') : '<div class="empty">No tasks yet. Add your first instruction, or connect the orchestrator bridge.</div>';
+    return;
+  }
+  $('tasks').innerHTML = state.agents.map(agent=>{
+    const assigned=state.tasks.filter(t=>t.agent===agent.id||t.active_agent===agent.id||Object.values(t.workflow||{}).includes(agent.id)).sort((a,b)=>b.task_number-a.task_number);
+    const active=assigned.find(t=>t.active_agent===agent.id&&['launching','running','stopping','processing_result','publishing'].includes(t.status));
+    return `<article class="agent-card"><div class="top"><strong>${escapeHTML(agent.name)}</strong><span class="badge">${agent.available?'Available':'Not configured'}</span></div><small>${active?`Working on ${escapeHTML(taskLabel(active))}: ${escapeHTML(active.title)}`:'No active task'} · ${assigned.length} linked</small><div class="agent-tasks">${assigned.slice(0,6).map(t=>`<button data-task="${t.id}" class="${selected===t.id?'selected':''}"><span>${escapeHTML(taskLabel(t))}</span> ${escapeHTML(t.title)} <small>${escapeHTML(labels[t.status]||t.status)}</small></button>`).join('')||'<span class="muted">No task history for this agent.</span>'}</div></article>`;
+  }).join('');
 }
 function renderDetail() {
   const t = [...state.tasks,...(state.conversation?.background_runs||[])].find(t=>t.id===selected);
@@ -49,14 +63,14 @@ function renderDetail() {
   const busy = ['launching','running','stopping','processing_result','publishing','interrupted'].includes(t.status);
   const w = t.workflow;
   const available = state.agents.find(a=>a.id===t.agent)?.available;
-  $('detail').innerHTML = `<small>REQUIREMENTS REVISION ${t.revision} · ${escapeHTML(labels[t.status])}</small><h2>${escapeHTML(t.title)}</h2><div class="instruction">${escapeHTML(t.instruction)}</div>
+  $('detail').innerHTML = `<small>${escapeHTML(taskLabel(t).toUpperCase())} · REQUIREMENTS REVISION ${t.revision} · ${escapeHTML(labels[t.status])}</small><h2>${escapeHTML(t.title)}</h2><div class="instruction">${escapeHTML(t.instruction)}</div>
   <label>Assigned worker<select id="assigned" ${busy||w?'disabled':''}>${options(t.agent)}</select></label>
   <div class="current"><strong>Active: ${escapeHTML(name(t.active_agent))}</strong><small>${escapeHTML(t.activity)}</small><small>Next: ${escapeHTML(t.next_step)}</small></div>
   ${t.pending_switch?`<div class="notice">Waiting for the current step to finish, then switching ${escapeHTML(t.pending_switch.role)} to ${escapeHTML(name(t.pending_switch.agent))}.</div>`:''}
   ${state.recovery_required?'<div class="notice">An interrupted runner needs process-tree inspection before this workspace can run new work.</div>':''}
   <div class="actions"><button id="start" ${busy||w||!available||t.status==='accepted'||state.recovery_required?'disabled':''}>${t.runs.length?'Run again':'Start task'}</button><button id="stop" ${!['running','stopping'].includes(t.status)?'disabled':''}>Stop now</button></div>
   ${w && !['accepted','publishing','interrupted'].includes(t.status)?`<form id="switch-form"><label>Change role<select name="role"><option value="implementer">Implementation</option><option value="reviewer">Review</option><option value="coordinator">Coordination</option></select></label><label>Use agent<select name="agent">${options(w.implementer)}</select></label><button ${t.pending_switch?'disabled':''}>Switch after current step</button><p class="muted">The current step finishes first. Its files and reports stay available to the next agent.</p></form>`:''}
-  <details><summary>Priority and prerequisites</summary><form id="schedule-form"><label>Priority (higher runs first)<input name="priority" type="number" min="0" max="100" value="${t.priority??50}" ${busy?'disabled':''}></label><label>Wait for accepted tasks<select name="depends_on" multiple ${busy?'disabled':''}>${state.tasks.filter(x=>x.id!==t.id).map(x=>`<option value="${x.id}" ${(t.depends_on||[]).includes(x.id)?'selected':''}>${escapeHTML(x.title)}</option>`).join('')}</select></label><button ${busy?'disabled':''}>Save schedule</button></form></details>
+  <details><summary>Priority and prerequisites</summary><form id="schedule-form"><label>Priority (higher runs first)<input name="priority" type="number" min="0" max="100" value="${t.priority??50}" ${busy?'disabled':''}></label><label>Wait for accepted tasks<select name="depends_on" multiple ${busy?'disabled':''}>${state.tasks.filter(x=>x.id!==t.id).map(x=>`<option value="${x.id}" ${(t.depends_on||[]).includes(x.id)?'selected':''}>${escapeHTML(taskLabel(x))}: ${escapeHTML(x.title)}</option>`).join('')}</select></label><button ${busy?'disabled':''}>Save schedule</button></form></details>
   <details ${w?'open':''}><summary>Background coordination${w?' · '+escapeHTML(w.phase):''}</summary>
   ${w?`<p><strong>${escapeHTML(w.stage)} · round ${w.round}/${w.max_rounds}</strong><br>${w.enabled?'Enabled':'Paused or complete'} · ${escapeHTML(w.mode)}</p><small>Snapshot: ${escapeHTML(w.snapshot?.id || 'Not captured yet')}</small>`:''}
   <form id="workflow-form">
@@ -127,6 +141,8 @@ async function connect() {
   catch(e){$('connect-panel').hidden=false;error(e.message);}
 }
 $('tasks').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;render();renderDetail();}};
+$('view-tasks').onclick=()=>{workView='tasks';render();};
+$('view-agents').onclick=()=>{workView='agents';render();};
 $('connect-form').onsubmit=e=>{e.preventDefault();token=$('token').value.trim();connect();};
 $('new-task').onclick=()=>{if(!state){error('Connect to the local coordinator first.');return;} $('task-dialog').showModal();};
 $('close-dialog').onclick=()=>$('task-dialog').close();
@@ -206,7 +222,7 @@ function renderConversation(){
   $('orchestrator-status').textContent=c.held ? 'Needs attention: '+c.held : owner ? `${name(owner)} is handling your messages.` : c.pending ? `${c.pending} saved message(s) waiting for an orchestrator.` : 'Ready for your next message. Ideas remain discussion; requested work appears in the work plan.';
   const box=$('messages'), nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
   for(const m of c.messages)messageHistory.set(m.id,m);
-  const html=[...messageHistory.values()].sort((a,b)=>a.seq-b.seq).map(m=>`<article class="message ${m.role}"><small>${m.role==='user'?'You':escapeHTML(name(m.source))} · ${new Date(m.at*1000).toLocaleTimeString()}${m.status==='pending'?' · saved, waiting':''}</small><div>${escapeHTML(m.text)}</div>${m.data?.task_ids?.length?`<small>Linked tasks: ${m.data.task_ids.map(id=>`<button class="task-link" data-task="${escapeHTML(id)}">${escapeHTML(state.tasks.find(t=>t.id===id)?.title||id)}</button>`).join(' ')}</small>`:''}</article>`).join('');
+  const html=[...messageHistory.values()].sort((a,b)=>a.seq-b.seq).map(m=>`<article class="message ${m.role}"><small>${m.role==='user'?'You':escapeHTML(name(m.source))} · ${new Date(m.at*1000).toLocaleTimeString()}${m.status==='pending'?' · saved, waiting':''}</small><div>${escapeHTML(m.text)}</div>${m.data?.task_ids?.length?`<small>Linked tasks: ${m.data.task_ids.map(id=>{const task=state.tasks.find(t=>t.id===id);return `<button class="task-link" data-task="${escapeHTML(id)}">${task?escapeHTML(taskLabel(task)+': '+task.title):escapeHTML(id)}</button>`;}).join(' ')}</small>`:''}</article>`).join('');
   if(box.innerHTML!==html){box.innerHTML=html||'<p class="muted">Your conversation starts here. Messages from the desktop orchestrator appear here when it saves them through MCP.</p>';if(nearBottom)box.scrollTop=box.scrollHeight;}
   $('background-runs').innerHTML=(c.background_runs||[]).map(t=>`<button data-task="${escapeHTML(t.id)}">${escapeHTML(t.title)} · ${escapeHTML(t.status)} · inspect / stop</button>`).join('');
   $('retry-conversation').hidden=!c.held;

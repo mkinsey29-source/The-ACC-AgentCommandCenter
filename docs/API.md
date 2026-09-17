@@ -15,6 +15,8 @@ All API calls require `Authorization: Bearer <local token>`. Mutations require J
 | POST `/api/tasks/{id}/review` | `{message, reference, revision, run_id}`; only accept the current review-ready run. Reference identifies the externally reviewed snapshot. |
 | POST `/api/tasks/{id}/recover` | `{process_tree_inspected:true}`; explicit operator acknowledgement after external inspection. Reject if the recorded parent PID still exists. |
 
+Every user-visible task also has a permanent positive `task_number`. The human label is `Task N`; the UUID `id` remains the API key. Existing databases assign numbers once in original row order, internal conversation/transcription runs receive no number, and the next number is never reduced or reused.
+
 Error responses contain `error`: 400 invalid request, 401/403 authentication/origin, 404 missing task/endpoint, 409 conflicting state. Mutation retries are not a general idempotency API yet: do not blindly replay creation, start, or report calls after a network timeout. Read state and reconcile first.
 
 The SSE stream is ordered and replayable within the local database. Local Git reconciliation checks every second; it is not yet an operating-system filesystem notification adapter. A Git change event does not claim an agent authored it. GitHub refresh uses a configurable 15–300 second interval, default 30, with a manual refresh control and last-success timestamp.

@@ -238,8 +238,10 @@ class Conversation:
             response = {'reply': reply, 'task_ids': [t['id'] for t in tasks], 'message_ids': ids}
             with self.c.store.connect() as db:
                 for task in tasks:
+                    self.c.store.ensure_task_number(db, task)
                     db.execute('INSERT OR REPLACE INTO tasks VALUES (?,?)', (task['id'], json.dumps(task)))
-                    self.event(db, 'conversation_task', {'message': task['title'], 'task_id': task['id'], 'revision': task['revision']})
+                    self.event(db, 'conversation_task', {'message': task['title'], 'task_id': task['id'],
+                               'task_number': task['task_number'], 'revision': task['revision']})
                 for mid in ids:
                     db.execute("UPDATE messages SET status='handled', data=? WHERE id=? AND status='pending'",
                                (json.dumps({'turn': token, 'task_ids': response['task_ids']}), mid))
