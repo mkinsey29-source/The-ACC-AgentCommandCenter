@@ -56,6 +56,15 @@ CONVERSATION_TOOLS = [
 ]
 TOOLS.extend(CONVERSATION_TOOLS)
 TOOLS.extend([
+    ('acc_set_project_mode', 'Set the authoritative project-wide assignment mode. Offline blocks new cloud work and lets an already-running supervised step reach a safe boundary.',
+     {'mode': {'type': 'string', 'enum': ['online', 'offline']}}, ['mode']),
+    ('acc_search_archive', 'Search permanent task history by text, status, agent, or task-number range.',
+     {'q': {'type': 'string'}, 'status': {'type': 'string'}, 'agent': {'type': 'string'},
+      'number_from': {'type': 'integer'}, 'number_to': {'type': 'integer'}, 'limit': {'type': 'integer'}}, []),
+    ('acc_export_archive', 'Export a Markdown task archive and consistent SQLite backup to an existing absolute local directory.',
+     {'directory': {'type': 'string'}}, ['directory']),
+    ('acc_create_recovery_handoff', 'Create a numbered successor task from known state after an unavailable worker has stopped.',
+     {'task_id': {'type': 'string'}, 'agent': {'type': 'string'}, 'reason': {'type': 'string'}}, ['task_id', 'agent', 'reason']),
     ('acc_switch_agent', 'Request a role change after the current step ends. Completed files and reports are retained; does not interrupt the runner.',
      {'task_id': {'type': 'string'}, 'role': {'type': 'string', 'enum': ['implementer', 'reviewer', 'coordinator']}, 'agent': {'type': 'string'}, 'request_id': {'type': 'string'}}, ['task_id', 'role', 'agent', 'request_id']),
     ('acc_schedule_task', 'Set priority (higher first) and tasks that must be accepted before this task runs. Rejects dependency cycles.',
@@ -80,7 +89,7 @@ def dispatch(message, url, token):
         supported = ('2024-11-05', '2025-03-26', '2025-06-18')
         requested = message.get('params', {}).get('protocolVersion')
         return result({'protocolVersion': requested if requested in supported else supported[-1],
-                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.4.0'}})
+                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.5.0'}})
     if method == 'ping':
         return result({})
     if method == 'tools/list':
@@ -106,6 +115,13 @@ def dispatch(message, url, token):
             path, data = '/api/conversation/' + name.removeprefix('acc_conversation_'), args
         elif name.startswith('acc_github_'):
             path, data = '/api/github/' + name.removeprefix('acc_github_'), args
+        elif name == 'acc_set_project_mode':
+            path, data = '/api/project/mode', args
+        elif name == 'acc_search_archive':
+            from urllib.parse import urlencode
+            path, data = '/api/archive?' + urlencode(args), None
+        elif name == 'acc_export_archive':
+            path, data = '/api/archive/export', args
         elif name == 'acc_create_task':
             path, data = '/api/tasks', args
         else:
@@ -115,7 +131,8 @@ def dispatch(message, url, token):
             action = {'acc_start_task': 'start', 'acc_stop_task': 'stop', 'acc_assign_task': 'assign',
                       'acc_update_instructions': 'instructions', 'acc_report': 'report', 'acc_record_review': 'review',
                       'acc_configure_workflow': 'workflow', 'acc_switch_agent': 'switch', 'acc_schedule_task': 'schedule',
-                      'acc_publish_preview': 'publish-preview', 'acc_publish_task': 'publish'}[name]
+                      'acc_publish_preview': 'publish-preview', 'acc_publish_task': 'publish',
+                      'acc_create_recovery_handoff': 'recovery-handoff'}[name]
             path, data = f'/api/tasks/{task_id}/{action}', args
         request = urllib.request.Request(url + path, data=None if data is None else json.dumps(data).encode(),
                                          headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})

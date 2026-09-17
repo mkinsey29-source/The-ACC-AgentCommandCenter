@@ -65,6 +65,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, {'messages': self.server.coordinator.conversation.messages(after)})
                 except ValueError as exc:
                     return self.reply(400, {'error': str(exc)})
+            if url.path == '/api/archive':
+                query = {key: values[0] for key, values in parse_qs(url.query).items()}
+                return self.reply(200, self.server.coordinator.archive.search(query))
             if url.path == '/api/events':
                 try:
                     cursor = int(parse_qs(url.query).get('after', ['0'])[0])
@@ -135,6 +138,10 @@ class Handler(BaseHTTPRequestHandler):
                 if parts[2] not in routes:
                     return self.reply(404, {'error': 'Unknown GitHub operation.'})
                 return self.reply(200, routes[parts[2]](payload))
+            if parts == ['api', 'project', 'mode']:
+                return self.reply(200, c.controls.set_mode(payload))
+            if parts == ['api', 'archive', 'export']:
+                return self.reply(200, c.archive.export(payload))
             if parts == ['api', 'tasks']:
                 return self.reply(201, c.create(payload))
             if len(parts) != 4 or parts[:2] != ['api', 'tasks']:
@@ -152,6 +159,7 @@ class Handler(BaseHTTPRequestHandler):
                 'workflow': lambda: c.workflows.configure(task, payload),
                 'recover': lambda: c.recover(task) if payload.get('process_tree_inspected') is True else
                            (_ for _ in ()).throw(ValueError('Explicit process-tree inspection acknowledgement required.')),
+                'recovery-handoff': lambda: c.controls.recovery_handoff(task, payload),
             }
             if action not in routes:
                 return self.reply(404, {'error': 'Unknown action.'})

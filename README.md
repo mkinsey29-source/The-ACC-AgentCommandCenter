@@ -57,6 +57,8 @@ Use the included Hermes connector to run implementation → coordinator → inde
 
 See the [complete Hermes setup and behavior guide](docs/HERMES-CONNECTOR.md), [example agent profiles](examples/hermes-agents.json), and [Linux background service template](examples/acc.service). The guide includes Windows startup, MCP setup, the actual verification performed, and remaining host checks.
 
+For Google Antigravity, use the [MCP-first interactive integration contract](docs/ANTIGRAVITY-INTEGRATION.md). ACC does not claim background Antigravity control until the installed host exposes and passes a supported noninteractive lifecycle.
+
 ## First concrete task
 
 For a model-free verification, open **Advanced task controls** and create a task assigned to **Local command**:

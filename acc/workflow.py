@@ -90,7 +90,8 @@ class Workflows:
         role = {'implement': 'implementer', 'review': 'reviewer', 'coordinate': 'coordinator'}[workflow['stage']]
         preferred = workflow[role]
         fallback = workflow['fallbacks'].get(role)
-        if workflow['mode'] == 'offline' and self.c.agents[preferred].get('local') is not True:
+        offline = self.c.controls.mode() == 'offline' or workflow['mode'] == 'offline'
+        if offline and self.c.agents[preferred].get('local') is not True:
             if not fallback:
                 raise ValueError('Offline: no permitted local adapter for ' + role + '. Waiting for connectivity or assignment.')
             return fallback

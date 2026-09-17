@@ -1,5 +1,15 @@
 # Implementation status — September 16, 2026
 
+## Current product work: archive, global mode, and recovery
+
+ACC now provides task-number/text/status/agent archive search, explicit Markdown plus SQLite backup export, and one authoritative project-wide Online/Offline setting. Offline blocks new cloud-model starts across direct tasks, managed workflows, and local conversation routing; a supervised cloud step already running is allowed to reach a safe boundary without introducing another writer.
+
+Unavailable workers can be replaced only after the active writer has stopped. ACC creates a new numbered recovery task containing the original requirement, current revision/status/phase, baseline and current Git facts, changed files, recent runs, last report, failure reason, and an inspection warning. The UI keeps these operations under contingency controls.
+
+Each managed implementation, independent-review, and coordination run also creates its own numbered workflow-step record linked to the parent task. These records are visible and searchable but cannot be launched or scheduled independently.
+
+The Antigravity integration is documented as an MCP interactive-client contract. Live host discovery and any future background adapter remain laptop checks because no supported installed noninteractive Antigravity CLI/API has been demonstrated.
+
 ## Current product work: task identity and command-center views
 
 User-visible tasks now receive permanent ACC-wide sequential numbers while retaining UUID API keys. Existing state databases migrate in creation order, and internal planner/transcription runs do not consume numbers. The dashboard has linked Tasks and Agents views; selecting a task from either opens the same task detail and history. Task numbers also appear in conversation links, dependency choices, events, publication titles, PR descriptions, and commit trailers.
