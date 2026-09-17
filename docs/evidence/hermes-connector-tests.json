@@ -1,0 +1,40 @@
+{
+  "date": "2026-09-16",
+  "base_commit": "28a4f083d3c754cdbdb94fd6482b46d0ef95fef8",
+  "platform": "Linux",
+  "python": "3.12.14",
+  "suite": {
+    "command": "python -m unittest discover -s tests -v",
+    "tests_run": 34,
+    "passed": 34,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "duration_seconds": 12.397,
+    "optional_mcp_sdk": "2.2.0"
+  },
+  "checks": {
+    "frontend_javascript_syntax": "passed",
+    "python_compilation": "passed",
+    "git_diff_check": "passed",
+    "previous_review_handoff_replay": "passed"
+  },
+  "exercised": [
+    "Sequential implement-coordinate-review-coordinate using actual subprocesses",
+    "Full correction cycle through actual ACC Hermes CLI adapter with scripted Hermes JSONL output",
+    "Independent SDK stdio client to HTTP coordinator to managed workflow acceptance",
+    "Snapshot/project drift, stale results, missing result, and premature approval rejection",
+    "Correction limit escalation; pause and resume across restart",
+    "Offline selection, preferred-agent return, and explicit local coordinator fallback",
+    "Launch intent before spawn, crash recovery blocking, and retry after stop failure",
+    "Reviewer reassignment invalidates previous review; repeated enable cannot restart accepted work"
+  ],
+  "not_verified": [
+    "Installed Hermes runtime and real model inference",
+    "Provider credentials or model tool-use quality",
+    "Native Windows process containment or startup",
+    "Browser clicks or visual layout",
+    "Automatic internet detection/active takeover (not implemented)"
+  ],
+  "model_responses": "Scripted fixtures; no paid calls or real local-model inference. The earlier independent-agent exercise remains separately documented."
+}

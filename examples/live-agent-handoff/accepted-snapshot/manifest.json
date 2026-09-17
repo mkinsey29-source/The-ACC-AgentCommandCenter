@@ -1,0 +1,13 @@
+{
+  "snapshot_id": "sha256:344602110adb3002d006baef3092cd0c52b27cf718bb73c34e211ae0a27b64d9",
+  "entries": {
+    "staffing.py": {
+      "sha256": "16150cb7a6e7b061c52bdd9782a807177089a29b170021afafff1092662e3dfa",
+      "executable": false
+    },
+    "test_staffing.py": {
+      "sha256": "fc9b15bd08d0bddf2258d916556f462af4a2741cc1f492beca7ec3fc87675e83",
+      "executable": false
+    }
+  }
+}

@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+.local/
+.acc/
+*.sqlite3*
+node_modules/
+.env

@@ -1,0 +1,2 @@
+Exhaustive two-level oracle: 1936 valid allocations and 2160 excessive-training cases passed; all 4096 cases preserved inputs.
+Additional independent checks: 66 invalid argument cases, arbitrary-precision integers, and shared-input aliasing passed.

@@ -1,0 +1,26 @@
+{
+  "snapshot_id": "sha256:edcbb60e68b29865a261387e8beac3bdf8ac5cb44917aeccf6c86ca5b79b4765",
+  "implementer_checks": 0,
+  "reviewer_checks": 0,
+  "accepted_status": "accepted",
+  "stale_run_rejected": {
+    "error": "Review does not match the current run and requirement revision."
+  },
+  "wrong_revision_rejected": {
+    "error": "Review does not match the current run and requirement revision."
+  },
+  "negative_control_status": "failed",
+  "negative_control_exit": 1,
+  "failed_run_approval_rejected": {
+    "error": "Only completed runs awaiting review can be accepted."
+  },
+  "snapshot_unchanged": true,
+  "stdio_tool_calls": {
+    "acc_create_task": 3,
+    "acc_start_task": 4,
+    "acc_state": 6,
+    "acc_record_review": 4,
+    "acc_report": 1
+  },
+  "limitation": "Replays real-agent artifacts. Agent delegation, snapshot creation, and routing are external to ACC."
+}

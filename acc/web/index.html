@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ACC · Agent Command Center</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><div class="brand"><b>ACC</b><div>Agent Command Center<small id="project">Connect to your local workspace</small></div></div><div class="header-actions"><span id="connection" class="badge">Disconnected</span><button id="new-task">Advanced task controls</button></div></header>
+<section id="connect-panel" class="connect"><form id="connect-form"><label>Local session token<input id="token" type="password" autocomplete="off" required placeholder="Use the link printed by ACC, or paste its token"></label><button>Connect</button></form></section>
+<div id="error" role="alert" hidden></div>
+<div class="context"><span id="branch">Local Git</span><span>Local commands stream directly</span><span id="git-status">GitHub: checking connection</span><span id="counts"></span></div>
+<section class="conversation-panel">
+ <div class="section-title"><div><h1>Conversation</h1><p id="orchestrator-status" class="muted">Your instructions and decisions, in one place.</p></div><button id="retry-conversation" hidden>Retry saved messages</button></div>
+ <div id="messages" class="messages" aria-live="polite"><p class="muted">Tell your orchestrator what you want to do, or save an idea for later.</p></div>
+ <button id="load-history" type="button">Load earlier conversation</button>
+ <div id="outbox-status" class="muted" role="status"></div>
+ <form id="conversation-form"><label for="message">What are you thinking?</label><textarea id="message" rows="3" maxlength="50000" placeholder="Describe what you want, ask a question, or save an idea…"></textarea><div class="actions"><button class="primary" id="send-message">Send</button><button type="button" id="record-voice">Record voice</button><span id="voice-status" class="muted"></span></div></form>
+ <div id="recordings"></div><div id="background-runs"></div>
+ <details id="conversation-settings"><summary>Orchestrator settings</summary><p class="muted">Set your agents once. ChatGPT Remote can claim the conversation through the desktop MCP connection. When no external session owns it, these adapters handle your messages.</p><form id="routing-form"><div id="routing-fields"></div><button>Save routing</button></form></details>
+</section>
+<main>
+ <section class="work">
+  <div class="section-title"><h1>Work plan</h1><span class="muted">Local workspace · one writer</span></div>
+  <div id="tasks" class="tasks"><div class="empty">Connect to see tasks. No sample work is shown.</div></div>
+  <section class="git-panel"><div class="section-title"><h2>Local changes</h2><span class="muted">Observed every second</span></div><div id="changes" class="muted">Waiting for Git state.</div><details><summary>Recent local commits</summary><div id="commits"></div></details></section>
+ <section class="git-panel"><div class="section-title"><h2>GitHub</h2><button id="github-refresh">Refresh</button></div><div id="github-activity"></div><details><summary>GitHub settings</summary><form id="github-settings"><label>Remote<input name="remote" value="origin" required></label><label>Source branch<input name="source" value="temporary" required></label><label>PR base<input name="base" value="main" required></label><label>Refresh seconds<input name="interval" type="number" min="15" max="300" value="30"></label><label><span><input type="checkbox" name="enabled" checked> Refresh GitHub activity</span></label><button>Save GitHub settings</button></form></details></section>
+ </section>
+ <aside id="detail"><div class="empty"><h2>Your instructions, clearly tracked.</h2><p>Send a message above or through the orchestrator bridge. Select it to inspect instructions, assignment, output, and evidence.</p></div></aside>
+</main>
+<section class="feed"><div class="section-title"><h2>Activity</h2><span class="muted">Observed operations and attributed reports</span></div><div id="events"><p class="muted">No events loaded.</p></div></section>
+<footer><span>ACC 0.4 · Project command center</span><span>Sequential handoffs · Fixed review snapshots · Configure Hermes and worker models on this computer</span></footer>
+<dialog id="publish-dialog"><div id="publish-content"></div><div class="actions"><button id="publish-confirm" class="primary">Publish to GitHub</button><button id="publish-close">Close</button></div></dialog>
+<dialog id="task-dialog"><form id="task-form"><div class="section-title"><h2>New task</h2><button type="button" id="close-dialog" aria-label="Close">×</button></div><p id="task-error" role="alert" hidden></p><label>Task title<input name="title" required maxlength="200" placeholder="Verify specialist staffing"></label><label>Your instruction<textarea name="instruction" required rows="5" placeholder="What should be done, preserved, and checked?"></textarea></label><label>Assigned worker<select name="agent" id="new-agent"></select></label><label id="argv-label">Command arguments (JSON array)<textarea name="argv" rows="3" placeholder='["python", "-m", "unittest", "discover", "-s", "tests"]'></textarea></label><p class="muted">Local command executes the exact argument list in this project folder. It does not call an AI model. Creating a task does not start it.</p><button class="primary">Create task</button></form></dialog>
+</body></html>
