@@ -1,4 +1,4 @@
-# Local API and event contract — v0.4
+# Local API and event contract — v0.5
 
 All API calls require `Authorization: Bearer <local token>`. Mutations require JSON. The server accepts only localhost/127.0.0.1 Host values for its bound port and rejects foreign browser origins. No cross-origin access is enabled. The token is a local control credential, not an agent-provider key.
 
@@ -16,6 +16,15 @@ All API calls require `Authorization: Bearer <local token>`. Mutations require J
 | POST `/api/tasks/{id}/recover` | `{process_tree_inspected:true}`; explicit operator acknowledgement after external inspection. Reject if the recorded parent PID still exists. |
 
 Every user-visible task also has a permanent positive `task_number`. The human label is `Task N`; the UUID `id` remains the API key. Existing databases assign numbers once in original row order, internal conversation/transcription runs receive no number, and the next number is never reduced or reused.
+
+Managed implementation, review, and coordination runs are stored as numbered `workflow_step` child records with `parent_task_id` and `parent_task_number`. They are history records controlled by the parent and cannot be started or scheduled directly. Recovery successors use `task_kind: recovery` and the same parent fields.
+
+Additional v0.5 operations:
+
+- `GET /api/archive` searches by `q`, `status`, `agent`, `number_from`, `number_to`, and `limit`.
+- `POST /api/archive/export` writes a Markdown archive and consistent SQLite backup to an existing absolute local directory.
+- `POST /api/project/mode` sets the authoritative project-wide `online` or `offline` assignment policy.
+- `POST /api/tasks/{id}/recovery-handoff` creates a numbered successor after the prior writer has stopped.
 
 Error responses contain `error`: 400 invalid request, 401/403 authentication/origin, 404 missing task/endpoint, 409 conflicting state. Mutation retries are not a general idempotency API yet: do not blindly replay creation, start, or report calls after a network timeout. Read state and reconcile first.
 

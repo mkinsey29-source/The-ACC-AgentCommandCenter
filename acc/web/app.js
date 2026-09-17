@@ -4,7 +4,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 let token = new URLSearchParams(location.hash.slice(1)).get('token') || sessionStorage.getItem('acc-token') || '';
 history.replaceState(null, '', location.pathname);
 let state = null, selected = null, workView = 'tasks', cursor = 0, refreshTimer = null, streamController = null, eventHistory = new Map();
-const labels = {launching:'Launching', queued:'Queued', running:'Working', stopping:'Stopping', interrupted:'Needs inspection', paused:'Paused', failed:'Failed', awaiting_review:'Needs review', accepted:'Accepted', publishing:'Publishing'};
+const labels = {launching:'Launching', queued:'Queued', running:'Working', stopping:'Stopping', interrupted:'Needs inspection', paused:'Paused', failed:'Failed', completed:'Completed', awaiting_review:'Needs review', accepted:'Accepted', publishing:'Publishing'};
 function error(message) { for (const id of ['error','task-error']) { $(id).textContent = message || ''; $(id).hidden = !message; } }
 async function api(path, body) {
   const response = await fetch('/api/' + path, {method: body === undefined ? 'GET' : 'POST', headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
@@ -26,6 +26,7 @@ function render() {
   renderConversation();
   renderGitHub();
   $('project').textContent = state.project;
+  $('project-mode').value = state.project_mode || 'online';
   $('branch').textContent = 'Branch: ' + (state.git.branch || 'unavailable');
   const active = state.tasks.filter(t=>t.status==='running').length;
   const accepted = state.tasks.filter(t=>t.status==='accepted').length;
@@ -61,16 +62,17 @@ function renderDetail() {
     return;
   }
   const busy = ['launching','running','stopping','processing_result','publishing','interrupted'].includes(t.status);
+  const workflowRecord = t.task_kind === 'workflow_step';
   const w = t.workflow;
   const available = state.agents.find(a=>a.id===t.agent)?.available;
   $('detail').innerHTML = `<small>${escapeHTML(taskLabel(t).toUpperCase())} · REQUIREMENTS REVISION ${t.revision} · ${escapeHTML(labels[t.status])}</small><h2>${escapeHTML(t.title)}</h2><div class="instruction">${escapeHTML(t.instruction)}</div>
-  <label>Assigned worker<select id="assigned" ${busy||w?'disabled':''}>${options(t.agent)}</select></label>
+  <label>Assigned worker<select id="assigned" ${workflowRecord||busy||w?'disabled':''}>${options(t.agent)}</select></label>
   <div class="current"><strong>Active: ${escapeHTML(name(t.active_agent))}</strong><small>${escapeHTML(t.activity)}</small><small>Next: ${escapeHTML(t.next_step)}</small></div>
   ${t.pending_switch?`<div class="notice">Waiting for the current step to finish, then switching ${escapeHTML(t.pending_switch.role)} to ${escapeHTML(name(t.pending_switch.agent))}.</div>`:''}
   ${state.recovery_required?'<div class="notice">An interrupted runner needs process-tree inspection before this workspace can run new work.</div>':''}
-  <div class="actions"><button id="start" ${busy||w||!available||t.status==='accepted'||state.recovery_required?'disabled':''}>${t.runs.length?'Run again':'Start task'}</button><button id="stop" ${!['running','stopping'].includes(t.status)?'disabled':''}>Stop now</button></div>
+  ${workflowRecord?`<div class="notice">This ${escapeHTML(t.workflow_stage)} record belongs to Task ${t.parent_task_number}. Run and control it through the parent task.</div>`:''}<div class="actions"><button id="start" ${workflowRecord||busy||w||!available||t.status==='accepted'||state.recovery_required?'disabled':''}>${t.runs.length?'Run again':'Start task'}</button><button id="stop" ${workflowRecord||!['running','stopping'].includes(t.status)?'disabled':''}>Stop now</button></div>
   ${w && !['accepted','publishing','interrupted'].includes(t.status)?`<form id="switch-form"><label>Change role<select name="role"><option value="implementer">Implementation</option><option value="reviewer">Review</option><option value="coordinator">Coordination</option></select></label><label>Use agent<select name="agent">${options(w.implementer)}</select></label><button ${t.pending_switch?'disabled':''}>Switch after current step</button><p class="muted">The current step finishes first. Its files and reports stay available to the next agent.</p></form>`:''}
-  <details><summary>Priority and prerequisites</summary><form id="schedule-form"><label>Priority (higher runs first)<input name="priority" type="number" min="0" max="100" value="${t.priority??50}" ${busy?'disabled':''}></label><label>Wait for accepted tasks<select name="depends_on" multiple ${busy?'disabled':''}>${state.tasks.filter(x=>x.id!==t.id).map(x=>`<option value="${x.id}" ${(t.depends_on||[]).includes(x.id)?'selected':''}>${escapeHTML(taskLabel(x))}: ${escapeHTML(x.title)}</option>`).join('')}</select></label><button ${busy?'disabled':''}>Save schedule</button></form></details>
+  ${workflowRecord?'':`<details><summary>Priority and prerequisites</summary><form id="schedule-form"><label>Priority (higher runs first)<input name="priority" type="number" min="0" max="100" value="${t.priority??50}" ${busy?'disabled':''}></label><label>Wait for accepted tasks<select name="depends_on" multiple ${busy?'disabled':''}>${state.tasks.filter(x=>x.id!==t.id&&x.task_kind!=='workflow_step').map(x=>`<option value="${x.id}" ${(t.depends_on||[]).includes(x.id)?'selected':''}>${escapeHTML(taskLabel(x))}: ${escapeHTML(x.title)}</option>`).join('')}</select></label><button ${busy?'disabled':''}>Save schedule</button></form></details>`}
   <details ${w?'open':''}><summary>Background coordination${w?' · '+escapeHTML(w.phase):''}</summary>
   ${w?`<p><strong>${escapeHTML(w.stage)} · round ${w.round}/${w.max_rounds}</strong><br>${w.enabled?'Enabled':'Paused or complete'} · ${escapeHTML(w.mode)}</p><small>Snapshot: ${escapeHTML(w.snapshot?.id || 'Not captured yet')}</small>`:''}
   <form id="workflow-form">
@@ -90,9 +92,10 @@ function renderDetail() {
   <form id="report-form"><label>Result or review findings<textarea name="message" required rows="3"></textarea></label><label>Evidence / snapshot reference<input name="reference" placeholder="Commit, snapshot ID, or evidence path"></label><div class="actions"><button>Record report</button><button type="button" id="accept" ${w||t.status!=='awaiting_review'?'disabled':''}>Record review acceptance</button></div></form></details>
   <details><summary>Run history (${t.runs.length})</summary>${t.runs.map(r=>`<div class="evidence"><small>${escapeHTML(name(r.agent))} · PID ${r.pid} · revision ${r.revision}</small><code>${escapeHTML(r.id)}</code><small>${escapeHTML(r.folder)}</small><small>${r.ended?'Exited '+r.exit_code:'No terminal result recorded'}</small></div>`).join('')}</details>
   ${t.status==='interrupted'?'<details><summary>Recover interrupted task</summary><p class="notice">Inspect the recorded PID and every descendant outside ACC. Confirm none can still write to this workspace.</p><label><span><input type="checkbox" id="inspected"> I inspected the old process tree and retained files.</span></label><button id="recover">Release interrupted task</button></details>':''}
+  <details><summary>Contingency controls</summary><p class="muted">Use replacement only after the prior worker has stopped. ACC creates a numbered recovery task with the known worktree and run evidence.</p><form id="recovery-handoff-form"><label>Replacement agent<select name="agent" ${busy?'disabled':''}>${options(t.agent)}</select></label><label>Why the previous worker is unavailable<textarea name="reason" required maxlength="2000" ${busy?'disabled':''}></textarea></label><button ${busy?'disabled':''}>Create recovery handoff</button></form></details>
   <div class="notice">${t.publication?`Publication: ${escapeHTML(t.publication.status)} ${t.publication.url?githubLink(t.publication.url,'Open PR'):''}${t.publication.error?`<p>${escapeHTML(t.publication.error)}</p>`:''}`:'Accepted managed work can be published after inspecting its preview.'}</div><button id="publish-preview" ${t.status==='accepted'&&w?'':'disabled'}>Preview commit and PR</button>`;
   if($('switch-form')) $('switch-form').onsubmit=e=>{e.preventDefault();action('switch',{...Object.fromEntries(new FormData(e.target)),request_id:crypto.randomUUID()});};
-  $('schedule-form').onsubmit=e=>{e.preventDefault();const data=new FormData(e.target);action('schedule',{priority:Number(data.get('priority')),depends_on:data.getAll('depends_on')});};
+  if($('schedule-form')) $('schedule-form').onsubmit=e=>{e.preventDefault();const data=new FormData(e.target);action('schedule',{priority:Number(data.get('priority')),depends_on:data.getAll('depends_on')});};
   $('publish-preview').onclick=()=>publicationPreview(t.id);
   $('workflow-form').onsubmit = e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));const fallbacks={};for(const role of ['implementer','reviewer','coordinator']){if(data['fallback_'+role]) fallbacks[role]=data['fallback_'+role];delete data['fallback_'+role];}action('workflow',{...data,enabled:true,restart:data.restart==='on',max_rounds:Number(data.max_rounds),fallbacks});};
   $('pause-workflow').onclick = ()=>action('workflow',{enabled:false});
@@ -103,6 +106,7 @@ function renderDetail() {
   $('report-form').onsubmit = e=>{e.preventDefault();action('report',Object.fromEntries(new FormData(e.target)));};
   $('accept').onclick = ()=>action('review',{...Object.fromEntries(new FormData($('report-form'))),revision:t.revision,run_id:t.run_id});
   if($('recover')) $('recover').onclick = ()=>action('recover',{process_tree_inspected:$('inspected').checked});
+  $('recovery-handoff-form').onsubmit=e=>{e.preventDefault();action('recovery-handoff',Object.fromEntries(new FormData(e.target)));};
 }
 async function action(kind, payload) {
   try { error(''); await api(`tasks/${selected}/${kind}`,payload); await refresh(); renderDetail(); }
@@ -143,6 +147,10 @@ async function connect() {
 $('tasks').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;render();renderDetail();}};
 $('view-tasks').onclick=()=>{workView='tasks';render();};
 $('view-agents').onclick=()=>{workView='agents';render();};
+$('project-mode').onchange=async e=>{try{await api('project/mode',{mode:e.target.value});await refresh();}catch(err){error(err.message);await refresh();}};
+$('archive-search').onsubmit=async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(e.target));const query=new URLSearchParams(Object.fromEntries(Object.entries(data).filter(([,v])=>v))).toString();const result=await api('archive?'+query);$('archive-results').innerHTML=result.tasks.map(t=>`<button class="task" data-task="${t.id}"><div class="top"><strong>${escapeHTML(taskLabel(t))} ${escapeHTML(t.title)}</strong><span class="badge">${escapeHTML(labels[t.status]||t.status)}</span></div><small>${escapeHTML(t.activity)}</small></button>`).join('')||'<p class="muted">No matching tasks.</p>';}catch(err){error(err.message);}};
+$('archive-results').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;render();renderDetail();}};
+$('archive-export').onsubmit=async e=>{e.preventDefault();try{const result=await api('archive/export',Object.fromEntries(new FormData(e.target)));$('archive-status').textContent=`Exported ${result.tasks} tasks to ${result.markdown} and ${result.database}`;}catch(err){error(err.message);}};
 $('connect-form').onsubmit=e=>{e.preventDefault();token=$('token').value.trim();connect();};
 $('new-task').onclick=()=>{if(!state){error('Connect to the local coordinator first.');return;} $('task-dialog').showModal();};
 $('close-dialog').onclick=()=>$('task-dialog').close();

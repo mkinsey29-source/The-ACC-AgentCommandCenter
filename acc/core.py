@@ -297,6 +297,8 @@ class Coordinator:
         self.controls = Controls(self)
         from .github import GitHub
         self.github = GitHub(self, settings.get('github'))
+        from .archive import Archive
+        self.archive = Archive(self)
         self.observer.start()
         self.github.thread.start()
         self.workflows.thread.start()
@@ -307,7 +309,8 @@ class Coordinator:
     def snapshot(self):
         with self.lock:
             seq = self.store.tail()
-            return {'project': str(self.project), 'tasks': [t for t in self.store.tasks() if not t.get('internal')],
+            return {'project': str(self.project), 'project_mode': self.controls.mode(),
+                    'tasks': [t for t in self.store.tasks() if not t.get('internal')],
                     'conversation': self.conversation.state(), 'github': self.github.snapshot(),
                     'agents': self.public_agents(), 'git': self.git, 'cursor': seq,
                     'events': self.store.events(max(0, seq - 100)),
@@ -343,6 +346,8 @@ class Coordinator:
     def assign(self, task_id, agent):
         with self.lock:
             task = self.store.get(task_id)
+            if task.get('task_kind') == 'workflow_step':
+                raise Conflict('Workflow step records are controlled through their parent task.')
             if agent not in self.agents or not self.agents[agent]['available']:
                 raise ValueError('That agent is not configured and available.')
             if task.get('internal'):
@@ -360,6 +365,8 @@ class Coordinator:
             raise ValueError('Instruction must contain 1–50,000 characters.')
         with self.lock:
             task = self.store.get(task_id)
+            if task.get('task_kind') == 'workflow_step':
+                raise Conflict('Workflow step records are controlled through their parent task.')
             if task.get('internal'):
                 raise Conflict('Send a new conversation message instead of revising internal work.')
             if task['status'] in ('launching', 'running', 'stopping', 'processing_result', 'publishing', 'interrupted'):
@@ -390,6 +397,8 @@ class Coordinator:
     def start(self, task_id, _managed=False, _internal=False):
         with self.lock:
             task = self.store.get(task_id)
+            if task.get('task_kind') == 'workflow_step':
+                raise Conflict('Workflow step records are run through their parent task.')
             if task.get('internal') and not _internal:
                 raise Conflict('Use the conversation or transcription retry controls for internal work.')
             if self.halt.is_set():
@@ -416,12 +425,26 @@ class Coordinator:
             agent = self.agents[agent_id]
             if not agent['available']:
                 raise ValueError('Configure this worker on the host first.')
+            if self.controls.mode() == 'offline' and agent.get('kind') == 'model' and agent.get('local') is not True:
+                raise Conflict('Project is offline; new cloud model runs are blocked.')
             if workflow and workflow['stage'] == 'implement' and (task.get('baseline') or {}).get('revision') != task['revision']:
                 from .snapshots import inventory
                 before = git_snapshot(self.project)
                 task['baseline'] = {'revision': task['revision'], 'entries': inventory(self.project),
                                     'dirty_paths': [f['path'] for f in before.get('files', [])], 'head': before.get('head')}
             run_id = identifier()
+            if workflow:
+                stage = workflow['stage']
+                child = self.build_task({'title': stage.capitalize() + f" Task {task['task_number']}: {task['title']}",
+                                         'instruction': task['instruction'], 'agent': agent_id,
+                                         'timeout_seconds': task['timeout_seconds']})
+                child.update(task_kind='workflow_step', parent_task_id=task['id'],
+                             parent_task_number=task['task_number'], workflow_stage=stage,
+                             run_id=run_id, status='launching', active_agent=agent_id,
+                             activity='Starting ' + stage + ' step.', next_step='Return result to parent task')
+                self.store.save(child, 'workflow_step_created', {'message': child['title'],
+                                'parent_task_number': task['task_number'], 'stage': stage})
+                task['active_child_id'] = child['id']
             folder = self.state / 'runs' / run_id
             folder.mkdir(parents=True)
             prompt = folder / 'task.json'
@@ -454,6 +477,11 @@ class Coordinator:
             except OSError as exc:
                 task.update(status='failed', active_agent=None, activity='Worker failed to launch.')
                 self.store.save(task, 'launch_failed', {'message': str(exc)})
+                if task.get('active_child_id'):
+                    child = self.store.get(task['active_child_id'])
+                    child.update(status='failed', active_agent=None, activity=task['activity'])
+                    self.store.save(child, 'workflow_step_finished', {'message': child['activity'],
+                                    'parent_task_number': task['task_number'], 'status': 'failed'})
                 raise ValueError('Worker failed to launch: ' + str(exc))
             self.process, self.running_task = proc, task_id
             task.update(status='running', active_agent=agent['id'], run_id=run_id, pid=proc.pid,
@@ -464,6 +492,13 @@ class Coordinator:
                                  'stage': workflow['stage'] if workflow else 'command'})
             self.store.save(task, 'run_started', {'message': 'Started ' + agent['name'], 'run_id': run_id,
                                                 'pid': proc.pid, 'revision': task['revision']})
+            if workflow:
+                child = self.store.get(task['active_child_id'])
+                child.update(status='running', pid=proc.pid, activity='Runner started; waiting for output.')
+                child['runs'].append({'id': run_id, 'pid': proc.pid, 'agent': agent['id'],
+                                      'revision': task['revision'], 'started': now(), 'folder': str(folder),
+                                      'stage': workflow['stage']})
+                self.store.save(child, 'workflow_step_started', {'message': child['activity'], 'run_id': run_id})
             self.worker_thread = threading.Thread(target=self._collect, args=(proc, task_id, run_id, folder), daemon=True)
             self.deadline = threading.Timer(task['timeout_seconds'], self._timeout, args=(task_id, run_id))
             self.deadline.daemon = True
@@ -537,6 +572,16 @@ class Coordinator:
                             self.store.save(task, 'transcription_held', {'message': str(exc)})
                         else:
                             self.conversation.fail(task, str(exc), retry=False)
+                if task.get('active_child_id'):
+                    child = self.store.get(task['active_child_id'])
+                    child_status = 'paused' if stopped else ('failed' if code or task['timed_out'] else 'completed')
+                    child.update(status=child_status, active_agent=None, pid=None, exit_code=code,
+                                 activity=task['activity'], next_step='Inspect parent task handoff')
+                    child['runs'][-1].update(ended=now(), exit_code=code)
+                    self.store.save(child, 'workflow_step_finished', {'message': child['activity'],
+                                    'parent_task_number': task['task_number'], 'status': child_status})
+                    task['active_child_id'] = None
+                    self.store.save(task, 'workflow_child_link_cleared', {'message': 'Numbered workflow step recorded.'})
                 self.controls.apply(task_id)
                 self.process, self.running_task = None, None
         except Exception as exc:
@@ -545,6 +590,10 @@ class Coordinator:
                 task.update(status='interrupted', activity='Runner supervision failed; inspect process before resuming.')
                 self.recovery_required = True
                 self.store.save(task, 'supervisor_error', {'message': str(exc)})
+                if task.get('active_child_id'):
+                    child = self.store.get(task['active_child_id'])
+                    child.update(status='interrupted', active_agent=None, activity=task['activity'])
+                    self.store.save(child, 'workflow_step_interrupted', {'message': child['activity']})
         finally:
             proc.stdout.close()
 

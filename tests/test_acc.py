@@ -141,6 +141,33 @@ class CoreTests(unittest.TestCase):
         migrated = Store(legacy_path).tasks()
         self.assertEqual([task['task_number'] for task in migrated], [1, 2])
 
+    def test_archive_search_and_consistent_export(self):
+        first = self.task()
+        self.c.revise(first['id'], 'Searchable revised requirement')
+        self.task()
+        result = self.c.archive.search({'q': 'searchable', 'number_from': '1', 'number_to': '1'})
+        self.assertEqual([task['task_number'] for task in result['tasks']], [1])
+        export_dir = self.root / 'exports'
+        export_dir.mkdir()
+        exported = self.c.archive.export({'directory': str(export_dir)})
+        self.assertIn('Task 1: Check', Path(exported['markdown']).read_text())
+        backup = Store(exported['database'])
+        self.assertEqual(len([task for task in backup.tasks() if not task.get('internal')]), 2)
+
+    def test_global_mode_and_numbered_recovery_handoff(self):
+        task = self.task()
+        changed = self.c.controls.set_mode({'mode': 'offline'})
+        self.assertEqual(changed['mode'], 'offline')
+        self.assertEqual(self.c.snapshot()['project_mode'], 'offline')
+        with self.assertRaises(ValueError):
+            self.c.controls.recovery_handoff(task['id'], {'agent': 'deepseek', 'reason': 'Quota exhausted'})
+        self.c.controls.set_mode({'mode': 'online'})
+        successor = self.c.controls.recovery_handoff(task['id'], {'agent': 'local-command', 'reason': 'Provider unavailable'})
+        self.assertEqual(successor['task_number'], 2)
+        self.assertEqual(successor['parent_task_number'], 1)
+        self.assertEqual(successor['task_kind'], 'recovery')
+        self.assertIn('incomplete-worker recovery', successor['instruction'])
+
     def test_restart_does_not_assume_old_worker_stopped(self):
         task = self.task()
         task.update(status='running', pid=os.getpid())
@@ -185,7 +212,12 @@ class CoreTests(unittest.TestCase):
         config = self.root / 'agents.json'
         config.write_text(json.dumps({'agents':[{'id':'fixture-worker','name':'Fixture worker','argv':[sys.executable,str(script),'{prompt_file}']}]}))
         self.c = Coordinator(self.project, self.state, config)
-        task = self.complete(self.task(agent='fixture-worker'))
+        task = self.task(agent='fixture-worker')
+        self.c.controls.set_mode({'mode': 'offline'})
+        with self.assertRaises(Conflict):
+            self.c.start(task['id'])
+        self.c.controls.set_mode({'mode': 'online'})
+        task = self.complete(task)
         self.assertEqual(task['status'], 'awaiting_review')
         self.assertTrue(any('Run a concrete check' in e['data'].get('message','') for e in self.c.store.events()))
 

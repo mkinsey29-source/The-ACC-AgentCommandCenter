@@ -159,7 +159,9 @@ class Conversation:
         pending = [dict(r, data=json.loads(r['data'])) for r in rows]
         history = self.state()['messages']
         return {'pending': pending, 'recent_history': history,
-                'tasks': [{k: t.get(k) for k in ('id', 'title', 'instruction', 'revision', 'status', 'activity', 'next_step', 'review', 'source_ids')}
+                'tasks': [{k: t.get(k) for k in ('id', 'task_number', 'task_kind', 'parent_task_id',
+                          'parent_task_number', 'title', 'instruction', 'revision', 'status', 'activity',
+                          'next_step', 'review', 'source_ids')}
                           for t in self.c.store.tasks() if not t.get('internal')],
                 'workflow_defaults': self.settings.get('workflow'),
                 'offline': lease['offline'],
@@ -289,14 +291,15 @@ class Conversation:
             return False
         if not self.state()['pending']:
             return False
-        preferred = self.settings.get('preferred_agent') if self.settings.get('mode', 'online') == 'online' else None
+        project_offline = self.c.controls.mode() == 'offline'
+        preferred = self.settings.get('preferred_agent') if self.settings.get('mode', 'online') == 'online' and not project_offline else None
         local = self.settings.get('local_agent')
         agent = preferred if preferred and self.c.agents[preferred]['available'] else local
         if not agent or not self.c.agents[agent]['available']:
             return False  # Messages stay saved until a host adapter or external session is available.
         task = self.c.build_task({'title': 'Respond to conversation', 'instruction': 'Read conversation packet and propose the requested next steps.', 'agent': agent, 'timeout_seconds': 180})
         lease = {'token': identifier(), 'kind': 'local', 'owner': agent, 'expires': None,
-                 'offline': self.settings.get('mode') == 'offline' or (bool(preferred) and agent != preferred),
+                 'offline': project_offline or self.settings.get('mode') == 'offline' or (bool(preferred) and agent != preferred),
                  'task_id': task['id'], 'message_ids': []}
         lease['message_ids'] = [m['id'] for m in self.context(lease)['pending']]
         task.update(internal='conversation', conversation_token=lease['token'],

@@ -85,7 +85,7 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(task['source_ids'],['message-1'])
         self.assertEqual(len(task['runs']),4)
         self.assertEqual(self.c.conversation.state()['pending'],0)
-        self.assertEqual(len(self.c.snapshot()['tasks']),1)
+        self.assertEqual(len([t for t in self.c.snapshot()['tasks'] if not t.get('parent_task_id')]),1)
 
     def test_failed_commit_rolls_back_messages_tasks_and_receipt(self):
         self.configure(enabled=False);self.append();claim=self.claim();result=self.result(claim)
@@ -133,21 +133,24 @@ class ConversationTests(unittest.TestCase):
 
     def test_real_online_failure_local_fallback_and_remote_resumption(self):
         self.configure();self.append('Please build this offline')
-        eventually(lambda:len(self.c.snapshot()['tasks'])==1,timeout=8)
-        task_id=self.c.snapshot()['tasks'][0]['id']
+        eventually(lambda:len([t for t in self.c.snapshot()['tasks'] if not t.get('parent_task_id')])==1,timeout=8)
+        task_id=next(t['id'] for t in self.c.snapshot()['tasks'] if not t.get('parent_task_id'))
         eventually(lambda:self.c.store.get(task_id)['status']=='accepted',timeout=12)
         task=self.c.store.get(task_id)
         self.assertTrue(all(r['agent'].startswith('local-') for r in task['runs']))
+        children=[t for t in self.c.snapshot()['tasks'] if t.get('parent_task_id')==task_id]
+        self.assertEqual([t['task_number'] for t in children], list(range(2, 2 + len(children))))
+        self.assertEqual({t['task_kind'] for t in children}, {'workflow_step'})
         planner=[t for t in self.c.store.tasks() if t.get('internal')=='conversation'][0]
         self.assertEqual([r['agent'] for r in planner['runs']],['hermes-coordinator','local-coordinator'])
         self.assertEqual(planner['status'],'accepted')
         claim=self.claim()
-        self.assertEqual(claim['context']['tasks'][0]['status'],'accepted')
+        self.assertEqual(next(t for t in claim['context']['tasks'] if not t.get('parent_task_id'))['status'],'accepted')
         self.assertEqual(claim['context']['pending'],[])
         self.c.conversation.release({'token':claim['token']})
         self.append('Please make the next change','message-2')
-        eventually(lambda:len(self.c.snapshot()['tasks'])==2,timeout=8)
-        next_task=self.c.snapshot()['tasks'][1]['id']
+        eventually(lambda:len([t for t in self.c.snapshot()['tasks'] if not t.get('parent_task_id')])==2,timeout=8)
+        next_task=[t for t in self.c.snapshot()['tasks'] if not t.get('parent_task_id')][1]['id']
         eventually(lambda:self.c.store.get(next_task)['status']=='accepted',timeout=12)
         self.assertEqual(self.c.store.get(next_task)['runs'][0]['agent'],'builder')
 
