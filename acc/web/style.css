@@ -12,4 +12,5 @@
 .task-link{padding:.25rem .5rem;margin:.25rem;font-size:.85rem}
 #routing-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem 1rem}
 #routing-fields p{grid-column:1/-1}#outbox-status{margin:.5rem 0}
+.view-tabs{display:flex;gap:4px}.view-tabs button{padding:6px 12px}.view-tabs button.selected{background:var(--accent);border-color:var(--blue)}.task-number{color:var(--blue);white-space:nowrap}.agent-card{padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}.agent-card .top{display:flex;justify-content:space-between;gap:8px}.agent-tasks{display:grid;gap:5px;margin-top:9px}.agent-tasks button{text-align:left;padding:7px 9px}.agent-tasks button.selected{background:var(--accent);border-color:var(--blue)}.agent-tasks button small{display:inline;margin-left:6px}
 @media(max-width:760px){.conversation-panel{margin:1rem;padding:1rem}.message{max-width:100%}#routing-fields{grid-template-columns:1fr}}

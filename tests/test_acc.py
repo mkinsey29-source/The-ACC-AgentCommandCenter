@@ -120,6 +120,27 @@ class CoreTests(unittest.TestCase):
         self.c = Coordinator(self.project, self.state)
         self.assertEqual(self.c.store.get(task['id'])['evidence'][0]['message'], 'Explicit report')
 
+    def test_user_tasks_receive_permanent_sequential_numbers(self):
+        first = self.task()
+        second = self.task()
+        self.assertEqual((first['task_number'], second['task_number']), (1, 2))
+        self.c.close()
+        self.c = Coordinator(self.project, self.state)
+        self.assertEqual(self.c.store.get(first['id'])['task_number'], 1)
+        third = self.task()
+        self.assertEqual(third['task_number'], 3)
+
+    def test_existing_tasks_are_numbered_in_creation_order(self):
+        legacy_path = self.state / 'legacy.sqlite3'
+        store = Store(legacy_path)
+        with store.connect() as db:
+            for title in ('Old one', 'Old two'):
+                task = {'id': title.replace(' ', ''), 'title': title, 'created': time.time()}
+                db.execute('INSERT INTO tasks VALUES (?,?)', (task['id'], json.dumps(task)))
+            db.execute("DELETE FROM meta WHERE key='next_task_number'")
+        migrated = Store(legacy_path).tasks()
+        self.assertEqual([task['task_number'] for task in migrated], [1, 2])
+
     def test_restart_does_not_assume_old_worker_stopped(self):
         task = self.task()
         task.update(status='running', pid=os.getpid())

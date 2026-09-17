@@ -194,7 +194,8 @@ class GitHub:
                 preview = {'id': identifier(), 'task_id': task_id, 'revision': task['revision'], 'snapshot_id': snap['id'],
                            'repository': repo, 'branch': branch, 'base': self.settings['base'], 'remote': self.settings['remote'], 'push_url': push_urls[0],
                            'head': head, 'expected_tree': expected_tree, 'remote_heads': remote_heads, 'outgoing_commits': outgoing, 'pr_commits': pr_commits, 'paths': sorted(dirty), 'changed_paths': changed, 'created': now(),
-                           'title': task['title'], 'body': '## Requested change\n\n' + task['instruction'] + '\n\n## Validation\n\n' + task['review']['message'] + '\n\nACC task: ' + task_id + ' / revision ' + str(task['revision'])}
+                           'title': 'Task ' + str(task['task_number']) + ': ' + task['title'],
+                           'body': '## Requested change\n\n' + task['instruction'] + '\n\n## Validation\n\n' + task['review']['message'] + '\n\nACC Task ' + str(task['task_number']) + ' · internal ID ' + task_id + ' · revision ' + str(task['revision'])}
                 self.c.conversation.put(db, key, preview)
             return preview
 
@@ -315,7 +316,7 @@ class GitHub:
                 staged = sorted(filter(None, self.git('diff', '--cached', '--name-only', '-z').split('\0')))
                 if staged != p['paths']:
                     raise Conflict('Staged files changed. Inspect the index before retrying.')
-                self.git('commit', '-m', p['title'], '-m', 'ACC-Task: ' + task_id + '/' + str(task['revision']), task_id=task_id, timeout=60)
+                self.git('commit', '-m', p['title'], '-m', 'ACC-Task: ' + str(task['task_number']) + '\nACC-Task-ID: ' + task_id + '\nACC-Revision: ' + str(task['revision']), task_id=task_id, timeout=60)
                 head = self.git('rev-parse', 'HEAD')
             self.verify_commit(task['workflow']['snapshot'], head, p['expected_tree'])
             self._save(task_id, 'committed', commit=head)

@@ -42,6 +42,41 @@ class Store:
                 seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL,
                 task_id TEXT, kind TEXT NOT NULL, data TEXT NOT NULL);
             ''')
+            self._migrate_task_numbers(db)
+
+    @staticmethod
+    def _migrate_task_numbers(db):
+        """Give every existing user-visible task one permanent human number."""
+        rows = db.execute('SELECT id,data FROM tasks ORDER BY rowid').fetchall()
+        tasks = [(row['id'], json.loads(row['data'])) for row in rows]
+        existing = [task.get('task_number') for _, task in tasks
+                    if not task.get('internal') and type(task.get('task_number')) is int
+                    and task['task_number'] > 0]
+        next_number = max(existing, default=0) + 1
+        for task_id, task in tasks:
+            if task.get('internal') or (type(task.get('task_number')) is int and task['task_number'] > 0):
+                continue
+            task['task_number'] = next_number
+            next_number += 1
+            db.execute('UPDATE tasks SET data=? WHERE id=?', (json.dumps(task), task_id))
+        stored = db.execute("SELECT value FROM meta WHERE key='next_task_number'").fetchone()
+        if stored:
+            try:
+                next_number = max(next_number, int(stored[0]))
+            except (TypeError, ValueError):
+                pass
+        db.execute("INSERT OR REPLACE INTO meta VALUES ('next_task_number',?)", (str(next_number),))
+
+    @staticmethod
+    def ensure_task_number(db, task):
+        """Allocate a number inside the caller's transaction; internal runs stay hidden."""
+        if task.get('internal') or (type(task.get('task_number')) is int and task['task_number'] > 0):
+            return task
+        row = db.execute("SELECT value FROM meta WHERE key='next_task_number'").fetchone()
+        number = int(row[0]) if row else 1
+        task['task_number'] = number
+        db.execute("INSERT OR REPLACE INTO meta VALUES ('next_task_number',?)", (str(number + 1),))
+        return task
 
     @contextlib.contextmanager
     def connect(self):
@@ -67,7 +102,10 @@ class Store:
     def save(self, task, kind, details):
         # State and its event are committed together, so reconnects see consistent state.
         with self.connect() as db:
+            self.ensure_task_number(db, task)
             db.execute('INSERT OR REPLACE INTO tasks VALUES (?,?)', (task['id'], json.dumps(task)))
+            if task.get('task_number') and 'task_number' not in details:
+                details = {**details, 'task_number': task['task_number']}
             db.execute('INSERT INTO events(at,task_id,kind,data) VALUES (?,?,?,?)',
                        (now(), task['id'], kind, json.dumps(details)))
 
