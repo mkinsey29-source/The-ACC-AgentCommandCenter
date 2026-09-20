@@ -1,4 +1,4 @@
-# Local API and event contract — v0.5
+# Local API and event contract — v0.6
 
 All API calls require `Authorization: Bearer <local token>`. Mutations require JSON. The server accepts only localhost/127.0.0.1 Host values for its bound port and rejects foreign browser origins. No cross-origin access is enabled. The token is a local control credential, not an agent-provider key.
 
@@ -26,11 +26,25 @@ Additional v0.5 operations:
 - `POST /api/project/mode` sets the authoritative project-wide `online` or `offline` assignment policy.
 - `POST /api/tasks/{id}/recovery-handoff` creates a numbered successor after the prior writer has stopped.
 
-Error responses contain `error`: 400 invalid request, 401/403 authentication/origin, 404 missing task/endpoint, 409 conflicting state. Mutation retries are not a general idempotency API yet: do not blindly replay creation, start, or report calls after a network timeout. Read state and reconcile first.
+Error responses contain `error`: 400 invalid request, 401/403 authentication/origin, 404 missing task/endpoint, 409 conflicting state. Integration job submission, memory proposal, conversation, assignment, and publication operations have scoped idempotency keys. Do not blindly replay other mutations after a network timeout; read state and reconcile first.
 
 The SSE stream is ordered and replayable within the local database. Local Git reconciliation checks every second; it is not yet an operating-system filesystem notification adapter. A Git change event does not claim an agent authored it. GitHub refresh uses a configurable 15–300 second interval, default 30, with a manual refresh control and last-success timestamp.
 
 The MCP bridge translates tools into these local operations. It supports initialize, initialized notifications, ping, tools/list, and tools/call over newline-delimited JSON-RPC stdio. It negotiates the explicitly implemented protocol versions and exposes no extra resources/prompts. Host-specific installation and complete external SDK interoperability remain validation tasks.
+
+## Integration jobs and shared memory (v0.6)
+
+- `GET /api/integrations`: provider catalog, durable jobs, and artifact records.
+- `POST /api/integrations/jobs`: submit `{capability,input,provider?,task_id?,budget?,priority?,idempotency_key?}`. Automatic routing selects an enabled provider with that capability. Cloud-only work becomes `blocked_offline` while the project is offline.
+- `POST /api/integrations/claim`: a worker claims one eligible job using `{owner,provider?,capabilities?,lease_seconds?}` and receives a secret lease token plus monotonic fence.
+- `POST /api/integrations/jobs/{id}/renew`: renew with `{lease_token,fence,lease_seconds?}`.
+- `POST /api/integrations/jobs/{id}/finish`: finish with `{lease_token,fence,status,result?,cost?,error?,artifacts?}`. Status is `succeeded` or `failed`; stale owners are rejected.
+- `POST /api/integrations/jobs/{id}/cancel` and `/retry`: cancel waiting work or retry failed work under the current online/offline policy.
+- `GET /api/memory`: search using `q`, `kind`, `status`, `task_id`, and `limit`. Default status is reviewed `active` memory.
+- `POST /api/memory/propose`: propose a versioned `{title,body,kind?,key?,source?,task_id?,branch?,commit?,tags?,request_id?}` entry.
+- `POST /api/memory/{id}/review`: activate or reject a proposal with `{status,reviewer?}`. Activating a version supersedes the prior active version with the same key.
+
+Provider credentials are not accepted or stored by these endpoints. External workers keep credentials in their own environment, poll/claim jobs, perform the provider call, and report results and artifact references.
 
 ## Managed workflows
 
