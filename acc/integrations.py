@@ -24,6 +24,10 @@ PROVIDER_CATALOG = (
      'capabilities': ('image.generate', 'image.edit', 'video.generate')},
     {'id': 'typesafe-jev', 'name': 'TypeSafe Jev', 'local': False,
      'capabilities': ('decision.choice', 'decision.score', 'decision.noul')},
+    {'id': 'muse-spark-contributor', 'name': 'Muse Spark 1.3 Contributor', 'local': False,
+     'capabilities': ('code.implement', 'code.refactor', 'code.test', 'code.document'),
+     'credential_env': 'META_MODEL_API_KEY', 'data_policy': 'provider_training',
+     'max_classification': 'public', 'required_workspace_scope': 'isolated_repository'},
     {'id': 'runpod', 'name': 'RunPod', 'local': False,
      'capabilities': ('gpu.execute', 'render.blender', 'render.unity')},
     {'id': 'hearth-pipeline', 'name': 'Hearth and Havoc Pipeline', 'local': True,
@@ -35,6 +39,8 @@ WAITING_JOB_STATES = frozenset(('queued', 'blocked_offline', 'waiting_provider')
 MEMORY_KINDS = frozenset(('architecture', 'constraint', 'decision', 'fact', 'finding', 'procedure'))
 CAPABILITY = re.compile(r'[a-z][a-z0-9-]{0,39}(?:\.[a-z][a-z0-9-]{0,39}){0,3}\Z')
 PROVIDER_ID = re.compile(r'[a-z][a-z0-9-]{0,39}\Z')
+DATA_CLASSIFICATIONS = ('public', 'internal', 'confidential')
+WORKSPACE_SCOPES = ('project', 'isolated_repository')
 
 
 def _json_object(value, label, limit=100_000):
@@ -101,7 +107,7 @@ class IntegrationHub:
                     isinstance(x, str) and CAPABILITY.fullmatch(x) for x in capabilities):
                 raise ValueError('Provider capabilities must be dotted lowercase names.')
             enabled = override.get('enabled') is True
-            credential_env = override.get('credential_env')
+            credential_env = override.get('credential_env', base.get('credential_env'))
             if credential_env is not None and (not isinstance(credential_env, str) or
                                                not re.fullmatch(r'[A-Z][A-Z0-9_]{1,79}', credential_env)):
                 raise ValueError('credential_env must be an uppercase environment variable name.')
@@ -140,16 +146,28 @@ class IntegrationHub:
             return 'blocked_offline'
         return 'queued' if item['configured'] else 'waiting_provider'
 
-    def _select_provider(self, capability, requested=None):
+    @staticmethod
+    def _provider_accepts(provider, data_classification, workspace_scope):
+        maximum = provider.get('max_classification', 'confidential')
+        if DATA_CLASSIFICATIONS.index(data_classification) > DATA_CLASSIFICATIONS.index(maximum):
+            return False
+        required_scope = provider.get('required_workspace_scope')
+        return required_scope is None or workspace_scope == required_scope
+
+    def _select_provider(self, capability, requested=None, data_classification='internal',
+                         workspace_scope='project'):
         if requested is not None:
             if requested not in self.providers:
                 raise ValueError('Unknown integration provider.')
             if capability not in self.providers[requested]['capabilities']:
                 raise ValueError('Provider does not advertise the requested capability.')
+            if not self._provider_accepts(self.providers[requested], data_classification, workspace_scope):
+                raise Conflict('Provider policy does not permit this data classification or workspace scope.')
             return requested
-        candidates = [p for p in self.providers.values() if capability in p['capabilities']]
+        candidates = [p for p in self.providers.values() if capability in p['capabilities'] and
+                      self._provider_accepts(p, data_classification, workspace_scope)]
         if not candidates:
-            raise ValueError('No provider advertises that capability.')
+            raise ValueError('No provider accepts that capability, data classification, and workspace scope.')
         mode = self.c.controls.mode()
         candidates.sort(key=lambda p: (
             not (p['configured'] and (mode == 'online' or p['local'])),
@@ -193,7 +211,14 @@ class IntegrationHub:
         capability = str(payload.get('capability', '')).strip()
         if not CAPABILITY.fullmatch(capability):
             raise ValueError('Capability must be a dotted lowercase name.')
-        provider = self._select_provider(capability, payload.get('provider'))
+        data_classification = payload.get('data_classification', 'internal')
+        if data_classification not in DATA_CLASSIFICATIONS:
+            raise ValueError('Data classification must be public, internal, or confidential.')
+        workspace_scope = payload.get('workspace_scope', 'project')
+        if workspace_scope not in WORKSPACE_SCOPES:
+            raise ValueError('Workspace scope must be project or isolated_repository.')
+        provider = self._select_provider(capability, payload.get('provider'), data_classification,
+                                         workspace_scope)
         task_id = payload.get('task_id')
         if task_id is not None:
             if not isinstance(task_id, str):
@@ -215,8 +240,11 @@ class IntegrationHub:
                 if row:
                     existing = json.loads(row[0])
                     comparable = (existing['capability'], existing['provider'], existing['input'],
-                                  existing.get('budget', {}), existing.get('task_id'))
-                    incoming = (capability, provider, request, budget, task_id)
+                                  existing.get('budget', {}), existing.get('task_id'),
+                                  existing.get('data_classification', 'internal'),
+                                  existing.get('workspace_scope', 'project'))
+                    incoming = (capability, provider, request, budget, task_id,
+                                data_classification, workspace_scope)
                     if comparable != incoming:
                         raise Conflict('Idempotency key was already used for a different job.')
                     return existing
@@ -224,6 +252,7 @@ class IntegrationHub:
             job = {'id': identifier(), 'capability': capability, 'provider': provider,
                    'status': self._desired_state(provider), 'input': request, 'budget': budget,
                    'priority': priority, 'task_id': task_id, 'idempotency_key': idempotency_key,
+                   'data_classification': data_classification, 'workspace_scope': workspace_scope,
                    'created': stamp, 'updated': stamp, 'attempts': 0, 'fence': 0,
                    'lease_owner': None, 'lease_until': None, 'lease_token_hash': None,
                    'result': None, 'cost': {}, 'last_error': None}
