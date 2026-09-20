@@ -23,7 +23,7 @@ PROVIDER_CATALOG = (
     {'id': 'aura', 'name': 'Aura', 'local': False,
      'capabilities': ('image.generate', 'image.edit', 'video.generate')},
     {'id': 'typesafe-jev', 'name': 'TypeSafe Jev', 'local': False,
-     'capabilities': ('decision.choose', 'decision.score', 'decision.verify')},
+     'capabilities': ('decision.choice', 'decision.score', 'decision.noul')},
     {'id': 'runpod', 'name': 'RunPod', 'local': False,
      'capabilities': ('gpu.execute', 'render.blender', 'render.unity')},
     {'id': 'hearth-pipeline', 'name': 'Hearth and Havoc Pipeline', 'local': True,
