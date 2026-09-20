@@ -31,6 +31,8 @@ class IntegrationTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_capability_routing_and_offline_queue_reconciliation(self):
+        jev = self.c.integrations.providers['typesafe-jev']
+        self.assertEqual(jev['capabilities'], ['decision.choice', 'decision.noul', 'decision.score'])
         self.c.controls.set_mode({'mode': 'offline'})
         remote = self.c.integrations.submit({
             'capability': 'image.generate', 'provider': 'gemini', 'input': {'prompt': 'tank'},
