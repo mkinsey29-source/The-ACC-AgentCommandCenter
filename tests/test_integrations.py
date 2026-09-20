@@ -23,6 +23,7 @@ class IntegrationTests(unittest.TestCase):
             {'id': 'gemini', 'enabled': True, 'verified': True},
             {'id': 'hearth-pipeline', 'enabled': True, 'verified': True},
             {'id': 'typesafe-jev', 'enabled': True},
+            {'id': 'muse-spark-contributor', 'enabled': True},
         ]}}))
         self.c = Coordinator(self.project, self.state, self.config)
 
@@ -33,6 +34,21 @@ class IntegrationTests(unittest.TestCase):
     def test_capability_routing_and_offline_queue_reconciliation(self):
         jev = self.c.integrations.providers['typesafe-jev']
         self.assertEqual(jev['capabilities'], ['decision.choice', 'decision.noul', 'decision.score'])
+        muse = self.c.integrations.providers['muse-spark-contributor']
+        self.assertEqual(muse['data_policy'], 'provider_training')
+        self.assertEqual(muse['status'], 'credentials_missing')
+        with self.assertRaises(Conflict):
+            self.c.integrations.submit({'capability': 'code.implement',
+                'provider': 'muse-spark-contributor', 'data_classification': 'internal',
+                'workspace_scope': 'isolated_repository', 'input': {}})
+        with self.assertRaises(Conflict):
+            self.c.integrations.submit({'capability': 'code.implement',
+                'provider': 'muse-spark-contributor', 'data_classification': 'public',
+                'workspace_scope': 'project', 'input': {}})
+        muse_job = self.c.integrations.submit({'capability': 'code.implement',
+            'provider': 'muse-spark-contributor', 'data_classification': 'public',
+            'workspace_scope': 'isolated_repository', 'input': {'module': 'construction'}})
+        self.assertEqual(muse_job['status'], 'waiting_provider')
         self.c.controls.set_mode({'mode': 'offline'})
         remote = self.c.integrations.submit({
             'capability': 'image.generate', 'provider': 'gemini', 'input': {'prompt': 'tank'},

@@ -79,6 +79,8 @@ TOOLS.extend([
     ('acc_submit_integration_job', 'Durably queue a capability job. Remote jobs wait while offline; a stable idempotency key makes retries safe.',
      {'capability': {'type': 'string'}, 'provider': {'type': 'string'}, 'task_id': {'type': 'string'},
       'input': {'type': 'object'}, 'budget': {'type': 'object'}, 'priority': {'type': 'integer'},
+      'data_classification': {'type': 'string', 'enum': ['public', 'internal', 'confidential']},
+      'workspace_scope': {'type': 'string', 'enum': ['project', 'isolated_repository']},
       'idempotency_key': {'type': 'string'}}, ['capability', 'input']),
     ('acc_claim_integration_job', 'Claim the highest-priority eligible job with a fenced, expiring worker lease.',
      {'owner': {'type': 'string'}, 'provider': {'type': 'string'},
