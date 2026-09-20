@@ -27,6 +27,8 @@ class Controls:
             else:
                 message += 'New assignments now follow this policy.'
             self.c.store.event('project_mode_changed', {'message': message, 'mode': mode, 'previous': previous})
+            if hasattr(self.c, 'integrations'):
+                self.c.integrations.on_mode_changed()
             self.c.workflows.wake.set()
             return {'mode': mode, 'previous': previous, 'message': message}
 
