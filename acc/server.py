@@ -68,6 +68,11 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == '/api/archive':
                 query = {key: values[0] for key, values in parse_qs(url.query).items()}
                 return self.reply(200, self.server.coordinator.archive.search(query))
+            if url.path == '/api/integrations':
+                return self.reply(200, self.server.coordinator.integrations.snapshot())
+            if url.path == '/api/memory':
+                query = {key: values[0] for key, values in parse_qs(url.query).items()}
+                return self.reply(200, self.server.coordinator.integrations.search_memory(query))
             if url.path == '/api/events':
                 try:
                     cursor = int(parse_qs(url.query).get('after', ['0'])[0])
@@ -142,6 +147,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, c.controls.set_mode(payload))
             if parts == ['api', 'archive', 'export']:
                 return self.reply(200, c.archive.export(payload))
+            if parts == ['api', 'integrations', 'jobs']:
+                return self.reply(201, c.integrations.submit(payload))
+            if parts == ['api', 'integrations', 'claim']:
+                return self.reply(200, c.integrations.claim(payload))
+            if len(parts) == 5 and parts[:3] == ['api', 'integrations', 'jobs']:
+                job_id, action = parts[3:]
+                routes = {'renew': lambda: c.integrations.renew(job_id, payload),
+                          'finish': lambda: c.integrations.finish(job_id, payload),
+                          'cancel': lambda: c.integrations.cancel(job_id),
+                          'retry': lambda: c.integrations.retry(job_id)}
+                if action not in routes:
+                    return self.reply(404, {'error': 'Unknown integration job operation.'})
+                return self.reply(200, routes[action]())
+            if parts == ['api', 'memory', 'propose']:
+                return self.reply(201, c.integrations.propose_memory(payload))
+            if len(parts) == 4 and parts[:2] == ['api', 'memory'] and parts[3] == 'review':
+                return self.reply(200, c.integrations.review_memory(parts[2], payload))
             if parts == ['api', 'tasks']:
                 return self.reply(201, c.create(payload))
             if len(parts) != 4 or parts[:2] != ['api', 'tasks']:
