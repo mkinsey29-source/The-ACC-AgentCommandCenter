@@ -25,6 +25,7 @@ async function refresh() {
 function render() {
   renderConversation();
   renderGitHub();
+  renderIntegrations();
   $('project').textContent = state.project;
   $('project-mode').value = state.project_mode || 'online';
   $('branch').textContent = 'Branch: ' + (state.git.branch || 'unavailable');
@@ -38,6 +39,16 @@ function render() {
   $('new-agent').innerHTML = options($('new-agent').value || 'local-command');
   // Preserve open input fields while events continue arriving.
   if (!$('detail').contains(document.activeElement) || document.activeElement.tagName === 'BUTTON') renderDetail();
+}
+function renderIntegrations() {
+  const hub=state.integrations||{providers:[],jobs:[],memory:[],job_counts:{}};
+  $('provider-summary').innerHTML=hub.providers.map(p=>`<div class="provider-card"><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.status.replaceAll('_',' '))} · ${p.local?'local':'cloud'}</small><small>${escapeHTML(p.capabilities.join(', '))}</small></div>`).join('')||'<p class="muted">No providers registered.</p>';
+  if(!$('integration-job-form').contains(document.activeElement)){
+    const selectedProvider=$('integration-provider').value;
+    $('integration-provider').innerHTML='<option value="">Automatic</option>'+hub.providers.map(p=>`<option value="${escapeHTML(p.id)}" ${p.id===selectedProvider?'selected':''}>${escapeHTML(p.name)} · ${escapeHTML(p.status.replaceAll('_',' '))}</option>`).join('');
+  }
+  $('integration-jobs').innerHTML=hub.jobs.slice(0,20).map(j=>`<div class="integration-record"><strong>${escapeHTML(j.capability)}</strong><small>${escapeHTML(j.provider)} · ${escapeHTML(j.status.replaceAll('_',' '))} · priority ${escapeHTML(j.priority)}</small>${j.last_error?`<small>${escapeHTML(j.last_error)}</small>`:''}<div class="actions">${['queued','blocked_offline','waiting_provider'].includes(j.status)?`<button data-job="${escapeHTML(j.id)}" data-job-action="cancel">Cancel</button>`:''}${j.status==='failed'?`<button data-job="${escapeHTML(j.id)}" data-job-action="retry">Retry</button>`:''}</div></div>`).join('')||'<p class="muted">No integration jobs.</p>';
+  $('memory-list').innerHTML=hub.memory.slice(0,20).map(m=>`<div class="memory-record"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(m.kind)} · v${escapeHTML(m.version)} · ${escapeHTML(m.status)}</small><p>${escapeHTML(m.body)}</p>${m.status==='proposed'?`<div class="actions"><button data-memory="${escapeHTML(m.id)}" data-memory-status="active">Accept</button><button data-memory="${escapeHTML(m.id)}" data-memory-status="rejected">Reject</button></div>`:''}</div>`).join('')||'<p class="muted">No shared memory yet.</p>';
 }
 function renderWorkList() {
   $('view-tasks').classList.toggle('selected',workView==='tasks');
@@ -151,6 +162,10 @@ $('project-mode').onchange=async e=>{try{await api('project/mode',{mode:e.target
 $('archive-search').onsubmit=async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(e.target));const query=new URLSearchParams(Object.fromEntries(Object.entries(data).filter(([,v])=>v))).toString();const result=await api('archive?'+query);$('archive-results').innerHTML=result.tasks.map(t=>`<button class="task" data-task="${t.id}"><div class="top"><strong>${escapeHTML(taskLabel(t))} ${escapeHTML(t.title)}</strong><span class="badge">${escapeHTML(labels[t.status]||t.status)}</span></div><small>${escapeHTML(t.activity)}</small></button>`).join('')||'<p class="muted">No matching tasks.</p>';}catch(err){error(err.message);}};
 $('archive-results').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;render();renderDetail();}};
 $('archive-export').onsubmit=async e=>{e.preventDefault();try{const result=await api('archive/export',Object.fromEntries(new FormData(e.target)));$('archive-status').textContent=`Exported ${result.tasks} tasks to ${result.markdown} and ${result.database}`;}catch(err){error(err.message);}};
+$('integration-job-form').onsubmit=async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(e.target));data.input=JSON.parse(data.input);if(!data.provider)delete data.provider;if(!data.idempotency_key)delete data.idempotency_key;await api('integrations/jobs',data);error('');await refresh();}catch(err){error(err.message);}};
+$('integration-jobs').onclick=async e=>{const b=e.target.closest('[data-job-action]');if(!b)return;try{await api(`integrations/jobs/${b.dataset.job}/${b.dataset.jobAction}`,{});await refresh();}catch(err){error(err.message);}};
+$('memory-form').onsubmit=async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(e.target));data.tags=data.tags.split(',').map(x=>x.trim()).filter(Boolean);data.source='acc-dashboard';data.request_id=crypto.randomUUID();await api('memory/propose',data);e.target.reset();error('');await refresh();}catch(err){error(err.message);}};
+$('memory-list').onclick=async e=>{const b=e.target.closest('[data-memory-status]');if(!b)return;try{await api(`memory/${b.dataset.memory}/review`,{status:b.dataset.memoryStatus,reviewer:'acc-dashboard'});await refresh();}catch(err){error(err.message);}};
 $('connect-form').onsubmit=e=>{e.preventDefault();token=$('token').value.trim();connect();};
 $('new-task').onclick=()=>{if(!state){error('Connect to the local coordinator first.');return;} $('task-dialog').showModal();};
 $('close-dialog').onclick=()=>$('task-dialog').close();

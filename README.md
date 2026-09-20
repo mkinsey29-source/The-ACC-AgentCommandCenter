@@ -4,7 +4,7 @@
 
 A local project window for instructions, agent assignments, live worker output, local Git changes, and review records. Windows and Linux are the intended targets; this first implementation was exercised on Linux.
 
-**v0.4 adds saved laptop setup, GitHub activity and reviewed publication, agent switches after the current step, and task prerequisites.** Use the [laptop setup guide](docs/LAPTOP-SETUP.md) for Omarchy/Linux or Windows. Models become usable after their host profiles are configured. No sample tasks are loaded.
+**v0.6 adds one durable provider queue and reviewed shared project memory.** DeepSeek Harness, Gemini/Nano Banana, Meshy, Tripo, Aura, TypeSafe Jev, RunPod, Blender, and Unity are represented by capability-based provider profiles. Credentials and provider-specific executors remain external to ACC.
 
 For a saved launch from Linux, run `./start-acc.sh init --project /path/to/project`, then `./start-acc.sh`. On Windows use `start-acc.ps1` from PowerShell. `doctor` reports missing connections. Setup opens the dashboard and generates an absolute-path MCP configuration fragment.
 
@@ -47,6 +47,8 @@ Type naturally in ACC or use the desktop orchestrator through MCP. Configure age
 - Persist tasks, runs, activity, reports, and review acceptance in SQLite.
 - Block another ACC writer in the same workspace, including a second state directory under the same OS user.
 - Expose task controls through a local stdio MCP bridge for a connected orchestrator.
+- Route AI, asset, and rendering work through durable integration jobs with idempotency keys, budgets, offline blocking, and fenced worker leases.
+- Keep versioned shared project memory; agents propose entries and a reviewer activates or rejects them.
 - Label unavailable providers, failed runs, interrupted processes, and pending review honestly.
 
 For manual tasks, an exit code of zero means **Needs review**, not approved. Managed workflows advance only with a valid structured result and use the stronger snapshot-bound acceptance checks described below. Reported acceptance records its run ID, requirement revision, and a supplied code snapshot reference. ACC does not independently prove that an external reviewer inspected that reference.
@@ -88,6 +90,8 @@ Conversation tools include `acc_conversation_read`, `acc_conversation_send`, `ac
 
 Additional tools: `acc_switch_agent`, `acc_schedule_task`, `acc_github_refresh`, `acc_github_configure`, `acc_publish_preview`, and `acc_publish_task`.
 
+Integration tools: `acc_submit_integration_job`, `acc_claim_integration_job`, `acc_renew_integration_job`, `acc_finish_integration_job`, `acc_cancel_integration_job`, `acc_retry_integration_job`, `acc_memory_search`, `acc_memory_propose`, and `acc_memory_review`.
+
 Task tools: `acc_configure_workflow`, `acc_state`, `acc_create_task`, `acc_start_task`, `acc_stop_task`, `acc_assign_task`, `acc_update_instructions`, `acc_report`, and `acc_record_review`.
 
 Your connected orchestrator explicitly records instructions and actions through these tools. ACC does not read unrelated chats or automatically connect this repository to ChatGPT Remote. The bridge's HTTP operations are tested; native host setup still needs verification on your computer.
@@ -113,4 +117,4 @@ node --check acc/web/app.js
 
 See [implementation status](docs/IMPLEMENTATION-STATUS.md) for evidence and remaining work, [the full plan](docs/PROJECT-PLAN.md) for the agreed direction, and [the API](docs/API.md) for the bridge/HTTP contract.
 
-Work is tracked through `temporary` → `main` PRs for this initial delivery. Do not merge or delete the source branch without the user's instruction.
+Work is tracked through short-lived `temporary` → `main` PRs. The repository deletes merged branches automatically.

@@ -1,4 +1,12 @@
-# Implementation status — September 16, 2026
+# Implementation status — September 20, 2026
+
+## Current product work: integration queue and shared memory (v0.6)
+
+ACC now has a capability-routed provider catalog for DeepSeek Harness, Gemini/Nano Banana, Meshy, Tripo, Aura, TypeSafe Jev, RunPod, and the local Blender/Unity pipeline. Jobs persist in SQLite with priority, idempotent submission, cost budgets, offline blocking, explicit retry/cancel, expiring leases, and monotonic fencing. Workers report structured results, costs, and artifact references without placing provider credentials in ACC.
+
+Shared project memory is versioned and review-gated. Agents can search active memory and propose new facts, decisions, conventions, and lessons; accepting a new version supersedes the previous active version. The dashboard, HTTP API, and MCP bridge expose both systems.
+
+Automated verification passes 95 tests, with one optional MCP SDK interoperability test skipped when its dependency is absent. Python compilation, JavaScript syntax, and shell syntax checks pass. These tests use local scripted clients; live provider calls, RunPod GPUs, Blender, Unity, and native browser interaction remain unverified.
 
 ## Current product work: archive, global mode, and recovery
 
@@ -70,14 +78,14 @@ Stage A is partially demonstrated with actual local command workers and a tested
 1. Configure Hermes profiles on the user's machine and execute a small live-model handoff. Validate provider login, tool permissions, model context, output contract, and cancellation.
 2. Verify dashboard controls and responsive layout in a browser; validate native Windows process containment and scheduled startup.
 3. Validate the new conversation fallback/return with live providers. Safe active worker reassignment and automatic recovery from partially edited failed worker runs remain separate work.
-4. Add native Unity/Blender pipeline evidence and larger asset-aware review scope. Task dependencies and reviewed GitHub publication are implemented in v0.4.
+4. Connect provider-specific workers and validate live Gemini/Nano Banana, Meshy/Tripo, Aura, TypeSafe Jev, DeepSeek Harness, RunPod, Blender, and Unity jobs. Add native asset-aware review evidence.
 5. Extend idempotency beyond the conversation/recording endpoints, add retention quotas and stronger execution isolation as needed.
 
 Live mid-run requirement injection, automatic recovery from partial failed edits, and direct Unity/Blender control are not implemented by ACC itself. Continue using the existing game pipeline under its coordinator.
 
 ## Repository workflow
 
-`main` contains only the bootstrap README until the implementation PR is merged. Initial implementation source: reusable `temporary`. Preserve it after merge. Do not merge without user instruction. The full agreed direction is in `PROJECT-PLAN.md`.
+Changes use a short-lived `temporary` branch and merge to `main` through a PR. The repository deletes merged branches automatically. The full agreed direction is in `PROJECT-PLAN.md`.
 
 ## Follow-up: real sub-agent handoff exercise
 

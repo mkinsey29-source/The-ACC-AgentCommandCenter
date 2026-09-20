@@ -295,6 +295,8 @@ class Coordinator:
         self.voice = Voice(self, settings.get('transcription'))
         from .controls import Controls
         self.controls = Controls(self)
+        from .integrations import IntegrationHub
+        self.integrations = IntegrationHub(self, settings.get('integrations'))
         from .github import GitHub
         self.github = GitHub(self, settings.get('github'))
         from .archive import Archive
@@ -312,10 +314,12 @@ class Coordinator:
             return {'project': str(self.project), 'project_mode': self.controls.mode(),
                     'tasks': [t for t in self.store.tasks() if not t.get('internal')],
                     'conversation': self.conversation.state(), 'github': self.github.snapshot(),
+                    'integrations': self.integrations.snapshot(),
                     'agents': self.public_agents(), 'git': self.git, 'cursor': seq,
                     'events': self.store.events(max(0, seq - 100)),
                     'recovery_required': self.recovery_required,
-                    'capabilities': {'github': True, 'switch_after_step': True, 'automatic_offline': bool(self.conversation.settings.get('local_agent')), 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True}}
+                    'capabilities': {'github': True, 'switch_after_step': True, 'automatic_offline': bool(self.conversation.settings.get('local_agent')), 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True,
+                                     'integration_jobs': True, 'shared_memory': True, 'fenced_job_leases': True}}
 
     def build_task(self, payload):
         title, instruction = payload.get('title', '').strip(), payload.get('instruction', '').strip()
