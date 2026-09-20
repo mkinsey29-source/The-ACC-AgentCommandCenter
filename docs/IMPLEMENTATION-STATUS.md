@@ -2,7 +2,7 @@
 
 ## Current product work: integration queue and shared memory (v0.6)
 
-ACC now has a capability-routed provider catalog for DeepSeek Harness, Gemini/Nano Banana, Meshy, Tripo, Aura, TypeSafe Jev (Choice, Score, and Noul), RunPod, and the local Blender/Unity pipeline. Jobs persist in SQLite with priority, idempotent submission, cost budgets, offline blocking, explicit retry/cancel, expiring leases, and monotonic fencing. Workers report structured results, costs, and artifact references without placing provider credentials in ACC.
+ACC now has a capability-routed provider catalog for DeepSeek Harness, Muse Spark 1.3 Contributor, Gemini/Nano Banana, Meshy, Tripo, Aura, TypeSafe Jev (Choice, Score, and Noul), RunPod, and the local Blender/Unity pipeline. Muse Contributor is policy-limited to public data and an isolated repository because its content may be used for provider training. Jobs persist in SQLite with priority, idempotent submission, cost budgets, offline blocking, explicit retry/cancel, expiring leases, and monotonic fencing. Workers report structured results, costs, and artifact references without placing provider credentials in ACC.
 
 Shared project memory is versioned and review-gated. Agents can search active memory and propose new facts, decisions, conventions, and lessons; accepting a new version supersedes the previous active version. The dashboard, HTTP API, and MCP bridge expose both systems.
 
