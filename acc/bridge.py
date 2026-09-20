@@ -76,6 +76,39 @@ TOOLS.extend([
      {'task_id': {'type': 'string'}}, ['task_id']),
     ('acc_publish_task', 'Publish a reviewed preview under existing user authorization: commit, non-force push, and create or reuse a PR. Never merges.',
      {'task_id': {'type': 'string'}, 'preview_id': {'type': 'string'}, 'request_id': {'type': 'string'}}, ['task_id', 'preview_id', 'request_id']),
+    ('acc_submit_integration_job', 'Durably queue a capability job. Remote jobs wait while offline; a stable idempotency key makes retries safe.',
+     {'capability': {'type': 'string'}, 'provider': {'type': 'string'}, 'task_id': {'type': 'string'},
+      'input': {'type': 'object'}, 'budget': {'type': 'object'}, 'priority': {'type': 'integer'},
+      'idempotency_key': {'type': 'string'}}, ['capability', 'input']),
+    ('acc_claim_integration_job', 'Claim the highest-priority eligible job with a fenced, expiring worker lease.',
+     {'owner': {'type': 'string'}, 'provider': {'type': 'string'},
+      'capabilities': {'type': 'array', 'items': {'type': 'string'}},
+      'lease_seconds': {'type': 'integer'}}, ['owner']),
+    ('acc_renew_integration_job', 'Renew an active fenced integration-job lease.',
+     {'job_id': {'type': 'string'}, 'lease_token': {'type': 'string'}, 'fence': {'type': 'integer'},
+      'lease_seconds': {'type': 'integer'}}, ['job_id', 'lease_token', 'fence']),
+    ('acc_finish_integration_job', 'Finish a leased job and atomically record structured results, costs, and artifacts.',
+     {'job_id': {'type': 'string'}, 'lease_token': {'type': 'string'}, 'fence': {'type': 'integer'},
+      'status': {'type': 'string', 'enum': ['succeeded', 'failed']}, 'result': {'type': 'object'},
+      'cost': {'type': 'object'}, 'error': {'type': 'string'},
+      'artifacts': {'type': 'array', 'items': {'type': 'object'}}},
+     ['job_id', 'lease_token', 'fence', 'status']),
+    ('acc_cancel_integration_job', 'Cancel a queued integration job. Running jobs retain lease ownership.',
+     {'job_id': {'type': 'string'}}, ['job_id']),
+    ('acc_retry_integration_job', 'Return a failed integration job to the policy-controlled durable queue.',
+     {'job_id': {'type': 'string'}}, ['job_id']),
+    ('acc_memory_search', 'Search reviewed shared project memory, or explicitly request proposed/superseded entries.',
+     {'q': {'type': 'string'}, 'kind': {'type': 'string'}, 'status': {'type': 'string'},
+      'task_id': {'type': 'string'}, 'limit': {'type': 'integer'}}, []),
+    ('acc_memory_propose', 'Propose a versioned project-memory entry for ACC review. Does not silently alter project truth.',
+     {'title': {'type': 'string'}, 'body': {'type': 'string'}, 'kind': {'type': 'string'},
+      'key': {'type': 'string'}, 'source': {'type': 'string'}, 'task_id': {'type': 'string'},
+      'branch': {'type': 'string'}, 'commit': {'type': 'string'},
+      'tags': {'type': 'array', 'items': {'type': 'string'}}, 'request_id': {'type': 'string'}},
+     ['title', 'body']),
+    ('acc_memory_review', 'Accept or reject a proposed memory version. Acceptance supersedes the prior active version.',
+     {'memory_id': {'type': 'string'}, 'status': {'type': 'string', 'enum': ['active', 'rejected']},
+      'reviewer': {'type': 'string'}}, ['memory_id', 'status']),
 ])
 
 
@@ -89,7 +122,7 @@ def dispatch(message, url, token):
         supported = ('2024-11-05', '2025-03-26', '2025-06-18')
         requested = message.get('params', {}).get('protocolVersion')
         return result({'protocolVersion': requested if requested in supported else supported[-1],
-                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.5.0'}})
+                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.6.0'}})
     if method == 'ping':
         return result({})
     if method == 'tools/list':
@@ -122,6 +155,27 @@ def dispatch(message, url, token):
             path, data = '/api/archive?' + urlencode(args), None
         elif name == 'acc_export_archive':
             path, data = '/api/archive/export', args
+        elif name == 'acc_submit_integration_job':
+            path, data = '/api/integrations/jobs', args
+        elif name == 'acc_claim_integration_job':
+            path, data = '/api/integrations/claim', args
+        elif name in ('acc_renew_integration_job', 'acc_finish_integration_job',
+                      'acc_cancel_integration_job', 'acc_retry_integration_job'):
+            job_id = args.pop('job_id')
+            if not isinstance(job_id, str) or not job_id.isalnum():
+                raise ValueError('Invalid integration job ID')
+            operation = name.removeprefix('acc_').removesuffix('_integration_job')
+            path, data = f'/api/integrations/jobs/{job_id}/{operation}', args
+        elif name == 'acc_memory_search':
+            from urllib.parse import urlencode
+            path, data = '/api/memory?' + urlencode(args), None
+        elif name == 'acc_memory_propose':
+            path, data = '/api/memory/propose', args
+        elif name == 'acc_memory_review':
+            memory_id = args.pop('memory_id')
+            if not isinstance(memory_id, str) or not memory_id.isalnum():
+                raise ValueError('Invalid memory ID')
+            path, data = f'/api/memory/{memory_id}/review', args
         elif name == 'acc_create_task':
             path, data = '/api/tasks', args
         else:
