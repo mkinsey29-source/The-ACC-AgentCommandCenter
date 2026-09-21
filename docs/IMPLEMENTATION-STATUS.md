@@ -6,7 +6,9 @@ ACC now has a capability-routed provider catalog for DeepSeek Harness, Muse Spar
 
 Shared project memory is versioned and review-gated. Agents can search active memory and propose new facts, decisions, conventions, and lessons; accepting a new version supersedes the previous active version. The dashboard, HTTP API, and MCP bridge expose both systems.
 
-Automated verification passes 95 tests, with one optional MCP SDK interoperability test skipped when its dependency is absent. Python compilation, JavaScript syntax, and shell syntax checks pass. These tests use local scripted clients; live provider calls, RunPod GPUs, Blender, Unity, and native browser interaction remain unverified.
+Agent 3D Studio has its first connector: `acc/agent3d.py` claims a queued job, asks a coding-agent CLI to build the asset with this project's own `img2threejs` skill chain, hashes the artifacts the agent declares, and reports success or failure back to the job queue. See [the connector guide](AGENT-3D-STUDIO.md) for the job contract and prerequisites.
+
+Automated verification passes 99 tests, with one optional MCP SDK interoperability test skipped when its dependency is absent. Python compilation, JavaScript syntax, and shell syntax checks pass. These tests use local scripted clients, including a scripted stand-in for the Agent 3D Studio coding-agent CLI; live provider calls, a live coding-agent run, RunPod GPUs, Blender, Unity, and native browser interaction remain unverified.
 
 ## Current product work: archive, global mode, and recovery
 
