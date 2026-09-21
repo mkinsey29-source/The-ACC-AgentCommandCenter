@@ -4,7 +4,7 @@
 
 A local project window for instructions, agent assignments, live worker output, local Git changes, and review records. Windows and Linux are the intended targets; this first implementation was exercised on Linux.
 
-**v0.6 adds one durable provider queue and reviewed shared project memory.** DeepSeek Harness, Muse Spark Contributor, Gemini/Nano Banana, Meshy, Tripo, Aura, TypeSafe Jev, RunPod, Blender, and Unity are represented by capability-based provider profiles. Muse Contributor jobs are limited to public data in an isolated repository. Credentials and provider-specific executors remain external to ACC.
+**v0.6 adds one durable provider queue and reviewed shared project memory.** DeepSeek Harness, Muse Spark Contributor, Gemini/Nano Banana, Agent 3D Studio (img2threejs), Aura, TypeSafe Jev, RunPod, Blender, and Unity are represented by capability-based provider profiles. Muse Contributor jobs are limited to public data in an isolated repository. Credentials and provider-specific executors remain external to ACC.
 
 For a saved launch from Linux, run `./start-acc.sh init --project /path/to/project`, then `./start-acc.sh`. On Windows use `start-acc.ps1` from PowerShell. `doctor` reports missing connections. Setup opens the dashboard and generates an absolute-path MCP configuration fragment.
 
