@@ -50,9 +50,17 @@ rather than being reported as succeeded.
 python3 -m acc.agent3d --token-file /path/to/token --workspace /path/to/managed/project
 ```
 
-`--executable` defaults to `claude`; pass `--extra-args --model sonnet` (or similar) to
-forward flags to the agent CLI. `--once` processes a single job and exits, for use as a
-supervised worker command instead of a long-running poller.
+`--executable` defaults to `claude`; pass `--extra-args "--model sonnet"` (a single
+shell-quoted string) to forward flags to the agent CLI. `--once` processes a single job
+and exits, for use as a supervised worker command instead of a long-running poller.
+
+Prefer a scoped `--allowedTools` list over `--permission-mode bypassPermissions` for
+real use: `img2threejs`'s gates run entirely through `python3 forge/*.py` and
+`python3 scripts/*.py` subprocess calls, which `acceptEdits` does not cover, but a
+narrow allowlist (e.g. `--extra-args "--allowedTools 'Bash(python3 forge/*.py *)' \
+'Bash(python3 scripts/*.py *)' 'Bash(chmod +x *)' Write Edit"`) grants exactly those
+without opening the agent up to arbitrary shell execution. `bypassPermissions` also
+refuses to run at all under a root/sudo process, by Claude Code's own design.
 
 ## Verification status
 
