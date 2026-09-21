@@ -260,6 +260,18 @@ class Coordinator:
         if for_config:
             for agent in for_config:
                 key = agent['id']
+                if key == 'local-command' or not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', key):
+                    raise ValueError('Invalid agent id.')
+                if agent.get('kind') == 'job':
+                    capability = agent.get('capability')
+                    if not isinstance(capability, str) or not re.fullmatch(
+                            r'[a-z][a-z0-9-]{0,39}(?:\.[a-z][a-z0-9-]{0,39}){0,3}', capability):
+                        raise ValueError('Job-backed agents need a dotted lowercase capability.')
+                    self.agents[key] = {'id': key, 'name': agent.get('name', key), 'kind': 'job',
+                                        'capability': capability, 'provider': agent.get('provider'),
+                                        'local': bool(agent.get('local')), 'available': True,
+                                        'description': 'Job-backed implementer; provider readiness checked at submission.'}
+                    continue
                 if agent.get('driver') == 'hermes':
                     executable = agent.get('executable', 'hermes')
                     argv = [sys.executable, str(Path(__file__).with_name('hermes.py')), 'run',
@@ -270,8 +282,6 @@ class Coordinator:
                     agent['argv'] = argv
                 else:
                     argv = agent['argv']
-                if key == 'local-command' or not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', key):
-                    raise ValueError('Invalid agent id.')
                 if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
                     raise ValueError('Agent argv must be a nonempty string array.')
                 available = bool(shutil.which(agent.get('executable', 'hermes') if agent.get('driver') == 'hermes' else argv[0]))
@@ -281,8 +291,13 @@ class Coordinator:
         self.recovery_required = False
         for task in self.store.tasks():
             if task['status'] in ('launching', 'running', 'stopping', 'processing_result', 'publishing'):
+                job_backed = bool((task.get('workflow') or {}).get('job_id')) and \
+                    self.agents.get(task.get('active_agent'), {}).get('kind') == 'job'
                 task['status'] = 'interrupted'
-                task['activity'] = 'Coordinator restarted. Inspect previous PID before releasing workspace.'
+                task['activity'] = ('Coordinator restarted while a job-backed step was outstanding; '
+                                     'confirm the external job/worker is stopped or reconciled before '
+                                     'releasing workspace.' if job_backed else
+                                     'Coordinator restarted. Inspect previous PID before releasing workspace.')
                 self.store.save(task, 'interrupted', {'message': task['activity']})
             if task['status'] == 'interrupted':
                 self.recovery_required = True
@@ -451,6 +466,8 @@ class Coordinator:
                 task['active_child_id'] = child['id']
             folder = self.state / 'runs' / run_id
             folder.mkdir(parents=True)
+            if agent.get('kind') == 'job':
+                return self._start_job_implementer(task, agent, run_id, folder)
             prompt = folder / 'task.json'
             packet = self._packet(task)
             packet['result_file'] = str(folder / 'result.json')
@@ -509,6 +526,82 @@ class Coordinator:
             self.deadline.start()
             self.worker_thread.start()
             return task
+
+    def _start_job_implementer(self, task, agent, run_id, folder):
+        """Dispatch the implement stage to a capability job instead of a supervised subprocess.
+
+        A job has no PID for ACC to own: it is claimed and executed by a decoupled, possibly
+        remote worker and reports back later via IntegrationHub.finish(). The single-writer
+        workspace lock (running_task) still applies for the whole wait, same as a subprocess run.
+        """
+        workflow = task['workflow']
+        job = self.integrations.submit({
+            'capability': agent['capability'], 'provider': agent.get('provider'),
+            'task_id': task['id'], 'input': {
+                'title': task['title'], 'instruction': task['instruction'],
+                'round': workflow['round'], 'history': workflow['history'][-6:]}})
+        workflow['job_id'], workflow['phase'] = job['id'], 'running'
+        task.update(status='running', run_id=run_id, pid=None, active_agent=agent['id'], exit_code=None,
+                    activity='Dispatched to ' + agent['name'] + '; awaiting job completion.',
+                    delivered_revision=task['revision'], next_step='Waiting for job-backed implementer',
+                    review=None, timed_out=False)
+        task['runs'].append({'id': run_id, 'pid': None, 'agent': agent['id'], 'job_id': job['id'],
+                             'revision': task['revision'], 'started': now(), 'folder': str(folder),
+                             'stage': 'implement'})
+        self.store.save(task, 'run_started', {'message': 'Dispatched job to ' + agent['name'],
+                        'run_id': run_id, 'job_id': job['id'], 'revision': task['revision']})
+        if task.get('active_child_id'):
+            child = self.store.get(task['active_child_id'])
+            child.update(status='running', activity=task['activity'])
+            child['runs'].append({'id': run_id, 'pid': None, 'agent': agent['id'], 'job_id': job['id'],
+                                  'revision': task['revision'], 'started': now(), 'folder': str(folder),
+                                  'stage': 'implement'})
+            self.store.save(child, 'workflow_step_started', {'message': child['activity'], 'run_id': run_id})
+        self.process, self.running_task = None, task['id']
+        self.deadline = threading.Timer(task['timeout_seconds'], self._timeout, args=(task['id'], run_id))
+        self.deadline.daemon = True
+        self.deadline.start()
+        return task
+
+    def _conclude_job_child(self, task, child_status):
+        if task.get('active_child_id'):
+            child = self.store.get(task['active_child_id'])
+            child.update(status=child_status, active_agent=None, pid=None, activity=task['activity'])
+            if child['runs']:
+                child['runs'][-1].update(ended=now())
+            self.store.save(child, 'workflow_step_finished', {'message': child['activity'],
+                            'parent_task_number': task['task_number'], 'status': child_status})
+            task['active_child_id'] = None
+            self.store.save(task, 'workflow_child_link_cleared', {'message': 'Numbered workflow step recorded.'})
+
+    def on_job_finished(self, job):
+        """Called by IntegrationHub.finish() (after its own transaction commits) for any job
+        that carries a task_id. Most calls are a no-op here: only a job that a job-backed
+        implementer step is actively waiting on advances the workflow."""
+        with self.lock:
+            task_id = job.get('task_id')
+            if not task_id:
+                return
+            try:
+                task = self.store.get(task_id)
+            except KeyError:
+                return
+            w = task.get('workflow')
+            if not (w and w.get('job_id') == job['id'] and w['stage'] == 'implement'
+                    and self.running_task == task_id and task['status'] in ('running', 'stopping')):
+                return  # Stale, superseded, or already resolved (e.g. marked interrupted at restart).
+            if self.deadline:
+                self.deadline.cancel()
+            stopped = task['status'] == 'stopping'
+            try:
+                self.workflows.finish_job(task, job, stopped)
+            except Exception as exc:
+                self.workflows.hold(task, str(exc))
+            task = self.store.get(task_id)
+            child_status = 'paused' if stopped else ('completed' if task['status'] == 'queued' else 'failed')
+            self._conclude_job_child(task, child_status)
+            self.controls.apply(task_id)
+            self.process, self.running_task = None, None
 
     def _timeout(self, task_id, run_id):
         with self.lock:
@@ -608,9 +701,30 @@ class Coordinator:
             task = self.store.get(task_id)
             if task.get('workflow'):
                 task['workflow']['enabled'] = False
+            job_id = (task.get('workflow') or {}).get('job_id')
+            job_backed = job_id and self.agents.get(task.get('active_agent'), {}).get('kind') == 'job'
             task.update(status='stopping', activity='Stopping runner and child processes…')
             self.store.save(task, 'stop_requested', {'message': task['activity']})
             proc = self.process
+        if job_backed:
+            # A job already claimed by a remote worker has no local process ACC can kill; it can
+            # only be cancelled while still queued. Otherwise the task waits in 'stopping' until
+            # on_job_finished() sees the eventual (success or failure) report and holds it.
+            try:
+                cancelled = self.integrations.cancel(job_id)
+            except (KeyError, Conflict):
+                cancelled = None
+            if cancelled and cancelled['status'] == 'cancelled':
+                with self.lock:
+                    task = self.store.get(task_id)
+                    if self.deadline:
+                        self.deadline.cancel()
+                    self.workflows.hold(task, 'Workflow stopped before the job was claimed.')
+                    task = self.store.get(task_id)
+                    self._conclude_job_child(task, 'paused')
+                    self.controls.apply(task_id)
+                    self.process, self.running_task = None, None
+            return self.store.get(task_id)
         stop_tree(proc)
         return self.store.get(task_id)
 

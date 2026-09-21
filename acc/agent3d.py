@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shlex
 import subprocess
 import sys
 import threading
@@ -157,13 +158,15 @@ def main(argv=None):
     parser.add_argument('--executable', default='claude')
     parser.add_argument('--owner', default='agent-3d-studio-worker')
     parser.add_argument('--permission-mode', default='acceptEdits')
-    parser.add_argument('--extra-args', nargs='*', default=[],
-                         help='Extra argv passed through to the agent CLI, e.g. --model sonnet')
+    parser.add_argument('--extra-args', default='',
+                         help='Extra argv passed through to the agent CLI, shell-quoted as one '
+                              'string, e.g. --extra-args "--model sonnet --allowedTools Write"')
     parser.add_argument('--lease-seconds', type=int, default=300)
     parser.add_argument('--timeout-seconds', type=int, default=1800)
     parser.add_argument('--poll-seconds', type=float, default=5.0)
     parser.add_argument('--once', action='store_true', help='Process at most one job and exit')
     args = parser.parse_args(argv)
+    args.extra_args = shlex.split(args.extra_args)
     token = Path(args.token_file).read_text(encoding='utf-8').strip()
     while True:
         try:

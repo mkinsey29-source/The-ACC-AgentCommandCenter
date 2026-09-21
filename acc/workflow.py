@@ -20,6 +20,8 @@ class Workflows:
         for role, agent in roles.items():
             if agent not in c.agents or agent == 'local-command':
                 raise ValueError('Configure a command adapter for ' + role + '.')
+            if role != 'implementer' and c.agents[agent].get('kind') == 'job':
+                raise ValueError('A job-backed adapter can only serve as the implementer.')
         if roles['implementer'] == roles['reviewer']:
             raise ValueError('Use a separate reviewer adapter.')
         rounds = payload.get('max_rounds', (old or {}).get('max_rounds', 3))
@@ -31,9 +33,11 @@ class Workflows:
         fallback = payload.get('fallbacks', (old or {}).get('fallbacks', {}))
         if not isinstance(fallback, dict) or set(fallback) - set(roles):
             raise ValueError('Fallbacks must map workflow roles to configured local adapters.')
-        for agent in fallback.values():
+        for role, agent in fallback.items():
             if agent not in c.agents or c.agents[agent].get('local') is not True:
                 raise ValueError('Fallback adapters must explicitly declare local: true.')
+            if role != 'implementer' and c.agents[agent].get('kind') == 'job':
+                raise ValueError('A job-backed adapter can only serve as the implementer.')
         return {**roles, 'max_rounds': rounds, 'mode': mode, 'fallbacks': fallback}
 
     @staticmethod
@@ -196,6 +200,36 @@ class Workflows:
         w.update(phase='queued', fallback_used=False)
         task.update(status='queued', next_step='Run ' + w['stage'], activity=result['summary'])
         self.c.store.save(task, 'handoff_ready', {'message': task['next_step'], 'summary': result['summary']})
+        self.wake.set()
+
+    def finish_job(self, task, job, stopped):
+        """The implement-stage counterpart to finish() for a job-backed implementer: the job's
+        own finish() report stands in for the result.json a spawned CLI would have written."""
+        w = task['workflow']
+        if stopped:
+            self.hold(task, 'Workflow stopped; retained job result needs inspection.')
+            return
+        if job['status'] != 'succeeded':
+            self.hold(task, 'Job-backed implementer failed: ' + (job.get('last_error') or 'Unknown error.'))
+            return
+        artifacts = job.get('artifacts', [])
+        summary = ((job.get('result') or {}).get('summary') or '').strip() or 'Job-backed implementer completed.'
+        # Match the envelope a spawned CLI's result.json carries (see packet()'s result_contract):
+        # later stages (the accept step in particular) read task_id/run_id/revision/snapshot_id
+        # back out of w['implementation'] regardless of which kind of implementer produced it.
+        result = {'task_id': task['id'], 'run_id': task['run_id'], 'revision': task['revision'],
+                  'snapshot_id': None, 'summary': summary,
+                  'checks': [{'artifact': a['uri'], 'kind': a['kind'], 'sha256': a['sha256']}
+                             for a in artifacts], 'artifacts': artifacts}
+        w['history'].append({'stage': 'implement', 'agent': task['active_agent'], 'at': now(), 'result': result})
+        w['snapshot'] = snapshots.freeze(self.c.project, Path(self.c.state) / 'runs' / task['run_id'] / 'snapshot')
+        w['implementation'] = result
+        w['implementation_agent'] = task['active_agent']
+        w['review_result'] = None
+        w['stage'] = 'coordinate'
+        w.update(phase='queued', fallback_used=False)
+        task.update(status='queued', next_step='Run coordinate', activity=summary)
+        self.c.store.save(task, 'handoff_ready', {'message': task['next_step'], 'summary': summary})
         self.wake.set()
 
     def _loop(self):

@@ -16,10 +16,12 @@ from acc.server import Server
 ROOT = Path(__file__).resolve().parents[1]
 
 # Stands in for a real coding-agent CLI: reads the prompt from stdin, finds the result-file
-# path it was told to write to, and reports either a produced artifact or a failure.
+# path it was told to write to, and reports either a produced artifact or a failure. Also
+# records its own argv so tests can assert on how --extra-args was forwarded.
 FAKE_AGENT = r'''
 import json, pathlib, re, sys
 
+pathlib.Path('argv.json').write_text(json.dumps(sys.argv[1:]))
 prompt = sys.stdin.read()
 result_file = pathlib.Path(re.search(r'to (\S+\.json)', prompt).group(1))
 if 'FAIL' in prompt:
@@ -132,6 +134,20 @@ class Agent3DTests(unittest.TestCase):
         run = self.run_worker()
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertEqual(self.c.integrations.snapshot()['jobs'], [])
+
+    def test_extra_args_with_embedded_flags_reach_the_agent_cli(self):
+        self.submit()
+        run = subprocess.run(
+            [sys.executable, str(ROOT / 'acc' / 'agent3d.py'), '--url', self.url,
+             '--token-file', str(self.token_file), '--workspace', str(self.project),
+             '--executable', str(self.fake_agent), '--once', '--extra-args',
+             "--allowedTools 'Bash(python3 forge/*.py *)' Write Edit"],
+            capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        argv = json.loads((self.project / 'argv.json').read_text())
+        self.assertEqual(argv, ['-p', '--output-format', 'json', '--permission-mode',
+                                 'acceptEdits', '--allowedTools',
+                                 'Bash(python3 forge/*.py *)', 'Write', 'Edit'])
 
 
 if __name__ == '__main__':
