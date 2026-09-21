@@ -611,7 +611,11 @@ class Coordinator:
             task['timed_out'] = True
             self.store.save(task, 'timeout', {'message': 'Run deadline exceeded; stopping worker.'})
         try:
-            self.stop(task_id)
+            # force=True: a stuck run is exactly the emergency case, not the graceful one -- a
+            # job-backed step must actually be asked to stop here, not just left to keep running
+            # past its deadline. force is a no-op for a supervised subprocess (already immediate)
+            # or a still-queued job (already cancellable outright).
+            self.stop(task_id, force=True)
         except (Conflict, OSError, subprocess.TimeoutExpired):
             pass  # Existing run remains owned; the user can inspect or stop it.
 
@@ -694,22 +698,40 @@ class Coordinator:
         finally:
             proc.stdout.close()
 
-    def stop(self, task_id):
+    def stop(self, task_id, force=False):
+        """force=False (the default) never discards in-flight work it cannot actually interrupt:
+        a job already claimed by a remote worker keeps running to a safe boundary, the same way
+        offline mode already lets an in-flight cloud step finish instead of killing it. force=True
+        is the "absolutely unwanted, stop it now" escape hatch (also used by _timeout): it asks
+        the worker to stop itself, since ACC has no process of its own to kill for a remote job.
+        """
         with self.lock:
             if self.running_task != task_id:
                 raise Conflict('This task has no supervised active runner.')
             task = self.store.get(task_id)
-            if task.get('workflow'):
-                task['workflow']['enabled'] = False
             job_id = (task.get('workflow') or {}).get('job_id')
             job_backed = job_id and self.agents.get(task.get('active_agent'), {}).get('kind') == 'job'
+            claimed = job_backed and (self.integrations.get(job_id) or {}).get('status') == 'running'
+            if job_backed and claimed and not force:
+                task['workflow']['enabled'] = False
+                task.update(activity='Stop requested: a job already claimed by a remote worker '
+                                      "can't be forcibly interrupted; letting it finish, then "
+                                      'pausing before the next step.',
+                            next_step='Waiting for the in-flight job to finish, then paused')
+                self.store.save(task, 'stop_requested_graceful', {'message': task['activity']})
+                return task
+            if task.get('workflow'):
+                task['workflow']['enabled'] = False
             task.update(status='stopping', activity='Stopping runner and child processes…')
             self.store.save(task, 'stop_requested', {'message': task['activity']})
             proc = self.process
         if job_backed:
-            # A job already claimed by a remote worker has no local process ACC can kill; it can
-            # only be cancelled while still queued. Otherwise the task waits in 'stopping' until
-            # on_job_finished() sees the eventual (success or failure) report and holds it.
+            if claimed:
+                # force=True and already claimed: ACC still cannot kill a process it doesn't own.
+                # Flag it for the worker's own lease check-in to notice and kill the subprocess
+                # it does own; on_job_finished() resolves the task once that report arrives.
+                self.integrations.request_cancel(job_id)
+                return self.store.get(task_id)
             try:
                 cancelled = self.integrations.cancel(job_id)
             except (KeyError, Conflict):

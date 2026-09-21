@@ -253,7 +253,7 @@ class IntegrationHub:
                    'data_classification': data_classification, 'workspace_scope': workspace_scope,
                    'created': stamp, 'updated': stamp, 'attempts': 0, 'fence': 0,
                    'lease_owner': None, 'lease_until': None, 'lease_token_hash': None,
-                   'result': None, 'cost': {}, 'last_error': None}
+                   'result': None, 'cost': {}, 'last_error': None, 'cancel_requested': False}
             self._save_job(db, job)
             _event(db, 'integration_job_created',
                    {'message': f"{capability} queued for {provider} ({job['status']}).",
@@ -363,13 +363,37 @@ class IntegrationHub:
                    job.get('task_id'))
             return job
 
+    def get(self, job_id):
+        with self.c.lock, self.c.store.connect() as db:
+            self._expire_leases(db)
+            try:
+                job = self._load_job(db, job_id)
+            except KeyError:
+                return None
+            return {k: v for k, v in job.items() if k != 'lease_token_hash'}
+
+    def request_cancel(self, job_id):
+        """Cooperative cancellation for a job a remote worker already claimed: ACC has no process
+        of its own to kill, so this only flags intent. The worker notices on its next lease
+        renewal, kills the process it does own, and reports back through the normal finish()."""
+        with self.c.lock, self.c.store.connect() as db:
+            job = self._load_job(db, job_id)
+            if job['status'] in FINAL_JOB_STATES:
+                return job
+            job.update(cancel_requested=True, updated=now())
+            self._save_job(db, job)
+            _event(db, 'integration_job_cancel_requested',
+                   {'message': 'Cancellation requested; the worker will stop at its next lease '
+                               'check-in.', 'job_id': job_id}, job.get('task_id'))
+            return job
+
     def retry(self, job_id):
         with self.c.lock, self.c.store.connect() as db:
             job = self._load_job(db, job_id)
             if job['status'] != 'failed':
                 raise Conflict('Only failed jobs can be retried.')
             job.update(status=self._desired_state(job['provider']), updated=now(), result=None,
-                       cost={}, last_error=None)
+                       cost={}, last_error=None, cancel_requested=False)
             self._save_job(db, job)
             _event(db, 'integration_job_retried',
                    {'message': f"{job['capability']} returned to {job['status']}.", 'job_id': job_id},

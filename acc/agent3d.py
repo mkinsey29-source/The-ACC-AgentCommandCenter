@@ -58,12 +58,14 @@ def _prompt_for(job, result_file):
     )
 
 
-def _run_agent(executable, workspace, prompt, permission_mode, extra_args, timeout_seconds):
+def _run_agent(executable, workspace, prompt, permission_mode, extra_args, timeout_seconds, keeper=None):
     argv = [executable, '-p', '--output-format', 'json', '--permission-mode', permission_mode]
     argv += extra_args
     proc = subprocess.Popen(argv, cwd=str(workspace), stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, encoding='utf-8')
+    if keeper is not None:
+        keeper.proc = proc  # so a cancellation request can kill the process this worker owns
     try:
         output, _ = proc.communicate(prompt, timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
@@ -95,13 +97,19 @@ def _load_result(result_file, workspace):
 
 
 class LeaseKeeper(threading.Thread):
-    """Renews a claimed job's lease in the background while the agent is still working."""
+    """Renews a claimed job's lease in the background while the agent is still working, and
+    kills the locally-spawned process if the operator flags the job for cancellation. ACC has
+    no process of its own to kill for a remote job -- this worker does, and this is the only
+    place that owns both the lease renewal loop and the Popen handle, so it is the one thing
+    that can actually act on a cancellation request."""
 
     def __init__(self, url, token, job_id, lease_token, fence, lease_seconds):
         super().__init__(daemon=True)
         self.url, self.token, self.job_id = url, token, job_id
         self.lease_token, self.fence, self.lease_seconds = lease_token, fence, lease_seconds
         self._stop = threading.Event()
+        self.cancelled = threading.Event()
+        self.proc = None
 
     def stop(self):
         self._stop.set()
@@ -109,11 +117,15 @@ class LeaseKeeper(threading.Thread):
     def run(self):
         while not self._stop.wait(max(5, self.lease_seconds // 3)):
             try:
-                _request(self.url, self.token, 'POST',
+                renewed = _request(self.url, self.token, 'POST',
                           f'/api/integrations/jobs/{self.job_id}/renew',
                           {'lease_token': self.lease_token, 'fence': self.fence,
                            'lease_seconds': self.lease_seconds})
             except RuntimeError:
+                return
+            if renewed.get('cancel_requested') and self.proc is not None and self.proc.poll() is None:
+                self.cancelled.set()
+                self.proc.kill()
                 return
 
 
@@ -132,7 +144,9 @@ def process_once(args, token):
     try:
         prompt = _prompt_for(job, result_file)
         code, output = _run_agent(args.executable, workspace, prompt, args.permission_mode,
-                                   args.extra_args, args.timeout_seconds)
+                                   args.extra_args, args.timeout_seconds, keeper)
+        if keeper.cancelled.is_set():
+            raise ValueError('Cancelled by operator before completion.')
         if code != 0:
             raise ValueError(f'{args.executable} exited {code}:\n{output[-2000:]}')
         manifest, artifacts = _load_result(result_file, workspace)

@@ -11,6 +11,7 @@ import unittest
 
 from acc.core import Coordinator
 from acc.server import Server
+from test_acc import eventually
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +43,13 @@ sys.stdin.read()
 sys.exit(3)
 '''
 
+# Stands in for a coding-agent CLI that's still working when a cancellation lands.
+SLEEPY_AGENT = r'''
+import sys, time
+sys.stdin.read()
+time.sleep(120)
+'''
+
 
 class Agent3DTests(unittest.TestCase):
     def setUp(self):
@@ -67,6 +75,9 @@ class Agent3DTests(unittest.TestCase):
         self.crash_agent = self.root / 'crash-claude'
         self.crash_agent.write_text('#!' + sys.executable + '\n' + CRASH_AGENT)
         self.crash_agent.chmod(0o755)
+        self.sleepy_agent = self.root / 'sleepy-claude'
+        self.sleepy_agent.write_text('#!' + sys.executable + '\n' + SLEEPY_AGENT)
+        self.sleepy_agent.chmod(0o755)
 
     def tearDown(self):
         self.server.shutdown()
@@ -129,6 +140,28 @@ class Agent3DTests(unittest.TestCase):
         self.assertEqual(finished['id'], job['id'])
         self.assertEqual(finished['status'], 'failed')
         self.assertIn('exited 3', finished['last_error'])
+
+    def test_cancellation_request_kills_the_agents_own_process(self):
+        job = self.submit()
+        proc = subprocess.Popen(
+            [sys.executable, str(ROOT / 'acc' / 'agent3d.py'), '--url', self.url,
+             '--token-file', str(self.token_file), '--workspace', str(self.project),
+             '--executable', str(self.sleepy_agent), '--lease-seconds', '15', '--once'],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        try:
+            eventually(lambda: next((j for j in self.c.integrations.snapshot()['jobs']
+                                     if j['id'] == job['id'] and j['status'] == 'running'), None),
+                       timeout=10)
+            self.c.integrations.request_cancel(job['id'])
+            out, _ = proc.communicate(timeout=30)
+        except Exception:
+            proc.kill()
+            raise
+        self.assertEqual(proc.returncode, 0, out)
+        finished = self.c.integrations.snapshot()['jobs'][0]
+        self.assertEqual(finished['id'], job['id'])
+        self.assertEqual(finished['status'], 'failed')
+        self.assertIn('Cancelled by operator', finished['last_error'])
 
     def test_no_queued_job_is_a_clean_noop(self):
         run = self.run_worker()

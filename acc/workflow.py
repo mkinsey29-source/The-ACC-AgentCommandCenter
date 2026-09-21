@@ -207,7 +207,9 @@ class Workflows:
         own finish() report stands in for the result.json a spawned CLI would have written."""
         w = task['workflow']
         if stopped:
-            self.hold(task, 'Workflow stopped; retained job result needs inspection.')
+            detail = job.get('last_error') or (job.get('result') or {}).get('summary')
+            message = 'Workflow stopped; retained job result needs inspection.'
+            self.hold(task, message + (' ' + detail if detail else ''))
             return
         if job['status'] != 'succeeded':
             self.hold(task, 'Job-backed implementer failed: ' + (job.get('last_error') or 'Unknown error.'))

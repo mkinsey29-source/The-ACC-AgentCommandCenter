@@ -107,21 +107,38 @@ existing, tested machinery instead of new one-off mechanisms:
   protected by ACC's single-writer workspace lock, until the existing
   preview → commit → push → PR flow delivers it — never before.
 
-Two real limits worth knowing before relying on this:
-- **Stopping a claimed job**: ACC can only cancel a job that's still `queued`. Once an
-  external worker has claimed it, ACC has no way to kill that remote process — `stop()`
-  marks the task `stopping` and waits for the eventual `finish()` report (success or
-  failure) to resolve it, same as a job submitted bare.
-- **Crash recovery**: a job-backed step interrupted by an ACC restart is marked
-  `interrupted` exactly like a subprocess-backed one (same blanket rule in
-  `Coordinator.__init__`), but the confirmation gate before clearing it
-  (`process_tree_inspected`) is still worded for a local PID — for a job-backed task the
-  operator should actually confirm the external job/worker is stopped or reconciled, and
-  nothing in the code enforces that distinction yet.
+## Stopping a job-backed step
+
+`stop(task_id)` never discards in-flight work it cannot actually interrupt. ACC has no
+process of its own to kill for a job claimed by a remote worker, so the **default behavior
+mirrors offline mode**: the same way offline mode lets an already-running cloud step reach
+a safe boundary instead of killing it, `stop()` on a claimed job-backed step just disables
+the workflow (no further steps get scheduled) and lets the job run to completion. A success
+still advances into `coordinate` normally — it is not thrown away just because a stop was
+requested — a failure still holds as usual. A still-*queued* (not yet claimed) job is
+cancelled outright either way, since there is no work in progress to lose.
+
+`stop(task_id, force=True)` is the "absolutely unwanted, stop it now" escape hatch, and is
+what a run's own timeout escalates to automatically (a stuck job is the emergency case, not
+the graceful one). It cannot kill the remote worker's process directly either — instead it
+sets `cancel_requested` on the job (`IntegrationHub.request_cancel`), which `agent3d.py`'s
+own lease-renewal loop (`LeaseKeeper`) checks on its next check-in (every
+`max(5, lease_seconds // 3)` seconds) and acts on by killing the *local* process it does
+own, then reporting back through the normal `finish()` call like any other failure.
+
+**Crash recovery**: a job-backed step interrupted by an ACC restart is marked `interrupted`
+exactly like a subprocess-backed one (same blanket rule in `Coordinator.__init__`), but the
+confirmation gate before clearing it (`process_tree_inspected`) is still worded for a local
+PID — for a job-backed task the operator should actually confirm the external job/worker is
+stopped or reconciled, and nothing in the code enforces that distinction yet.
 
 Covered by `tests/test_job_backed_workflow.py`: successful completion through to an
-accepted, snapshot-referenced review; a failed job holding the task; stopping a still-queued
-job; a timeout cancelling a still-queued job; the reviewer/coordinator role restriction; and
-restart recovery marking an outstanding job-backed step interrupted. Not covered by any
-test: stopping a job that's already been claimed (the "wait for finish()" path in `stop()`),
-since that depends on real concurrent worker timing rather than a scripted stand-in.
+accepted, snapshot-referenced review; a failed job holding the task; the graceful default
+stop on a claimed job (including that a success it produces still gets accepted); a forced
+stop flagging cancellation; a timeout escalating to a forced stop; stopping/cancelling a
+still-queued job; the reviewer/coordinator role restriction; and restart recovery marking an
+outstanding job-backed step interrupted. `tests/test_agent3d.py` additionally proves the
+real mechanism end to end: a real worker process claims a job, keeps a real subprocess
+running, and — when `request_cancel` is called mid-flight — actually kills that subprocess
+and reports the cancellation back, across real process boundaries rather than a scripted
+stand-in.
