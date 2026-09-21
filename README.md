@@ -63,7 +63,7 @@ For Google Antigravity, use the [MCP-first interactive integration contract](doc
 
 For low-cost game-logic work, see the [Muse Spark isolated-repository workflow](docs/MUSE-SPARK-WORKFLOW.md). The provider remains unavailable until a local credential and worker are configured.
 
-For agent-built 3D assets instead of a remote mesh-generation API, see the [Agent 3D Studio connector](docs/AGENT-3D-STUDIO.md). Its claim/run/finish loop is tested against a scripted stand-in; no live coding-agent CLI run has been exercised yet.
+For agent-built 3D assets instead of a remote mesh-generation API, see the [Agent 3D Studio connector](docs/AGENT-3D-STUDIO.md). Its claim/run/finish loop is tested against a scripted stand-in; no live coding-agent CLI run has been exercised yet. Configuring it as a job-backed implementer on a managed workflow (instead of submitting a bare job) routes its output through the same independent-review and git-delivery pipeline code tasks already use.
 
 ## First concrete task
 

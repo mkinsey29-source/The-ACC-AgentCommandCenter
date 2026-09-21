@@ -343,7 +343,12 @@ class IntegrationHub:
                    job.get('task_id'))
             public = {k: v for k, v in job.items() if k != 'lease_token_hash'}
             public['artifacts'] = saved
-            return public
+        if job.get('task_id'):
+            # Outside the transaction above: a job-backed workflow step's own bookkeeping opens
+            # its own lock/db scope, and self.c.lock is reentrant but nesting sqlite3 connections
+            # from the same commit isn't worth the risk for this desktop-scale tool.
+            self.c.on_job_finished(public)
+        return public
 
     def cancel(self, job_id):
         with self.c.lock, self.c.store.connect() as db:

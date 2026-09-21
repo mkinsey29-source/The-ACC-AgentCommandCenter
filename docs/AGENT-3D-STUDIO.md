@@ -68,3 +68,60 @@ Covered by `tests/test_agent3d.py` against a scripted stand-in for the agent CLI
 (claim → run → finish, success, an agent-reported failure, and a crashed process). No
 live Claude Code (or other coding-agent CLI) invocation has been exercised end-to-end
 yet, so the actual quality of agent-produced 3D assets through this path is unverified.
+
+## Reviewed delivery through a managed workflow
+
+Submitting a bare job (above) gets the asset built and its artifacts hashed, but nothing
+reviews it and nothing commits, pushes, or PRs it — the file just lands directly in the
+tracked project tree the moment the job succeeds. To get the same independent-review and
+git-delivery guarantees code tasks already have, configure `agent-3d-studio` as a
+**job-backed implementer** on a managed workflow task instead of submitting the job bare.
+
+Add a `kind: 'job'` agent to `agents.json`:
+
+```json
+{"agents": [
+  {"id": "asset-builder", "kind": "job", "capability": "mesh.generate",
+   "provider": "agent-3d-studio", "local": true}
+]}
+```
+
+Then configure a task's workflow with it as the implementer, same as any other adapter:
+
+```json
+{"implementer": "asset-builder", "reviewer": "reviewer-agent", "coordinator": "coordinator-agent"}
+```
+
+A job-backed adapter can only serve as the implementer — `specification()` rejects it for
+the reviewer or coordinator role, since only the implement stage has a shape (artifacts,
+no verdict) that maps onto an async job. Once configured, ACC's own `start()` submits the
+job (instead of spawning a subprocess) and dispatches; a running `agent3d.py` worker
+elsewhere claims and finishes it exactly as it would a bare job. When it succeeds, ACC
+freezes a git snapshot of the artifact-containing project tree — the same
+`snapshots.freeze()` used for code tasks — and hands off to the normal reviewer →
+coordinator → accept → publish pipeline. That gets you both gaps closed by reusing
+existing, tested machinery instead of new one-off mechanisms:
+
+- **Review**: an independent reviewer inspects the frozen snapshot, same as for code.
+- **Delivery ("point A to point B")**: the artifact sits as an *uncommitted* change,
+  protected by ACC's single-writer workspace lock, until the existing
+  preview → commit → push → PR flow delivers it — never before.
+
+Two real limits worth knowing before relying on this:
+- **Stopping a claimed job**: ACC can only cancel a job that's still `queued`. Once an
+  external worker has claimed it, ACC has no way to kill that remote process — `stop()`
+  marks the task `stopping` and waits for the eventual `finish()` report (success or
+  failure) to resolve it, same as a job submitted bare.
+- **Crash recovery**: a job-backed step interrupted by an ACC restart is marked
+  `interrupted` exactly like a subprocess-backed one (same blanket rule in
+  `Coordinator.__init__`), but the confirmation gate before clearing it
+  (`process_tree_inspected`) is still worded for a local PID — for a job-backed task the
+  operator should actually confirm the external job/worker is stopped or reconciled, and
+  nothing in the code enforces that distinction yet.
+
+Covered by `tests/test_job_backed_workflow.py`: successful completion through to an
+accepted, snapshot-referenced review; a failed job holding the task; stopping a still-queued
+job; a timeout cancelling a still-queued job; the reviewer/coordinator role restriction; and
+restart recovery marking an outstanding job-backed step interrupted. Not covered by any
+test: stopping a job that's already been claimed (the "wait for finish()" path in `stop()`),
+since that depends on real concurrent worker timing rather than a scripted stand-in.
