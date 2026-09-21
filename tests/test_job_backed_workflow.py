@@ -71,9 +71,12 @@ class JobBackedWorkflowTests(unittest.TestCase):
         path.write_bytes(content)
         return path
 
-    def claim_and_finish(self, job_id, status='succeeded', artifacts=None, error=None):
+    def claim_job(self, job_id):
         claim = self.c.integrations.claim({'owner': 'worker-1', 'provider': 'agent-3d-studio'})
         self.assertEqual(claim['job']['id'], job_id)
+        return claim
+
+    def finish_claimed(self, job_id, claim, status='succeeded', artifacts=None, error=None):
         payload = {'lease_token': claim['lease_token'], 'fence': claim['job']['fence'], 'status': status}
         if artifacts is not None:
             payload['artifacts'] = artifacts
@@ -82,6 +85,10 @@ class JobBackedWorkflowTests(unittest.TestCase):
         if status == 'succeeded':
             payload['result'] = {'summary': 'Reconstructed the tank from the reference image.'}
         return self.c.integrations.finish(job_id, payload)
+
+    def claim_and_finish(self, job_id, status='succeeded', artifacts=None, error=None):
+        claim = self.claim_job(job_id)
+        return self.finish_claimed(job_id, claim, status=status, artifacts=artifacts, error=error)
 
     def test_successful_job_advances_to_coordinate_with_frozen_snapshot(self):
         task_id = self.start_task()
@@ -146,6 +153,59 @@ class JobBackedWorkflowTests(unittest.TestCase):
         task = eventually(lambda: self.c.store.get(task_id) if
                           self.c.store.get(task_id)['status'] == 'paused' else None)
         self.assertIsNone(self.c.running_task)
+
+    def test_stop_on_a_claimed_job_is_graceful_and_still_accepts_success(self):
+        task_id = self.start_task()
+        job = self.outstanding_job(task_id)
+        claim = self.claim_job(job['id'])
+        stopped = self.c.stop(task_id)
+        # Can't forcibly interrupt a claimed remote job, so the default doesn't try: it lets the
+        # job keep running (mirroring how offline mode lets an in-flight cloud step finish) and
+        # only disables scheduling anything after it.
+        self.assertEqual(stopped['status'], 'running')
+        self.assertFalse(stopped['workflow']['enabled'])
+        self.assertEqual(self.c.running_task, task_id)
+        self.write_artifact('Assets/tank.glb')
+        digest = hashlib.sha256(b'glb-bytes').hexdigest()
+        self.finish_claimed(job['id'], claim, artifacts=[
+            {'kind': 'model', 'uri': 'Assets/tank.glb', 'metadata': {}, 'sha256': digest}])
+        # The success this worker actually produced is not thrown away just because a stop was
+        # requested -- it still advances into coordinate, same as if nothing had happened...
+        task = eventually(lambda: self.c.store.get(task_id) if
+                          self.c.store.get(task_id)['workflow']['stage'] != 'implement' else None)
+        self.assertEqual(task['workflow']['stage'], 'coordinate')
+        self.assertEqual(task['status'], 'queued')
+        # ...except the workflow stays disabled, so nothing further gets scheduled: paused.
+        self.assertFalse(task['workflow']['enabled'])
+        self.assertIsNone(self.c.running_task)
+
+    def test_force_stop_on_a_claimed_job_requests_cancellation(self):
+        task_id = self.start_task()
+        job = self.outstanding_job(task_id)
+        claim = self.claim_job(job['id'])
+        stopped = self.c.stop(task_id, force=True)
+        self.assertEqual(stopped['status'], 'stopping')
+        flagged = self.c.integrations.get(job['id'])
+        self.assertTrue(flagged['cancel_requested'])
+        # The worker notices the flag, kills the process it owns, and reports back like any
+        # other failure -- ACC never touched a process it doesn't have.
+        self.finish_claimed(job['id'], claim, status='failed', error='Cancelled by operator.')
+        task = eventually(lambda: self.c.store.get(task_id) if
+                          self.c.store.get(task_id)['status'] == 'paused' else None)
+        self.assertIn('Cancelled by operator', task['activity'])
+        self.assertIsNone(self.c.running_task)
+
+    def test_timeout_on_a_claimed_job_escalates_to_force_cancel(self):
+        task_id = self.start_task()
+        job = self.outstanding_job(task_id)
+        self.claim_job(job['id'])
+        task = self.c.store.get(task_id)
+        self.c._timeout(task_id, task['run_id'])
+        flagged = eventually(lambda: self.c.integrations.get(job['id']) if
+                             self.c.integrations.get(job['id'])['cancel_requested'] else None)
+        self.assertTrue(flagged['cancel_requested'])
+        task = self.c.store.get(task_id)
+        self.assertEqual(task['status'], 'stopping')
 
     def test_reviewer_cannot_be_job_backed(self):
         task = self.c.create({'title': 'x', 'instruction': 'y'})

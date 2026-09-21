@@ -156,6 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                 routes = {'renew': lambda: c.integrations.renew(job_id, payload),
                           'finish': lambda: c.integrations.finish(job_id, payload),
                           'cancel': lambda: c.integrations.cancel(job_id),
+                          'request-cancel': lambda: c.integrations.request_cancel(job_id),
                           'retry': lambda: c.integrations.retry(job_id)}
                 if action not in routes:
                     return self.reply(404, {'error': 'Unknown integration job operation.'})
