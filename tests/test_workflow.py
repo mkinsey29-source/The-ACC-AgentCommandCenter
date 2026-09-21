@@ -109,9 +109,18 @@ sys.exit(run.returncode)
     def test_changing_reviewer_invalidates_previous_review(self):
         task=self.done(self.start())
         # Reconstruct a held final decision, as if the coordinator paused after review.
-        task.update(status='paused',review=None)
-        task['workflow'].update(stage='coordinate',phase='held',enabled=False)
-        self.c.store.save(task,'fixture',{})
+        # Holding c.lock (an RLock) here is required, not just tidy: _collect()'s trailing
+        # active_child_id cleanup after the accept transition still runs a bit longer under
+        # the same lock, using its own in-memory task object from before this fixture write.
+        # A raw store.save() with no lock can land in that split second and then get clobbered
+        # by that stale trailing save, which is a test-harness race (Store itself has no
+        # locking by design), not a product bug -- any real caller goes through a Coordinator
+        # method and would block on c.lock instead of racing.
+        with self.c.lock:
+            task=self.c.store.get(task['id'])
+            task.update(status='paused',review=None)
+            task['workflow'].update(stage='coordinate',phase='held',enabled=False)
+            self.c.store.save(task,'fixture',{})
         self.c.workflows.configure(task['id'], {'reviewer':'local-reviewer'})
         task=self.done(task['id'])
         self.assertEqual(task['status'],'accepted')
