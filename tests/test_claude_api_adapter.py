@@ -144,6 +144,20 @@ class ClaudeApiUnitTests(unittest.TestCase):
         result = json.loads(Path(packet['result_file']).read_text())
         self.assertEqual(result['summary'], 'done')
 
+    def test_tilde_api_key_file_is_expanded(self):
+        import argparse
+        self.write_packet()
+        home = self.root / 'home'
+        home.mkdir()
+        (home / 'claude.key').write_text('expanded-key')
+        args = argparse.Namespace(packet=str(self.packet_path), api_key_file='~/claude.key',
+                                   model='claude-opus-5', max_tokens=16000, timeout_seconds=5,
+                                   endpoint=claude_api.ENDPOINT)
+        with patch.dict('os.environ', {'HOME': str(home)}), \
+                patch.object(claude_api, '_generate', return_value='{}') as generate:
+            claude_api.run(args)
+        self.assertEqual(generate.call_args.args[0], 'expanded-key')
+
     def test_empty_key_file_is_rejected(self):
         self.write_packet()
         self.key_file.write_text('')

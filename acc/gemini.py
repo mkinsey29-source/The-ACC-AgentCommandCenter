@@ -71,7 +71,7 @@ def run(args):
     # A local credential-reference file, not an ambient env var -- consistent with the project's
     # own "store credentials through local credential references" convention, and with how
     # deepastra.py's --key-file works.
-    api_key = Path(args.api_key_file).read_text(encoding='utf-8').strip()
+    api_key = Path(args.api_key_file).expanduser().read_text(encoding='utf-8').strip()
     if not api_key:
         raise ValueError('Gemini API key file was empty: ' + args.api_key_file)
     content = _generate(api_key, args.model, prompt, args.timeout_seconds, args.endpoint)

@@ -1,0 +1,75 @@
+{
+  "agents": [
+    {
+      "id": "deepseek-ollama",
+      "name": "DeepSeek via local Ollama",
+      "driver": "ollama",
+      "model": "deepseek-r1",
+      "host": "http://127.0.0.1:11434"
+    },
+    {
+      "id": "local-lmstudio",
+      "name": "Local model via LM Studio",
+      "driver": "lmstudio",
+      "model": "YOUR_LOADED_MODEL_ID",
+      "host": "http://localhost:1234"
+    },
+    {
+      "id": "deepseek-harness",
+      "name": "DeepSeek Harness (dsh)",
+      "driver": "dsh",
+      "executable": "dsh"
+    },
+    {
+      "id": "deepseek-astra",
+      "name": "DeepSeek via DeepAstra (Codex CLI)",
+      "driver": "deepastra",
+      "launcher": "/absolute/path/to/DeepAstra/launch.py",
+      "provider": "deepseek",
+      "key_file": "~/.config/acc/deepastra.key"
+    },
+    {
+      "id": "gemini-api",
+      "name": "Gemini (direct API)",
+      "driver": "gemini",
+      "model": "gemini-3.5-flash",
+      "api_key_file": "~/.config/acc/gemini.key"
+    },
+    {
+      "id": "antigravity-cli",
+      "name": "Google Antigravity (agy)",
+      "driver": "antigravity",
+      "executable": "agy",
+      "api_key_file": "~/.config/acc/antigravity.key",
+      "api_key_env": "ANTIGRAVITY_API_KEY"
+    },
+    {
+      "id": "claude-api",
+      "name": "Claude (direct API)",
+      "driver": "claude",
+      "model": "claude-opus-5",
+      "api_key_file": "~/.config/acc/claude.key"
+    },
+    {
+      "id": "claude-code-cli",
+      "name": "Claude Code CLI",
+      "driver": "claude-code",
+      "executable": "claude",
+      "api_key_file": "~/.config/acc/claude.key"
+    },
+    {
+      "id": "grok-api",
+      "name": "Grok (direct API)",
+      "driver": "grok",
+      "model": "grok-4.7",
+      "api_key_file": "~/.config/acc/grok.key"
+    },
+    {
+      "id": "grok-build-cli",
+      "name": "Grok Build CLI",
+      "driver": "grok-build",
+      "executable": "grok",
+      "api_key_file": "~/.config/acc/grok.key"
+    }
+  ]
+}

@@ -104,6 +104,8 @@ Your connected orchestrator explicitly records instructions and actions through 
 
 Copy `examples/agents.json` outside the repository and replace the placeholder command with the actual installed worker host's noninteractive invocation. Then launch ACC with `--agents` pointing to that file.
 
+For a named provider (DeepSeek, Gemini, Claude, Grok, a local Ollama/LM Studio server) instead of a custom `argv` adapter, use one of the built-in `driver` values documented in [DRIVERS.md](docs/DRIVERS.md), with a worked example of each in [`examples/all-drivers-agents.json`](examples/all-drivers-agents.json).
+
 `{prompt_file}` is replaced with a JSON task packet path. `{project}` is replaced with the project path. The adapter must read the packet, follow its requirements, emit progress on stdout/stderr, and remain attached until its work finishes. ACC does not force a task-file flag on hosts that do not support it; a small wrapper may be needed.
 
 A detected executable means **configured**, not a verified provider login or live model connection. API credentials stay in the host's own configuration or environment. No paid model calls are made by the default setup. Output and prompts are private local data; avoid putting credentials in worker output or task text.

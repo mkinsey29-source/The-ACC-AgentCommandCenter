@@ -199,6 +199,17 @@ class AntigravityUnitTests(unittest.TestCase):
             antigravity.run(self.args(api_key_file=str(key_file), api_key_env='MY_CUSTOM_KEY'))
         self.assertEqual(popen.call_args.kwargs['env']['MY_CUSTOM_KEY'], 'the-real-key')
 
+    def test_tilde_api_key_file_is_expanded(self):
+        self.write_packet()
+        home = self.root / 'home'
+        home.mkdir()
+        (home / 'agy.key').write_text('expanded-key')
+        proc = self.fake_proc(stdout=json.dumps({'status': 'SUCCESS', 'response': '{}'}))
+        with patch.dict('os.environ', {'HOME': str(home)}), \
+                patch('acc.antigravity.subprocess.Popen', return_value=proc) as popen:
+            antigravity.run(self.args(api_key_file='~/agy.key'))
+        self.assertEqual(popen.call_args.kwargs['env']['ANTIGRAVITY_API_KEY'], 'expanded-key')
+
     def test_empty_api_key_file_is_rejected(self):
         self.write_packet()
         key_file = self.root / 'agy.key'

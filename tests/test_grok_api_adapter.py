@@ -144,6 +144,20 @@ class GrokApiUnitTests(unittest.TestCase):
         result = json.loads(Path(packet['result_file']).read_text())
         self.assertEqual(result['summary'], 'done')
 
+    def test_tilde_api_key_file_is_expanded(self):
+        import argparse
+        self.write_packet()
+        home = self.root / 'home'
+        home.mkdir()
+        (home / 'grok.key').write_text('expanded-key')
+        args = argparse.Namespace(packet=str(self.packet_path), api_key_file='~/grok.key',
+                                   model='grok-4.7', max_tokens=16000, timeout_seconds=5,
+                                   endpoint=grok_api.ENDPOINT)
+        with patch.dict('os.environ', {'HOME': str(home)}), \
+                patch.object(grok_api, '_generate', return_value='{}') as generate:
+            grok_api.run(args)
+        self.assertEqual(generate.call_args.args[0], 'expanded-key')
+
     def test_empty_key_file_is_rejected(self):
         self.write_packet()
         self.key_file.write_text('')

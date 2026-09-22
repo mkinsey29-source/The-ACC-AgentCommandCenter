@@ -76,7 +76,7 @@ def run(args):
         argv += ['--model', args.model]
     env = worker_prompt.subprocess_env()
     if args.api_key_file:
-        key = Path(args.api_key_file).read_text(encoding='utf-8').strip()
+        key = Path(args.api_key_file).expanduser().read_text(encoding='utf-8').strip()
         if not key:
             raise ValueError('Antigravity API key file was empty: ' + args.api_key_file)
         env[args.api_key_env] = key

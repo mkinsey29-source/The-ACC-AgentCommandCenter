@@ -188,6 +188,19 @@ class GrokBuildUnitTests(unittest.TestCase):
             grok_build.run(self.args(api_key_file=str(key_file)))
         self.assertEqual(popen.call_args.kwargs['env']['XAI_API_KEY'], 'the-real-key')
 
+    def test_tilde_api_key_file_is_expanded(self):
+        self.write_packet()
+        home = self.root / 'home'
+        home.mkdir()
+        (home / 'grok.key').write_text('expanded-key')
+        proc = MagicMock()
+        proc.stdout.read.return_value = json.dumps({'text': '{}'})
+        proc.wait.return_value = 0
+        with patch.dict('os.environ', {'HOME': str(home)}), \
+                patch('acc.grok_build.subprocess.Popen', return_value=proc) as popen:
+            grok_build.run(self.args(api_key_file='~/grok.key'))
+        self.assertEqual(popen.call_args.kwargs['env']['XAI_API_KEY'], 'expanded-key')
+
 
 if __name__ == '__main__':
     unittest.main()
