@@ -24,7 +24,12 @@ human is not in the normal path — only in the exceptions.
 
 | Decision | Value |
 | --- | --- |
-| Program shape | A **desktop app** (Electron or Tauri). Not a web app, not a browser page. |
+| Program shape | A **desktop app**. Not a web app, not a browser page. |
+| Shell | **Tauri** (Rust), for a small binary and low memory. |
+| Core | The existing **Python** — drivers, job queue, leases, git, workflows — bundled and run as a background process inside the app. Nothing is rewritten in another language. |
+| State | **One SQLite database** in the app's own folder, holding every project, task, agent, job and event. |
+| Lifetime | The core **keeps running when the window is closed**. The UI is a view onto a service that is always working; closing it stops the view, not the work. |
+| Migration | **None needed.** The ACC has not been built yet — there is no deployed state, so schemas and task numbering can be designed freely. |
 | Identity | **One ACC.** A single program on the desktop running every project and every agent as one entity. There is never more than one ACC. |
 | Replaces | `acc/web` entirely. Not a second UI, not a re-skin. |
 | Target display | One laptop screen, roughly 1440px wide |
@@ -227,8 +232,11 @@ work it cannot interrupt.
 6. **One-program architecture** — a single ACC owning every project and every
    agent, with one scheduler and one cross-project task list, replacing the
    one-coordinator-per-project model.
-15. **Desktop application shell** — Electron or Tauri, giving a real PTY, the
-    microphone, OS notifications and local file access.
+15. **Desktop application shell** — Tauri, with the Python core bundled as a
+    background process, giving a real PTY, the microphone, OS notifications and
+    local file access.
+16. **A background service lifetime** — the core survives the window closing and
+    keeps runs going.
 7. **Branch-scoped writer leases** — one writer per branch per repository,
    replacing one runner per coordinator. No checkout management required.
 8. **A real PTY**, plus a local completion model for the terminal's inline
@@ -247,6 +255,10 @@ work it cannot interrupt.
     the machine and the provider can run.
 
 ## 15. Open questions
+
+- What happens to in-flight runs when the laptop actually sleeps, as opposed to
+  the window being closed: local subprocesses suspend with the machine, and
+  cloud calls in flight may time out. Resume behaviour on wake is undecided.
 
 - What each side rail holds in agent view and in task view, and how large they
   are.
