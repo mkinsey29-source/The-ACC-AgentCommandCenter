@@ -25,8 +25,11 @@ def run(args):
         value = getattr(args, name)
         if value:
             argv += ['--' + name, value]
-    # Inherit ACC's process group so stop/timeout reaches Hermes and its children.
-    proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True, encoding='utf-8')
+    # Inherit ACC's process group so stop/timeout reaches Hermes and its children. The filtered
+    # env keeps ACC's own unrelated secrets out of reach of whatever shell/tool access Hermes
+    # grants the model; see worker_prompt.subprocess_env.
+    proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
+                             encoding='utf-8', env=worker_prompt.subprocess_env())
     final = None
     try:
         for line in proc.stdout:

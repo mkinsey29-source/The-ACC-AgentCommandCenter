@@ -3,6 +3,10 @@ model (a spawned CLI's query file, a direct HTTP call, or anything else). Kept i
 result contract two different drivers rely on can't quietly drift apart, the way echoing back
 task_id/run_id/revision/snapshot_id already once did between the subprocess and job-backed paths."""
 import json
+import os
+import re
+
+_CREDENTIAL_NAME = re.compile(r'KEY|TOKEN|SECRET', re.IGNORECASE)
 
 INSTRUCTIONS = (
     'You are a worker in ACC. Follow the original requirements and applicable project instructions.\n'
@@ -30,6 +34,17 @@ def build(packet):
     return (INSTRUCTIONS
             + (CONVERSATION_OVERRIDE if packet.get('conversation') else '')
             + json.dumps(packet, indent=2))
+
+
+def subprocess_env():
+    """A copy of this process's environment with anything whose name looks like a credential
+    (KEY/TOKEN/SECRET) removed, before it's handed to a spawned worker CLI. These adapters give
+    the underlying model shell/tool access; without this, a prompt-injected or simply mistaken
+    command (`env`, `printenv`, a curl with a var interpolated in) could read and exfiltrate any
+    of ACC's own unrelated secrets, not just the ones the worker actually needs. A driver that
+    needs a real provider credential passed through (DeepAstra's --key-file, for example) still
+    can -- it's just explicit rather than inherited ambiently."""
+    return {name: value for name, value in os.environ.items() if not _CREDENTIAL_NAME.search(name)}
 
 
 def extract_json_object(text):

@@ -282,6 +282,12 @@ class Coordinator:
                             argv += ['--' + option, agent[option]]
                     agent['argv'] = argv
                     check_executable = executable
+                elif driver == 'dsh':
+                    executable = agent.get('executable', 'dsh')
+                    argv = [sys.executable, str(Path(__file__).with_name('deepseek_harness.py')),
+                            '--executable', executable, '--packet', '{prompt_file}']
+                    agent['argv'] = argv
+                    check_executable = executable
                 elif driver == 'ollama':
                     if not agent.get('model'):
                         raise ValueError('An ollama-driver agent needs a model.')
@@ -294,6 +300,21 @@ class Coordinator:
                     self.agents[key] = {**agent, 'kind': 'model', 'available': available,
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'Ollama host not reachable: ' + host}
+                    continue
+                elif driver == 'deepastra':
+                    launcher = agent.get('launcher', 'launch.py')
+                    provider = agent.get('provider', 'deepseek')
+                    argv = [sys.executable, str(Path(__file__).with_name('deepastra.py')),
+                            '--packet', '{prompt_file}', '--launcher', launcher, '--provider', provider]
+                    if agent.get('key_file'):
+                        argv += ['--key-file', agent['key_file']]
+                    agent['argv'] = argv
+                    # launch.py is a cloned script, not a PATH-resolvable command; shutil.which
+                    # would wrongly require it be chmod +x, unlike how it's actually invoked here.
+                    available = Path(launcher).is_file()
+                    self.agents[key] = {**agent, 'kind': 'model', 'available': available,
+                                        'description': 'Configured command adapter; provider readiness not verified.'
+                                                        if available else 'DeepAstra launcher not found: ' + launcher}
                     continue
                 else:
                     argv = agent['argv']

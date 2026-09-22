@@ -52,6 +52,18 @@ class HermesAdapterCleanupTests(unittest.TestCase):
         self.assertEqual(code, 7)
         proc.kill.assert_not_called()
 
+    def test_spawns_with_a_credential_filtered_environment(self):
+        proc = MagicMock()
+
+        def lines():
+            yield '{"type": "result", "exit_code": 0}\n'
+        proc.stdout = lines()
+        proc.wait.return_value = 0
+        with patch.dict('os.environ', {'GITHUB_TOKEN': 'shh'}, clear=False), \
+                patch('acc.hermes.subprocess.Popen', return_value=proc) as popen:
+            hermes.run(self.args())
+        self.assertNotIn('GITHUB_TOKEN', popen.call_args.kwargs['env'])
+
 
 if __name__ == '__main__':
     unittest.main()
