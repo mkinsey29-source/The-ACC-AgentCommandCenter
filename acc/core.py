@@ -272,7 +272,8 @@ class Coordinator:
                                         'local': bool(agent.get('local')), 'available': True,
                                         'description': 'Job-backed implementer; provider readiness checked at submission.'}
                     continue
-                if agent.get('driver') == 'hermes':
+                driver = agent.get('driver')
+                if driver == 'hermes':
                     executable = agent.get('executable', 'hermes')
                     argv = [sys.executable, str(Path(__file__).with_name('hermes.py')), 'run',
                             '--executable', executable, '--packet', '{prompt_file}']
@@ -280,11 +281,26 @@ class Coordinator:
                         if agent.get(option):
                             argv += ['--' + option, agent[option]]
                     agent['argv'] = argv
+                    check_executable = executable
+                elif driver == 'ollama':
+                    if not agent.get('model'):
+                        raise ValueError('An ollama-driver agent needs a model.')
+                    host = agent.get('host', 'http://127.0.0.1:11434')
+                    argv = [sys.executable, str(Path(__file__).with_name('ollama.py')),
+                            '--packet', '{prompt_file}', '--model', agent['model'], '--host', host]
+                    agent['argv'] = argv
+                    from .ollama import is_reachable
+                    available = is_reachable(host)
+                    self.agents[key] = {**agent, 'kind': 'model', 'available': available,
+                                        'description': 'Configured command adapter; provider readiness not verified.'
+                                                        if available else 'Ollama host not reachable: ' + host}
+                    continue
                 else:
                     argv = agent['argv']
+                    check_executable = argv[0]
                 if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
                     raise ValueError('Agent argv must be a nonempty string array.')
-                available = bool(shutil.which(agent.get('executable', 'hermes') if agent.get('driver') == 'hermes' else argv[0]))
+                available = bool(shutil.which(check_executable))
                 self.agents[key] = {**agent, 'kind': 'model', 'available': available,
                                     'description': 'Configured command adapter; provider readiness not verified.' if available else 'Executable missing.'}
         # An old live process could still be writing. Require explicit inspection on restart.

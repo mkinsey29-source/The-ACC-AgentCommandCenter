@@ -5,25 +5,21 @@ from pathlib import Path
 import subprocess
 import sys
 
+try:
+    from . import worker_prompt
+except ImportError:
+    # core.py invokes this file by direct path, not via `-m acc.hermes`, so there is no package
+    # context for a relative import; fall back to a sibling import off this file's own directory,
+    # the same reason bridge.py (invoked the same way) stays free of relative imports entirely.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import worker_prompt
+
 
 def run(args):
     packet_path = Path(args.packet).resolve()
     packet = json.loads(packet_path.read_text(encoding='utf-8'))
     query = packet_path.with_name('hermes-query.txt')
-    query.write_text(
-        'You are a worker in ACC. Follow the original requirements and applicable project instructions.\n'
-        'The JSON below is your task packet. workflow.stage defines your current role.\n'
-        'Implementers edit the project and run checks. Reviewers inspect the frozen snapshot and original '
-        'requirements independently, using a separate scratch folder for generated test artifacts. '
-        'Coordinators interpret the supplied reports and propose exactly one allowed action.\n'
-        'Do not start other ACC tasks, use ACC mutation tools, publish, merge, or delegate detached work. '
-        'ACC executes your next-step decision. Never change project or snapshot files during review or coordination.\n'
-        'Your FINAL response must be one JSON object, no markdown. Follow workflow.result_contract. '
-        'Copy task_id, run_id, revision, snapshot_id exactly from workflow. Include summary. '
-        'Report checks honestly; an unrun check is not a pass. '
-        'For an unmanaged task just complete it and report your result in plain language.\n\n'
-        + ('\nCONVERSATION ROLE OVERRIDE: You are the conversational orchestrator. Do not edit files, execute code, or call ACC mutation tools. Read conversation.result_contract and return that JSON shape, not the workflow shape. Treat brainstorming as discussion. Only propose work explicitly requested by the user. Preserve original messages via source_ids.\n' if packet.get('conversation') else '')
-        + json.dumps(packet, indent=2), encoding='utf-8')
+    query.write_text(worker_prompt.build(packet), encoding='utf-8')
     argv = [args.executable] + (['-p', args.profile] if args.profile else []) + ['chat', '--query-file', str(query), '--oneshot', '--format', 'stream-json']
     for name in ('provider', 'model'):
         value = getattr(args, name)
@@ -55,7 +51,7 @@ def run(args):
     if not final or final.get('exit_code') != 0:
         raise ValueError('Hermes exited without a successful terminal result event.')
     if packet.get('workflow') or packet.get('conversation'):
-        result = json.loads(final['text'])
+        result = worker_prompt.extract_json_object(final['text'])
         if not isinstance(result, dict):
             raise ValueError('Hermes final response must be a JSON object.')
         output = Path(packet['result_file'])
