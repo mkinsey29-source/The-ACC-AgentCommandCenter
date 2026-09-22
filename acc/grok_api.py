@@ -1,24 +1,25 @@
-"""Direct Grok (xAI) API adapter: runs a model-driven workflow step against xAI's API over plain
-HTTP, with no subprocess of its own to supervise -- the same shape as ollama.py, gemini.py, and
-claude_api.py. No SDK dependency, matching every other driver's stdlib-only convention.
+"""Direct Grok (xAI) API adapter: runs a model-driven workflow step against xAI's Responses API
+over plain HTTP, with no subprocess of its own to supervise -- the same shape as ollama.py,
+gemini.py, and claude_api.py. No SDK dependency, matching every other driver's stdlib-only
+convention.
 
-Deliberately uses the older Chat Completions endpoint (`POST api.x.ai/v1/chat/completions`,
-OpenAI-compatible `messages` request, `choices[0].message.content` / `choices[0].finish_reason`
-response) rather than xAI's newer "Responses API" (`/v1/responses`), even though xAI's own docs
-now recommend the latter. The Responses API's request shape (`{"model", "input"}`) was confirmed
-from multiple sources, but its raw JSON *response* shape could not be independently verified from
-here: docs.x.ai is blocked by this environment's egress proxy, and the one third-party source found
-describing it (`bigsk1/xai-api`) turned out, on checking its own README, to be an unofficial
-FastAPI proxy/wrapper around xAI's API, not xAI's own documentation -- its schema describes that
-project's own reimplementation, not a verified xAI wire format. Chat Completions' response shape is
-the long-established, unambiguous OpenAI-compatible convention xAI explicitly advertises
-compatibility with, so it's the safer choice absent a verified primary source for the newer
-endpoint. Revisit if/when the Responses API's actual response schema can be confirmed directly.
+Endpoint: POST https://api.x.ai/v1/responses
+Headers:  Authorization: Bearer <key>, Content-Type: application/json
+Body:     {"model", "input", "max_output_tokens"}
 
-Auth: `Authorization: Bearer <key>` (OpenAI-compatible). Default model `grok-4.6`, xAI's current
-recommended model for chat/coding/agentic workloads as of this writing; older model names
-(`grok-4-1-fast`, `grok-4-fast`, `grok-4-0709`, `grok-3`) now redirect server-side to a newer model
-and use its pricing, per xAI's own docs.
+Response schema confirmed directly against xAI's own API reference (pasted in full by the user
+after `docs.x.ai` turned out to be unreachable from this environment): there is no top-level
+`output_text` string in the raw JSON, only an `output` array of items. A text reply's item has
+`{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "..."}]}`;
+`.output_text` is purely an SDK-side convenience property some client libraries add, the same
+pattern OpenAI's own Responses API uses -- confirming the earlier guess (made without access to
+this schema) not to assume that convenience field exists on the wire was the right call. The
+top-level `status` field (`"completed"` / `"in_progress"` / `"incomplete"`) is checked explicitly:
+`"incomplete"` covers what the old Chat-Completions-based version of this driver checked via
+`finish_reason == "length"`, and more generally (any reason generation didn't finish cleanly, not
+just a token-limit truncation). A populated top-level `error` object is also checked explicitly.
+
+Default model `grok-4.7`, matching xAI's own current documented example request.
 """
 from __future__ import annotations
 
@@ -37,12 +38,25 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import worker_prompt
 
-ENDPOINT = 'https://api.x.ai/v1/chat/completions'
+ENDPOINT = 'https://api.x.ai/v1/responses'
 
 
-def _generate(api_key, model, prompt, max_tokens, timeout_seconds, endpoint=ENDPOINT):
-    payload = json.dumps({'model': model, 'max_tokens': max_tokens,
-                           'messages': [{'role': 'user', 'content': prompt}]}).encode()
+def _extract_text(body):
+    parts = []
+    for item in body.get('output') or []:
+        if not isinstance(item, dict) or item.get('type') != 'message':
+            continue
+        for block in item.get('content') or []:
+            if isinstance(block, dict) and block.get('type') == 'output_text':
+                text = block.get('text')
+                if isinstance(text, str):
+                    parts.append(text)
+    return ''.join(parts)
+
+
+def _generate(api_key, model, prompt, max_output_tokens, timeout_seconds, endpoint=ENDPOINT):
+    payload = json.dumps({'model': model, 'input': prompt,
+                           'max_output_tokens': max_output_tokens}).encode()
     req = urllib.request.Request(endpoint, data=payload, method='POST', headers={
         'Content-Type': 'application/json', 'Authorization': 'Bearer ' + api_key})
     try:
@@ -57,16 +71,15 @@ def _generate(api_key, model, prompt, max_tokens, timeout_seconds, endpoint=ENDP
         raise ValueError(f'Grok API error: {detail}') from exc
     except urllib.error.URLError as exc:
         raise ValueError(f'Could not reach the Grok API: {exc}') from exc
-    choices = body.get('choices') or []
-    if not choices:
-        raise ValueError('Grok API response had no choices.')
-    choice = choices[0]
-    if choice.get('finish_reason') == 'length':
-        raise ValueError('Grok API response was truncated (finish_reason=length); '
-                          'the required JSON object may be incomplete.')
-    text = (choice.get('message') or {}).get('content')
-    if not isinstance(text, str) or not text.strip():
-        raise ValueError('Grok API response had no message content.')
+    if body.get('error'):
+        raise ValueError(f'Grok API error: {body["error"]}')
+    status = body.get('status')
+    if status != 'completed':
+        raise ValueError(f'Grok API response did not complete (status={status}): '
+                          f'{body.get("incomplete_details")}')
+    text = _extract_text(body)
+    if not text.strip():
+        raise ValueError('Grok API response had no output_text content.')
     return text
 
 
@@ -97,7 +110,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Direct Grok (xAI) API adapter for ACC')
     parser.add_argument('--packet', required=True)
     parser.add_argument('--api-key-file', required=True)
-    parser.add_argument('--model', default='grok-4.6')
+    parser.add_argument('--model', default='grok-4.7')
     parser.add_argument('--max-tokens', type=int, default=16000)
     parser.add_argument('--timeout-seconds', type=int, default=180)
     # Real users never need this; it exists so tests can point the driver at a fake local server

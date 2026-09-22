@@ -305,7 +305,7 @@ class Coordinator:
                     api_key_file = agent.get('api_key_file')
                     if not api_key_file:
                         raise ValueError('A grok-driver agent needs an api_key_file.')
-                    model = agent.get('model', 'grok-4.6')
+                    model = agent.get('model', 'grok-4.7')
                     argv = [sys.executable, str(Path(__file__).with_name('grok_api.py')),
                             '--packet', '{prompt_file}', '--api-key-file', api_key_file, '--model', model]
                     if agent.get('endpoint'):
