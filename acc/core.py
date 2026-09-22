@@ -362,6 +362,14 @@ class Coordinator:
                         argv += ['--api-key-file', agent['api_key_file']]
                     agent['argv'] = argv
                     check_executable = executable
+                elif driver == 'mimo-code':
+                    executable = agent.get('executable', 'mimo')
+                    argv = [sys.executable, str(Path(__file__).with_name('mimo_code.py')),
+                            '--packet', '{prompt_file}', '--executable', executable]
+                    if agent.get('model'):
+                        argv += ['--model', agent['model']]
+                    agent['argv'] = argv
+                    check_executable = executable
                 elif driver == 'claude':
                     api_key_file = agent.get('api_key_file')
                     if not api_key_file:

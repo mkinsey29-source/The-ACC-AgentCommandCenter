@@ -27,6 +27,7 @@ a credential on the command line where it could leak into a process listing.
 | `claude-code` | `acc/claude_code.py` | Claude Code CLI (`claude`), spawned as a subprocess | — | `executable` (default `claude`), `model`, `api_key_file` |
 | `grok` | `acc/grok_api.py` | xAI's Responses API | `api_key_file` | `model` (default `grok-4.7`), `endpoint` |
 | `grok-build` | `acc/grok_build.py` | Grok Build CLI (`grok`), spawned as a subprocess | — | `executable` (default `grok`), `model`, `api_key_file` |
+| `mimo-code` | `acc/mimo_code.py` | MiMo Code CLI (`mimo`), spawned as a subprocess | — | `executable` (default `mimo`), `model` (`provider/model` format, e.g. `opencode/grok-code`) |
 | `hermes` | `acc/hermes.py` | Hermes CLI, spawned as a subprocess | — | `executable` (default `hermes`), `provider`, `model`, `profile` — see [HERMES-CONNECTOR.md](HERMES-CONNECTOR.md) |
 
 ## Availability
@@ -44,8 +45,8 @@ spending money or requiring a live network call for its own sake:
 - **API-key-file drivers** (`gemini`, `claude`, `grok`): whether the configured `api_key_file`
   exists on disk. Never a live authenticated call — that would either cost money or hit a rate
   limit just to report a status.
-- **Subprocess/CLI drivers** (`dsh`, `antigravity`, `claude-code`, `grok-build`, `hermes`):
-  whether the configured `executable` resolves via `PATH` (`shutil.which`).
+- **Subprocess/CLI drivers** (`dsh`, `antigravity`, `claude-code`, `grok-build`, `mimo-code`,
+  `hermes`): whether the configured `executable` resolves via `PATH` (`shutil.which`).
 - **`deepastra`** is the one exception: it checks that `launcher` is a real file on disk, since
   `launch.py` is a cloned script rather than a `PATH`-resolvable command.
 
@@ -54,19 +55,19 @@ configured plausibly enough to attempt a run. The first real run is still the ac
 
 ## Process supervision
 
-`hermes`, `dsh`, `deepastra`, `antigravity`, `claude-code`, and `grok-build` all spawn a real
-subprocess that ACC supervises via `stop_tree()` (SIGTERM, then unconditionally SIGKILL on a
+`hermes`, `dsh`, `deepastra`, `antigravity`, `claude-code`, `grok-build`, and `mimo-code` all spawn
+a real subprocess that ACC supervises via `stop_tree()` (SIGTERM, then unconditionally SIGKILL on a
 timeout). All of them inherit ACC's own process group so that reaches their children too, with one
 documented exception: `deepastra.py` additionally walks `/proc` to find and kill DeepAstra's own
 `codex` child, which `launch.py` detaches into its own session — see `acc/deepastra.py`'s module
 docstring for why. `ollama`, `lmstudio`, `openai-compatible`, `gemini`, `claude`, and `grok` have
 no subprocess of their own at all; a stop simply lets the in-flight HTTP request finish or time out.
 
-All five subprocess-spawning provider drivers (`hermes`, `dsh`, `deepastra`, `antigravity`,
-`claude-code`, `grok-build`) launch their worker CLI with a credential-filtered environment
-(`worker_prompt.subprocess_env()`): anything named like `*KEY*`/`*TOKEN*`/`*SECRET*` is stripped
-from what the subprocess inherits, so a model with shell/tool access can't read and exfiltrate
-ACC's own unrelated secrets.
+All six subprocess-spawning provider drivers (`hermes`, `dsh`, `deepastra`, `antigravity`,
+`claude-code`, `grok-build`, `mimo-code`) launch their worker CLI with a credential-filtered
+environment (`worker_prompt.subprocess_env()`): anything named like `*KEY*`/`*TOKEN*`/`*SECRET*` is
+stripped from what the subprocess inherits, so a model with shell/tool access can't read and
+exfiltrate ACC's own unrelated secrets.
 
 ## Shared contract
 
@@ -74,3 +75,17 @@ Every driver in this table shares `acc/worker_prompt.py`: the same instructions 
 regardless of transport, and the same `extract_json_object` recovers the required JSON result even
 through a leading `<think>...</think>` reasoning trace or a markdown code fence — both real
 behaviors from real models, not hypothetical edge cases.
+
+## A verification-confidence note on `mimo-code`
+
+Every other driver above was verified against a primary source that directly describes the exact
+tool being wrapped. `mimo-code` is the one exception worth flagging explicitly: its invocation
+(`mimo run --dangerously-skip-permissions "<task>"`) is confirmed directly from MiMo Code's own
+README, but its output-parsing contract is inferred from its parent project, upstream OpenCode's
+real, verified NDJSON event schema (`{type, sessionID, ...}` with `text`/`error` event types) --
+not from MiMo Code's own compiled source, which wasn't reachable to inspect directly. MiMo Code
+has already diverged from upstream on at least one flag name, so this inference could be wrong.
+`acc/mimo_code.py`'s own defensive checks (a non-JSON line is silently skipped; no text content at
+all is a clear, reported failure) mean a schema mismatch surfaces as an obvious error rather than
+silently misbehaving -- but treat this one driver as less certain than the rest of this table until
+it's actually been run against a real `mimo` install.

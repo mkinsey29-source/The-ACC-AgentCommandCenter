@@ -78,6 +78,13 @@
       "driver": "grok-build",
       "executable": "grok",
       "api_key_file": "~/.config/acc/grok.key"
+    },
+    {
+      "id": "mimo-code-cli",
+      "name": "MiMo Code CLI (Xiaomi)",
+      "driver": "mimo-code",
+      "executable": "mimo",
+      "model": "opencode/grok-code"
     }
   ]
 }
