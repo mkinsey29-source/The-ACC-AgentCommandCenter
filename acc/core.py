@@ -301,6 +301,30 @@ class Coordinator:
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'Ollama host not reachable: ' + host}
                     continue
+                elif driver == 'gemini':
+                    api_key_file = agent.get('api_key_file')
+                    if not api_key_file:
+                        raise ValueError('A gemini-driver agent needs an api_key_file.')
+                    model = agent.get('model', 'gemini-3.5-flash')
+                    argv = [sys.executable, str(Path(__file__).with_name('gemini.py')),
+                            '--packet', '{prompt_file}', '--api-key-file', api_key_file, '--model', model]
+                    if agent.get('endpoint'):
+                        argv += ['--endpoint', agent['endpoint']]
+                    agent['argv'] = argv
+                    # A local credential-reference file, not a PATH-resolvable command.
+                    available = Path(api_key_file).is_file()
+                    self.agents[key] = {**agent, 'kind': 'model', 'available': available,
+                                        'description': 'Configured command adapter; provider readiness not verified.'
+                                                        if available else 'Gemini API key file not found: ' + api_key_file}
+                    continue
+                elif driver == 'gemini-cli':
+                    executable = agent.get('executable', 'gemini')
+                    argv = [sys.executable, str(Path(__file__).with_name('gemini_cli.py')),
+                            '--packet', '{prompt_file}', '--executable', executable]
+                    if agent.get('model'):
+                        argv += ['--model', agent['model']]
+                    agent['argv'] = argv
+                    check_executable = executable
                 elif driver == 'deepastra':
                     launcher = agent.get('launcher', 'launch.py')
                     provider = agent.get('provider', 'deepseek')
