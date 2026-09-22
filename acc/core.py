@@ -314,6 +314,28 @@ class Coordinator:
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'LM Studio host not reachable: ' + host}
                     continue
+                elif driver == 'openai-compatible':
+                    if not agent.get('base_url'):
+                        raise ValueError('An openai-compatible-driver agent needs a base_url.')
+                    if not agent.get('model'):
+                        raise ValueError('An openai-compatible-driver agent needs a model.')
+                    base_url = agent['base_url']
+                    argv = [sys.executable, str(Path(__file__).with_name('openai_compatible.py')),
+                            '--packet', '{prompt_file}', '--base-url', base_url, '--model', agent['model']]
+                    api_key = None
+                    if agent.get('api_key_file'):
+                        argv += ['--api-key-file', agent['api_key_file']]
+                        try:
+                            api_key = Path(agent['api_key_file']).expanduser().read_text(encoding='utf-8').strip()
+                        except OSError:
+                            api_key = None
+                    agent['argv'] = argv
+                    from .openai_compatible import is_reachable
+                    available = is_reachable(base_url, api_key)
+                    self.agents[key] = {**agent, 'kind': 'model', 'available': available,
+                                        'description': 'Configured command adapter; provider readiness not verified.'
+                                                        if available else 'OpenAI-compatible host not reachable: ' + base_url}
+                    continue
                 elif driver == 'grok':
                     api_key_file = agent.get('api_key_file')
                     if not api_key_file:

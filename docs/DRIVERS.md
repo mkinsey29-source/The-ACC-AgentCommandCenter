@@ -18,6 +18,7 @@ a credential on the command line where it could leak into a process listing.
 | --- | --- | --- | --- | --- |
 | `ollama` | `acc/ollama.py` | A local Ollama server's HTTP API | `model` | `host` (default `http://127.0.0.1:11434`) |
 | `lmstudio` | `acc/lmstudio.py` | A local LM Studio (or other OpenAI-compatible) server | `model` | `host` (default `http://localhost:1234`) |
+| `openai-compatible` | `acc/openai_compatible.py` | Any OpenAI-Chat-Completions-compatible endpoint | `base_url`, `model` | `api_key_file` |
 | `dsh` | `acc/deepseek_harness.py` | DeepSeek Harness (`dsh`), spawned as a subprocess | — | `executable` (default `dsh`) |
 | `deepastra` | `acc/deepastra.py` | DeepAstra (`launch.py`, wrapping Codex CLI) | `launcher` | `provider` (default `deepseek`), `key_file` |
 | `gemini` | `acc/gemini.py` | Google's Gemini Interactions API | `api_key_file` | `model` (default `gemini-3.5-flash`), `endpoint` |
@@ -36,6 +37,10 @@ spending money or requiring a live network call for its own sake:
 - **Local HTTP drivers** (`ollama`, `lmstudio`): a live GET against the host. No process of their
   own exists to check for; a configured host that doesn't answer is unavailable regardless of
   whether any local binary is installed.
+- **`openai-compatible`** also does a live GET, but — since it may point at a real paid gateway
+  that requires authentication to answer at all, unlike `ollama`/`lmstudio`'s local no-auth
+  servers — includes the configured `api_key_file`'s contents (if any) in that probe, so a server
+  correctly rejecting an unauthenticated request isn't mistaken for one that's simply down.
 - **API-key-file drivers** (`gemini`, `claude`, `grok`): whether the configured `api_key_file`
   exists on disk. Never a live authenticated call — that would either cost money or hit a rate
   limit just to report a status.
@@ -54,8 +59,8 @@ subprocess that ACC supervises via `stop_tree()` (SIGTERM, then unconditionally 
 timeout). All of them inherit ACC's own process group so that reaches their children too, with one
 documented exception: `deepastra.py` additionally walks `/proc` to find and kill DeepAstra's own
 `codex` child, which `launch.py` detaches into its own session — see `acc/deepastra.py`'s module
-docstring for why. `ollama`, `lmstudio`, `gemini`, `claude`, and `grok` have no subprocess of their
-own at all; a stop simply lets the in-flight HTTP request finish or time out.
+docstring for why. `ollama`, `lmstudio`, `openai-compatible`, `gemini`, `claude`, and `grok` have
+no subprocess of their own at all; a stop simply lets the in-flight HTTP request finish or time out.
 
 All five subprocess-spawning provider drivers (`hermes`, `dsh`, `deepastra`, `antigravity`,
 `claude-code`, `grok-build`) launch their worker CLI with a credential-filtered environment

@@ -15,6 +15,14 @@
       "host": "http://localhost:1234"
     },
     {
+      "id": "custom-openai-compatible",
+      "name": "Custom OpenAI-compatible endpoint (gateway, self-hosted server, etc.)",
+      "driver": "openai-compatible",
+      "base_url": "https://YOUR-PROVIDER/v1",
+      "model": "YOUR_MODEL_ID",
+      "api_key_file": "~/.config/acc/openai-compatible.key"
+    },
+    {
       "id": "deepseek-harness",
       "name": "DeepSeek Harness (dsh)",
       "driver": "dsh",
