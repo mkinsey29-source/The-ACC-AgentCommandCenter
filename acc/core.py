@@ -301,6 +301,19 @@ class Coordinator:
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'Ollama host not reachable: ' + host}
                     continue
+                elif driver == 'lmstudio':
+                    if not agent.get('model'):
+                        raise ValueError('An lmstudio-driver agent needs a model.')
+                    host = agent.get('host', 'http://localhost:1234')
+                    argv = [sys.executable, str(Path(__file__).with_name('lmstudio.py')),
+                            '--packet', '{prompt_file}', '--model', agent['model'], '--host', host]
+                    agent['argv'] = argv
+                    from .lmstudio import is_reachable
+                    available = is_reachable(host)
+                    self.agents[key] = {**agent, 'kind': 'model', 'available': available,
+                                        'description': 'Configured command adapter; provider readiness not verified.'
+                                                        if available else 'LM Studio host not reachable: ' + host}
+                    continue
                 elif driver == 'grok':
                     api_key_file = agent.get('api_key_file')
                     if not api_key_file:
