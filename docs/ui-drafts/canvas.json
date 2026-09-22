@@ -1,0 +1,19 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-09-22T00:00:00Z" },
+  "title": "ACC Command Shell",
+  "launch": { "view": "canvas" },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": { "x": 0, "y": 0, "w": 1600, "h": 1000, "title": "Command shell — full screen", "is_interactive": true },
+    "Terminal.dc.html": { "x": 1680, "y": 0, "w": 1000, "h": 640, "title": "Offline terminal — palette and proposed edit" },
+    "Command.dc.html": { "x": 0, "y": 1500, "w": 460, "h": 760, "title": "Master command panel", "is_interactive": true },
+    "Tokens.dc.html": { "x": 540, "y": 1500, "w": 460, "h": 760, "title": "Agent token usage meter" }
+  },
+  "order": ["Main.dc.html", "Terminal.dc.html", "Command.dc.html", "Tokens.dc.html"],
+  "notes": {
+    "t1": { "x": 0, "y": -300, "text": "ACC command shell", "kind": "title1", "maxW": 2680 },
+    "t2": { "x": 0, "y": 1240, "text": "Panel details", "kind": "title1", "maxW": 1000 }
+  },
+  "designSystems": []
+}

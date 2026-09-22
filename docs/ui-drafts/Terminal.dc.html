@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Offline terminal — command palette and proposed edit</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #060b14; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+    a { color: #5fd0e8; } a:hover { color: #9ae6f7; }
+  </style>
+</helmet>
+
+<div style="width: 1000px; height: 640px; box-sizing: border-box; display: flex; flex-direction: column; background: #060d16; border: 1px solid #1f4d66; color: #d6e7f4; overflow: hidden;">
+
+  <!-- tab strip -->
+  <div style="height: 34px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: stretch; background: #0f2436; border-bottom: 1px solid #1f4d66;">
+    <span style="display: flex; align-items: center; gap: 7px; padding: 0 16px; background: #060d16; border-right: 1px solid #1f4d66; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #d6e7f4;">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: #43e39a;"></span>bash · task-41
+    </span>
+    <span style="display: flex; align-items: center; gap: 7px; padding: 0 16px; border-right: 1px solid #1f4d66; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #7d95ab;">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: #3a5268;"></span>pytest · watch
+    </span>
+    <span style="display: flex; align-items: center; gap: 7px; padding: 0 16px; border-right: 1px solid #1f4d66; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #7d95ab;">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: #3a5268;"></span>git · main
+    </span>
+    <button type="button" aria-label="New terminal tab" style="width: 34px; height: 100%; background: transparent; border: 0; border-right: 1px solid #1f4d66; color: #7d95ab; font-family: 'IBM Plex Mono', monospace; font-size: 15px; cursor: pointer;">+</button>
+    <div style="flex-grow: 1;"></div>
+    <div style="display: flex; align-items: center; gap: 9px; padding: 0 12px;">
+      <span style="padding: 3px 8px; border: 1px solid #1d5a49; background: #0a1f1a; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #43e39a;">NO EGRESS</span>
+      <span style="padding: 3px 8px; border: 1px solid #25445a; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #8fa8bd;">WRITES: ON</span>
+    </div>
+  </div>
+
+  <!-- scrollback -->
+  <div style="flex-grow: 1; min-height: 0; padding: 12px 16px; display: flex; flex-direction: column; gap: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; line-height: 1.6;">
+    <div style="color: #5fd0e8;">$ acc attach task-41</div>
+    <div style="color: #6b8299;">attached to writer lease 8821 · claude-code · read/write · 00:41:06 remaining</div>
+    <div style="color: #5fd0e8;">$ python -m unittest tests.test_workflow -k offline</div>
+    <div style="color: #ff6070;">FAIL: test_offline_hold (tests.test_workflow.WorkflowTests)</div>
+    <div style="color: #ff6070;">AssertionError: 'queued' != 'held'</div>
+    <div style="color: #8fa8bd;">Ran 1 test in 0.214s — FAILED (failures=1)</div>
+
+    <div style="height: 10px;"></div>
+
+    <!-- command palette -->
+    <div style="border: 1px solid #2f6f8c; background: #0b1c2a; box-shadow: 0 0 0 1px #071119;">
+      <div style="display: flex; align-items: center; gap: 10px; padding: 10px 13px; border-bottom: 1px solid #1f4d66;">
+        <span style="padding: 2px 7px; border: 1px solid #2f6f8c; font-size: 10px; letter-spacing: 0.08em; color: #7fdcf0;">⌘K</span>
+        <span style="color: #e2eef8; font-size: 13px;">why does the offline hold test fail?</span>
+        <span style="width: 8px; height: 16px; background: #5fd0e8;"></span>
+        <span style="flex-grow: 1;"></span>
+        <span style="font-size: 10.5px; letter-spacing: 0.08em; color: #6b8299;">qwen3-coder:14b · local · 41 tok/s</span>
+      </div>
+      <div style="padding: 11px 13px; display: flex; flex-direction: column; gap: 9px;">
+        <div style="font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; line-height: 1.55; color: #cfe0ee;">Offline mode never reaches the hold branch: <span style="font-family: 'IBM Plex Mono', monospace; color: #7fdcf0;">schedule()</span> returns before the driver locality check, so a cloud step stays <span style="font-family: 'IBM Plex Mono', monospace; color: #ffb84d;">queued</span> instead of moving to <span style="font-family: 'IBM Plex Mono', monospace; color: #43e39a;">held</span>.</div>
+        <div style="border: 1px solid #1f4d66; background: #081420;">
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 11px; border-bottom: 1px solid #142f43;">
+            <span style="font-size: 10.5px; letter-spacing: 0.08em; color: #6b8299;">PROPOSED EDIT</span>
+            <span style="color: #7fdcf0; font-size: 11.5px;">acc/workflow.py</span>
+            <span style="color: #6b8299; font-size: 11px;">+3 −1</span>
+            <span style="flex-grow: 1;"></span>
+            <span style="font-size: 10.5px; color: #6b8299;">writes go through the task lease</span>
+          </div>
+          <div style="padding: 8px 11px; display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; line-height: 1.6;">
+            <div style="color: #6b8299;">@@ def schedule(self, task, payload):</div>
+            <div style="background: #24101a; color: #ff8a96;">-        if self.mode() == 'offline':</div>
+            <div style="background: #24101a; color: #ff8a96;">-            return {'state': 'queued'}</div>
+            <div style="background: #0d2418; color: #7ef0b5;">+        if self.mode() == 'offline' and not agent.get('local'):</div>
+            <div style="background: #0d2418; color: #7ef0b5;">+            self.c.store.event('cloud_step_held', {'task': task['id']})</div>
+            <div style="background: #0d2418; color: #7ef0b5;">+            return {'state': 'held', 'reason': 'offline mode'}</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button type="button" style="height: 30px; padding: 0 14px; background: #0c2c22; border: 1px solid #2c7f5f; color: #43e39a; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.12em; cursor: pointer;">APPLY ⏎</button>
+          <button type="button" style="height: 30px; padding: 0 14px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.12em; cursor: pointer;">RUN TEST FIRST</button>
+          <button type="button" style="height: 30px; padding: 0 14px; background: transparent; border: 1px solid #2a4258; color: #8fa8bd; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.12em; cursor: pointer;">DISCARD ESC</button>
+          <span style="flex-grow: 1;"></span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #6b8299;">applied edits are logged as task evidence</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1;"></div>
+
+    <!-- prompt -->
+    <div style="display: flex; align-items: center; gap: 9px; padding: 9px 12px; background: #0b1622; border: 1px solid #1f4d66;">
+      <span style="color: #43e39a;">➜</span>
+      <span style="color: #5fd0e8;">acc</span>
+      <span style="color: #d6e7f4;">run tests --changed</span>
+      <span style="color: #3f5468;"> --since HEAD~1</span>
+      <span style="width: 8px; height: 16px; background: #5fd0e8;"></span>
+      <span style="flex-grow: 1;"></span>
+      <span style="font-size: 10.5px; color: #6b8299;">TAB accepts · ⌥⏎ new line</span>
+    </div>
+  </div>
+
+  <!-- footer -->
+  <div style="height: 36px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #09121c; border-top: 1px solid #1f4d66; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px;">
+    <span style="padding: 3px 9px; border: 1px solid #25445a; color: #b9cdde;">MODEL qwen3-coder:14b</span>
+    <span style="padding: 3px 9px; border: 1px solid #25445a; color: #b9cdde;">@acc/workflow.py</span>
+    <span style="padding: 3px 9px; border: 1px solid #25445a; color: #b9cdde;">@tests/test_workflow.py</span>
+    <button type="button" style="height: 22px; padding: 0 9px; background: transparent; border: 1px dashed #2a4258; color: #8fa8bd; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; cursor: pointer;">+ add context</button>
+    <span style="flex-grow: 1;"></span>
+    <span style="color: #6b8299;">lease 8821 · 7 files changed · task 41</span>
+  </div>
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1000,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
