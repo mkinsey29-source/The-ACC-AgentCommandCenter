@@ -50,6 +50,12 @@ Each surface gets assigned a tier as it is designed.
   holds a toggle per agent and per setting.
 - The **activity feed** may be a full play-by-play. It is ambient, never an
   interruption, and clicking an entry jumps to where it is happening.
+- **Voice is a first-class input on the orchestrator line.** The microphone is
+  always there; talking is faster than typing and is the preferred way to give
+  instructions.
+- **No welcome screen.** Opening the ACC shows where you left off and whatever
+  is running now, with anything blocking surfaced. No "while you were away"
+  summary — background workers mean there is always something in flight.
 
 ## Attention
 
@@ -98,6 +104,14 @@ assigned instead of asking.
 - The concurrency rule is **no two agents on the same branch in the same
   repository at the same time**. Different branches and different repositories
   run in parallel.
+- **No worktree machinery is needed.** Agents already work the way remote
+  sessions do: each takes its own copy of the repo and works a branch in it.
+  ACC's job is to refuse two agents the same branch, not to manage checkouts.
+- Work reaches GitHub through two gates: an agent's copy is **merged into your
+  local clone after review**, and the local clone is **pushed to GitHub after a
+  separate review**.
+- Projects live one folder per project on the desktop and are GitHub-backed.
+  ACC is pointed at the folder.
 
 ## Orchestrator
 
@@ -123,8 +137,11 @@ Each of these is absent from the current code.
 6. **Multi-project coordinator.** One `Coordinator` per project folder today,
    with no cross-project task list.
 7. **Branch-scoped writer leases.** Today one running task per coordinator;
-   the rule should be one writer per branch per repository, which likely means
-   git worktrees.
+   the rule should be one writer per branch per repository. No checkout
+   management needed — agents bring their own copy — only the refusal to put two
+   agents on one branch.
+12. **Two-gate merge pipeline.** Review before an agent's copy merges into the
+    local clone, and a separate review before the local clone pushes to GitHub.
 8. **A real PTY**, plus a local completion model for the terminal's inline
    suggestions.
 9. **Orchestrator bridge** to a remote-capable assistant, beyond the existing
@@ -139,12 +156,6 @@ Each of these is absent from the current code.
 - What each side rail holds in agent view and in task view, and how large they
   are.
 - The task-type list itself — deferred to the build stage.
-- Whether ACC manages git worktrees so two agents can work one repository on
-  different branches, or expects them to exist already.
-- How a project is added to the ACC: a folder picker, a registry file, or
-  discovery.
-- Whether voice capture and transcription (`acc/voice.py`) carry into the new
-  shell.
 - Which remote assistant becomes the orchestrator bridge.
 
 ## Where the current drafts disagree with this
