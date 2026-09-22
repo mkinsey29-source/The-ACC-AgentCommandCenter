@@ -18,6 +18,10 @@ design stage.
   activity feed on the other.
 - Side rails are **contextual** — they can hold different panels in agent view
   than in task view. What goes in them is not yet decided.
+- Each tab owns the **whole centre console**. In agent view the centre is
+  entirely agents, idle ones included, each clickable for its prior work; in
+  task view it is entirely tasks. Within a tab it reads as list plus detail,
+  the detail taking most of the width.
 - The centre layout **does not change shape by task stage**. Several tasks
   across several projects are live at once, so the view stays stable and
   scannable; a task at review stage opens its review inside the same pane.
@@ -59,8 +63,9 @@ Each surface gets assigned a tier as it is designed.
 
 ## Attention
 
-The shell interrupts only for things that **stop progress and cannot be cleared
-without a human**: something needs logging into, a review is waiting, no agent
+Because completion, review, merge and push are all automatic, the human is not
+in the normal path at all. The shell interrupts only for things that **stop
+progress and cannot be cleared without a human**: something needs logging into, a review is waiting, no agent
 is available, a usage cap is hit, the orchestrator asked a question.
 
 Routine agent activity, ordinary errors and "shall I push this?" never
@@ -109,7 +114,16 @@ assigned instead of asking.
   ACC's job is to refuse two agents the same branch, not to manage checkouts.
 - Work reaches GitHub through two gates: an agent's copy is **merged into your
   local clone after review**, and the local clone is **pushed to GitHub after a
-  separate review**.
+  separate review**. Both reviews are done **by an agent, not by you**.
+- **The default path is seamless.** A task is completed, reviewed, merged and
+  pushed without waiting on your approval. You review only when you explicitly
+  say you want to review that task.
+- **There is no need to watch an agent's console.** What an agent pushes to its
+  branch is visible locally, and the branch is the reflection of its console.
+  Review happens before anything reaches main.
+- One agent per task, per branch, per repository. Twenty branches can carry
+  twenty agents on twenty tasks in one repository; the rule is only that no two
+  share a branch.
 - Projects live one folder per project on the desktop and are GitHub-backed.
   ACC is pointed at the folder.
 
