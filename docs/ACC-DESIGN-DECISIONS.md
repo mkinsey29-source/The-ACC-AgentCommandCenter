@@ -29,6 +29,10 @@ human is not in the normal path — only in the exceptions.
 | Core | The existing **Python** — drivers, job queue, leases, git, workflows — bundled and run as a background process inside the app. Nothing is rewritten in another language. |
 | State | **One SQLite database** in the app's own folder, holding every project, task, agent, job and event. |
 | Lifetime | The core **keeps running when the window is closed**. The UI is a view onto a service that is always working; closing it stops the view, not the work. |
+| Transport | The core **keeps its local HTTP server and token**. The window is a client like any other, and the existing MCP bridge already speaks it, so the orchestrator connection comes free. |
+| Exposure | The ACC **never listens to the outside world**. The phone talks to ChatGPT, ChatGPT reaches the desktop through its own remote channel, and the orchestrator drives the ACC locally. The listener stays bound to localhost. |
+| Credentials | Provider keys live in the **OS keychain**, handed to a driver only as it runs. |
+| Concurrency | ACC **watches the machine** — CPU, memory and VRAM headroom decide how much runs at once, with local models serial underneath. Because the limit is dynamic, the shell must always say *why* a run is waiting. |
 | Migration | **None needed.** The ACC has not been built yet — there is no deployed state, so schemas and task numbering can be designed freely. |
 | Identity | **One ACC.** A single program on the desktop running every project and every agent as one entity. There is never more than one ACC. |
 | Replaces | `acc/web` entirely. Not a second UI, not a re-skin. |
@@ -213,6 +217,7 @@ These are decisions the current code contradicts. Each needs a deliberate change
 | Review is automatic | `review()` requires a human-supplied decision, and managed acceptance requires the bound reviewer result plus a coordinator decision | `acc/core.py` |
 | The UI is one dense shell | `acc/web` is a stacked document-flow dashboard with dialogs | `acc/web/*` |
 | The ACC is a desktop app | A Python `http.server` on localhost with a token, opened in a browser | `acc/server.py`, `acc/web/*` |
+| Keys in the OS keychain | Every driver reads an `api_key_file` path from `agents.json`, expanded with `.expanduser()`; `worker_prompt.subprocess_env()` strips `*KEY*`/`*TOKEN*`/`*SECRET*` from what a subprocess inherits | all drivers, `acc/worker_prompt.py` |
 | One ACC runs everything | The program is one `Coordinator` bound to one project folder, started per project with its own state directory and SQLite file | `acc/core.py`, `acc/__main__.py` |
 
 Not conflicts, but worth knowing: the offline rule already behaves the way the
@@ -235,6 +240,10 @@ work it cannot interrupt.
 15. **Desktop application shell** — Tauri, with the Python core bundled as a
     background process, giving a real PTY, the microphone, OS notifications and
     local file access.
+17. **Keychain-backed credentials**, replacing key-file paths while keeping the
+    credential-filtered subprocess environment.
+18. **Load-aware scheduling** — admission based on CPU, memory and VRAM headroom,
+    with the waiting reason exposed to the UI.
 16. **A background service lifetime** — the core survives the window closing and
     keeps runs going.
 7. **Branch-scoped writer leases** — one writer per branch per repository,
