@@ -317,12 +317,16 @@ class Coordinator:
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'Gemini API key file not found: ' + api_key_file}
                     continue
-                elif driver == 'gemini-cli':
-                    executable = agent.get('executable', 'gemini')
-                    argv = [sys.executable, str(Path(__file__).with_name('gemini_cli.py')),
+                elif driver == 'antigravity':
+                    executable = agent.get('executable', 'agy')
+                    argv = [sys.executable, str(Path(__file__).with_name('antigravity.py')),
                             '--packet', '{prompt_file}', '--executable', executable]
                     if agent.get('model'):
                         argv += ['--model', agent['model']]
+                    if agent.get('api_key_file'):
+                        argv += ['--api-key-file', agent['api_key_file']]
+                    if agent.get('api_key_env'):
+                        argv += ['--api-key-env', agent['api_key_env']]
                     agent['argv'] = argv
                     check_executable = executable
                 elif driver == 'deepastra':
