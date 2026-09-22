@@ -103,6 +103,15 @@ interrupt. An error an agent cannot resolve causes reassignment, not a question.
   operator can read what was actually delegated.
 - That brief is **editable from the screen where it is displayed**, and both the
   orchestrator and the assigned agent see the edit.
+- **An edit takes effect immediately.** If it changes what is being done, the
+  run restarts or adjusts to it. The edit exists because the direction is wrong,
+  and spending tokens on a wrong direction is waste. This is the one case where
+  the graceful "let the step finish" rule does not apply — it is the
+  `stop(force=True)` case the code already has a primitive for.
+- **The orchestrator is not subject to usage caps** and is never failed over.
+  Running it out of tokens or credits is the operator's problem to solve by
+  swapping it; nothing is delegated about that decision. Its usage is still
+  shown so the swap can be an informed choice, but nothing acts on it.
 - It bridges to a remote-capable assistant so it can be driven from a phone —
   ChatGPT's remote feature or Claude's equivalent. *Which one is not settled.*
 - Inside the ACC, any configured agent can be assigned as the one you talk to.
@@ -228,10 +237,6 @@ work it cannot interrupt.
   are.
 - The task-type list itself — deferred to the build stage.
 - Which remote assistant becomes the orchestrator bridge.
-- How an edited brief reconciles with a run already in flight: restart the
-  agent, or apply from its next step.
-- Whether the orchestrator itself is subject to the same usage caps as
-  sub-agents.
 
 ## 16. Status of the visual drafts
 
