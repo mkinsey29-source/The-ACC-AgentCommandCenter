@@ -282,6 +282,12 @@ class Coordinator:
                             argv += ['--' + option, agent[option]]
                     agent['argv'] = argv
                     check_executable = executable
+                elif driver == 'dsh':
+                    executable = agent.get('executable', 'dsh')
+                    argv = [sys.executable, str(Path(__file__).with_name('deepseek_harness.py')),
+                            '--executable', executable, '--packet', '{prompt_file}']
+                    agent['argv'] = argv
+                    check_executable = executable
                 elif driver == 'ollama':
                     if not agent.get('model'):
                         raise ValueError('An ollama-driver agent needs a model.')
