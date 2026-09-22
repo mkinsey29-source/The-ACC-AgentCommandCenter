@@ -97,8 +97,11 @@ def run(args):
         argv += ['--key-file', args.key_file]
     # Inherit ACC's process group like the other subprocess-based drivers -- launch.py itself is
     # reachable that way. Its own codex child is not; see the module docstring and _kill_orphans.
+    # The filtered env (worker_prompt.subprocess_env) keeps ACC's own unrelated secrets out of
+    # reach of codex's shell/tool access; a real DeepSeek/OpenRouter credential still reaches
+    # launch.py explicitly via --key-file rather than an ambient *_API_KEY env var.
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
+                             stderr=subprocess.DEVNULL, env=worker_prompt.subprocess_env())
 
     def _on_terminate(signum, frame):
         # Read /proc and kill while launch.py's pid is still live -- once reaped it could be

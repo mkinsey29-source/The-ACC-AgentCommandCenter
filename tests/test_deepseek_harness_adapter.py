@@ -151,6 +151,16 @@ class DeepSeekHarnessUnitTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertFalse(Path(packet['result_file']).exists())
 
+    def test_spawns_with_a_credential_filtered_environment(self):
+        self.write_packet()
+        proc = MagicMock()
+        proc.stdout.read.return_value = ''
+        proc.wait.return_value = 1
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'shh'}, clear=False), \
+                patch('acc.deepseek_harness.subprocess.Popen', return_value=proc) as popen:
+            deepseek_harness.run(self.args())
+        self.assertNotIn('OPENAI_API_KEY', popen.call_args.kwargs['env'])
+
 
 if __name__ == '__main__':
     unittest.main()

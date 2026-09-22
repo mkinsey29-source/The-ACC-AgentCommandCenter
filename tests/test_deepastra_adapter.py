@@ -229,6 +229,16 @@ class DeepAstraUnitTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertFalse(Path(packet['result_file']).exists())
 
+    def test_spawns_with_a_credential_filtered_environment(self):
+        self.write_packet()
+        proc = MagicMock()
+        proc.pid = 424244
+        proc.wait.return_value = 1
+        with patch.dict('os.environ', {'DEEPSEEK_API_KEY': 'shh'}, clear=False), \
+                patch('acc.deepastra.subprocess.Popen', return_value=proc) as popen:
+            deepastra.run(self.args())
+        self.assertNotIn('DEEPSEEK_API_KEY', popen.call_args.kwargs['env'])
+
     def test_last_agent_message_requires_a_log(self):
         with self.assertRaises(ValueError):
             deepastra._last_agent_message(self.root / 'no-such-dir')

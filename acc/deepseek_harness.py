@@ -40,8 +40,11 @@ def run(args):
     # Inherit ACC's process group so stop/timeout reaches dsh and its children -- same convention
     # as the Hermes adapter. This script does not enforce its own timeout; ACC's outer supervision
     # (the coordinator's deadline timer + stop_tree/killpg) owns interrupting a hung run.
+    # The filtered env keeps ACC's own unrelated secrets out of reach of whatever shell/tool
+    # access dsh grants the model; see worker_prompt.subprocess_env.
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+                             stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+                             env=worker_prompt.subprocess_env())
     try:
         output = proc.stdout.read()
         code = proc.wait()
