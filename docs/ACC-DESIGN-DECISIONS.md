@@ -1,4 +1,8 @@
-# ACC command centre — design decisions
+# ACC design decisions
+
+> **Superseded by [ACC-HANDOFF.md](ACC-HANDOFF.md)**, which contains everything
+> here plus the build checklist, the conflicts table, the repo map and the
+> record of design changes. Read that instead; this file is kept for history.
 
 Status: **design stage. Nothing here is implemented.** This records what was
 decided in a design Q&A about the ACC's new interface and the behaviour behind
