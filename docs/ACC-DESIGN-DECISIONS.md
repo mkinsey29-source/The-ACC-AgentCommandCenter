@@ -45,6 +45,11 @@ Each surface gets assigned a tier as it is designed.
 - The terminal is a **real PTY**: any command, full-screen TUI programs
   included. Neovim must run in it. That means real terminal emulation, not a
   log view.
+- The orchestrator **echoes what it understood** and starts; it does not wait
+  for confirmation.
+- The ACC shows **the exact instruction set the orchestrator gave each
+  sub-agent**. You brainstorm loosely; it writes the precise brief; you can read
+  what was actually delegated.
 - The **orchestrator line** in the bottom rail is plain conversation. The
   orchestrator is a conversational agent that reads intent, answers from its own
   knowledge or by asking a sub-agent, and delegates tasks itself. Typing does
@@ -121,6 +126,14 @@ assigned instead of asking.
 - **There is no need to watch an agent's console.** What an agent pushes to its
   branch is visible locally, and the branch is the reflection of its console.
   Review happens before anything reaches main.
+- **You opt into reviewing** either when you issue the task, or later from the
+  task screen with a manual-review-after-completion toggle.
+- **GitHub gets a full activity panel** — pull requests, checks and review
+  comments inside the ACC, not just failures.
+- Both views share a **grouping switcher**: a flat list by default, grouped by
+  project on demand. In agent view, grouping by project shows which agents are
+  in that project and what each is doing.
+- **One agent can hold several tasks at once**, on different branches.
 - One agent per task, per branch, per repository. Twenty branches can carry
   twenty agents on twenty tasks in one repository; the rule is only that no two
   share a branch.
@@ -154,6 +167,10 @@ Each of these is absent from the current code.
    the rule should be one writer per branch per repository. No checkout
    management needed — agents bring their own copy — only the refusal to put two
    agents on one branch.
+13. **Delegated instruction records.** The orchestrator's brief to each
+    sub-agent, stored and readable per task.
+14. **Per-agent task concurrency**, so one agent holding several tasks does not
+    exceed what the machine or the provider can run.
 12. **Two-gate merge pipeline.** Review before an agent's copy merges into the
     local clone, and a separate review before the local clone pushes to GitHub.
 8. **A real PTY**, plus a local completion model for the terminal's inline
