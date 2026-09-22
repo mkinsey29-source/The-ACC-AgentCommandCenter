@@ -18,7 +18,7 @@
   </style>
 </helmet>
 
-<div style="width: 1600px; height: 1000px; box-sizing: border-box; display: flex; flex-direction: column; background: #060b14; color: #d6e7f4; overflow: hidden;">
+<div style="width: 1600px; height: 1000px; box-sizing: border-box; position: relative; display: flex; flex-direction: column; background: #060b14; color: #d6e7f4; overflow: hidden;">
 
   <!-- ============ TOP BAR ============ -->
   <div style="height: 54px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 16px; padding: 0 18px; background: #09121c; border-bottom: 1px solid {{accent}};">
@@ -48,50 +48,14 @@
     <!-- ---------- LEFT RAIL ---------- -->
     <div style="width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; min-height: 0;">
 
-      <!-- MASTER COMMAND -->
-      <div style="border: 1px solid #1f4d66; background: #0b1622; display: flex; flex-direction: column;">
-        <div style="height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #103049; border-bottom: 1px solid #1f4d66;">
-          <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
-          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">MASTER COMMAND</span>
-          <span style="flex-grow: 1;"></span>
-          <button type="button" style="height: 20px; padding: 0 8px; background: #0d2334; border: 1px solid #2f6f8c; color: #7fdcf0; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.08em; cursor: pointer;">FULL PANEL ⌘M</button>
-        </div>
-        <div style="padding: 11px 11px 12px 11px; display: flex; flex-direction: column; gap: 9px;">
-          <div style="display: flex; gap: 0;">
-            <button type="button" onClick="{{ goOnline }}" style="{{ onlineStyle }}">ONLINE</button>
-            <button type="button" onClick="{{ goOffline }}" style="{{ offlineStyle }}">OFFLINE</button>
-          </div>
-          <div style="display: flex; align-items: baseline; gap: 7px;">
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.14em; color: #6b8299;">FLEET</span>
-            <span style="flex-grow: 1; height: 1px; background: #17394e;"></span>
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #6b8299;">{{ assignableLabel }}</span>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 0;">
-            <sc-for list="{{ fleet }}" as="f" hint-placeholder-count="6">
-              <div style="display: flex; align-items: center; gap: 9px; height: 24px;">
-                <span style="width: 6px; height: 6px; border-radius: 50%; background: {{ f.dot }}; flex-shrink: 0;"></span>
-                <span style="flex-grow: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: {{ f.nameColor }}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ f.short }}</span>
-                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: {{ f.stateColor }}; width: 52px; text-align: right;">{{ f.state }}</span>
-                <button type="button" onClick="{{ f.toggle }}" aria-label="Assignable: {{ f.short }}" style="{{ f.trackStyle }}"><span style="{{ f.knobStyle }}"></span></button>
-              </div>
-            </sc-for>
-          </div>
-          <div style="display: flex; align-items: baseline; gap: 7px; margin-top: 2px;">
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.14em; color: #6b8299;">SYSTEMS</span>
-            <span style="flex-grow: 1; height: 1px; background: #17394e;"></span>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 0;">
-            <sc-for list="{{ systems }}" as="s" hint-placeholder-count="5">
-              <div style="display: flex; align-items: center; gap: 9px; height: 24px;">
-                <span style="width: 5px; height: 5px; background: {{ s.dot }}; flex-shrink: 0;"></span>
-                <span style="flex-grow: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #b9cdde; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ s.label }}</span>
-                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: {{ s.stateColor }}; width: 30px; text-align: right;">{{ s.state }}</span>
-                <button type="button" onClick="{{ s.toggle }}" aria-label="Toggle {{ s.label }}" style="{{ s.trackStyle }}"><span style="{{ s.knobStyle }}"></span></button>
-              </div>
-            </sc-for>
-          </div>
-        </div>
-      </div>
+      <!-- MASTER COMMAND · collapsed -->
+      <button type="button" onClick="{{ togglePanel }}" aria-expanded="{{ panelOpen }}" style="{{ barStyle }}">
+        <span style="width: 6px; height: 6px; background: #5fd0e8; flex-shrink: 0;"></span>
+        <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">MASTER COMMAND</span>
+        <span style="flex-grow: 1;"></span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; color: {{ barSummaryColor }};">{{ barSummary }}</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #7fdcf0; width: 10px; text-align: right;">{{ barChevron }}</span>
+      </button>
 
       <!-- SYSTEM HEALTH -->
       <div style="border: 1px solid #17394e; background: #0b1622;">
@@ -117,7 +81,7 @@
       </div>
 
       <!-- MODEL INFRASTRUCTURE -->
-      <div style="flex-grow: 1; min-height: 0; border: 1px solid #17394e; background: #0b1622; display: flex; flex-direction: column;">
+      <div style="flex-shrink: 0; border: 1px solid #17394e; background: #0b1622; display: flex; flex-direction: column;">
         <div style="height: 30px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #0f2436; border-bottom: 1px solid #17394e;">
           <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
           <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">MODEL INFRASTRUCTURE</span>
@@ -128,6 +92,24 @@
               <span style="flex-grow: 1; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #b9cdde; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ m.name }}</span>
               <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">{{ m.size }}</span>
               <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: {{ m.color }}; width: 62px; text-align: right;">{{ m.state }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- LOCAL CHANGES -->
+      <div style="flex-grow: 1; min-height: 0; border: 1px solid #17394e; background: #0b1622; display: flex; flex-direction: column;">
+        <div style="height: 30px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #0f2436; border-bottom: 1px solid #17394e;">
+          <span style="width: 6px; height: 6px; background: #ffb84d;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">LOCAL CHANGES</span>
+          <span style="flex-grow: 1;"></span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: #6b8299;">UNSTAGED</span>
+        </div>
+        <div style="padding: 8px 12px; display: flex; flex-direction: column; gap: 1px;">
+          <sc-for list="{{ changes }}" as="ch" hint-placeholder-count="7">
+            <div style="display: flex; align-items: center; gap: 9px; height: 24px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: {{ ch.color }}; width: 14px; flex-shrink: 0;">{{ ch.mark }}</span>
+              <span style="flex-grow: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #b9cdde; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ ch.path }}</span>
             </div>
           </sc-for>
         </div>
@@ -357,6 +339,116 @@
     </div>
   </div>
 
+  <!-- ============ MASTER COMMAND · expanded flyout ============ -->
+  <sc-if value="{{ panelOpen }}" hint-placeholder-val="{{ true }}">
+    <div style="position: absolute; left: 324px; top: 66px; width: 430px; z-index: 10; background: #0b1622; border: 1px solid #2f6f8c; box-shadow: 0 20px 44px #02060bd9; display: flex; flex-direction: column;">
+      <div style="height: 32px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #103049; border-bottom: 1px solid #2f6f8c;">
+        <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
+        <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #9ae6f7;">MASTER COMMAND</span>
+        <span style="flex-grow: 1;"></span>
+        <button type="button" style="height: 20px; padding: 0 8px; background: #0d2334; border: 1px solid #2f6f8c; color: #7fdcf0; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.08em; cursor: pointer;">FULL PANEL ⌘M</button>
+        <button type="button" onClick="{{ togglePanel }}" aria-label="Collapse master command" style="width: 20px; height: 20px; background: transparent; border: 1px solid #25445a; color: #8fa8bd; font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 1; cursor: pointer;">×</button>
+      </div>
+
+      <div style="padding: 11px; display: flex; gap: 0; border-bottom: 1px solid #17394e;">
+        <button type="button" onClick="{{ goOnline }}" style="{{ onlineStyle }}">ONLINE</button>
+        <button type="button" onClick="{{ goOffline }}" style="{{ offlineStyle }}">OFFLINE</button>
+      </div>
+
+      <!-- FLEET -->
+      <button type="button" onClick="{{ fleetToggle }}" aria-expanded="{{ fleetOpen }}" style="{{ fleetHeadStyle }}">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.14em; color: #b9cdde;">FLEET</span>
+        <span style="flex-grow: 1;"></span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: #6b8299;">{{ assignableLabel }}</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #7fdcf0; width: 10px; text-align: right;">{{ fleetChevron }}</span>
+      </button>
+      <sc-if value="{{ fleetOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="padding: 4px 11px 9px 11px; display: flex; flex-direction: column; gap: 0;">
+          <sc-for list="{{ fleet }}" as="f" hint-placeholder-count="6">
+            <div style="display: flex; align-items: center; gap: 9px; height: 26px;">
+              <span style="width: 6px; height: 6px; border-radius: 50%; background: {{ f.dot }}; flex-shrink: 0;"></span>
+              <span style="flex-grow: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: {{ f.nameColor }}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ f.short }}</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: {{ f.stateColor }}; width: 56px; text-align: right;">{{ f.state }}</span>
+              <button type="button" onClick="{{ f.toggle }}" aria-label="Assignable: {{ f.short }}" style="{{ f.trackStyle }}"><span style="{{ f.knobStyle }}"></span></button>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- SYSTEMS -->
+      <button type="button" onClick="{{ systemsToggle }}" aria-expanded="{{ systemsOpen }}" style="{{ systemsHeadStyle }}">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.14em; color: #b9cdde;">SYSTEMS</span>
+        <span style="flex-grow: 1;"></span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: #6b8299;">{{ systemsLabel }}</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #7fdcf0; width: 10px; text-align: right;">{{ systemsChevron }}</span>
+      </button>
+      <sc-if value="{{ systemsOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="padding: 4px 11px 9px 11px; display: flex; flex-direction: column; gap: 0;">
+          <sc-for list="{{ systems }}" as="s" hint-placeholder-count="5">
+            <div style="display: flex; align-items: center; gap: 9px; height: 26px;">
+              <span style="width: 5px; height: 5px; background: {{ s.dot }}; flex-shrink: 0;"></span>
+              <span style="flex-grow: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #b9cdde; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ s.label }}</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: {{ s.stateColor }}; width: 30px; text-align: right;">{{ s.state }}</span>
+              <button type="button" onClick="{{ s.toggle }}" aria-label="Toggle {{ s.label }}" style="{{ s.trackStyle }}"><span style="{{ s.knobStyle }}"></span></button>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- WORKFLOW -->
+      <button type="button" onClick="{{ workflowToggle }}" aria-expanded="{{ workflowOpen }}" style="{{ workflowHeadStyle }}">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.14em; color: #b9cdde;">WORKFLOW ROLES</span>
+        <span style="flex-grow: 1;"></span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: #6b8299;">{{ rounds }} ROUNDS</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #7fdcf0; width: 10px; text-align: right;">{{ workflowChevron }}</span>
+      </button>
+      <sc-if value="{{ workflowOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="padding: 6px 11px 11px 11px; display: flex; flex-direction: column; gap: 8px;">
+          <label style="display: flex; align-items: center; gap: 9px;">
+            <span style="width: 92px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">IMPLEMENTER</span>
+            <select style="flex-grow: 1; height: 26px; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px;"><option>claude-code</option><option>agent3d-job</option><option>deepseek-harness</option></select>
+          </label>
+          <label style="display: flex; align-items: center; gap: 9px;">
+            <span style="width: 92px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">REVIEWER</span>
+            <select style="flex-grow: 1; height: 26px; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px;"><option>deepseek-ollama</option><option>local-lmstudio</option></select>
+          </label>
+          <label style="display: flex; align-items: center; gap: 9px;">
+            <span style="width: 92px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">COORDINATOR</span>
+            <select style="flex-grow: 1; height: 26px; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px;"><option>claude-api</option><option>local-lmstudio</option></select>
+          </label>
+          <div style="display: flex; align-items: center; gap: 9px;">
+            <span style="width: 92px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">ROUNDS</span>
+            <button type="button" onClick="{{ roundsDown }}" aria-label="Fewer rounds" style="width: 26px; height: 26px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'IBM Plex Mono', monospace; font-size: 13px; cursor: pointer;">−</button>
+            <span style="width: 38px; height: 26px; display: flex; align-items: center; justify-content: center; background: #081420; border-top: 1px solid #1f4d66; border-bottom: 1px solid #1f4d66; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #d6e7f4;">{{ rounds }}</span>
+            <button type="button" onClick="{{ roundsUp }}" aria-label="More rounds" style="width: 26px; height: 26px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'IBM Plex Mono', monospace; font-size: 13px; cursor: pointer;">+</button>
+            <span style="flex-grow: 1; font-family: 'IBM Plex Sans', sans-serif; font-size: 10.5px; color: #6b8299;">1–10 · reviewer must differ</span>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- SERVICES -->
+      <button type="button" onClick="{{ servicesToggle }}" aria-expanded="{{ servicesOpen }}" style="{{ servicesHeadStyle }}">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.14em; color: #b9cdde;">SERVICES</span>
+        <span style="flex-grow: 1;"></span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: #6b8299;">{{ servicesLabel }}</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #7fdcf0; width: 10px; text-align: right;">{{ servicesChevron }}</span>
+      </button>
+      <sc-if value="{{ servicesOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="padding: 6px 11px 11px 11px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;">
+          <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">SOURCE BRANCH</span><input type="text" value="temporary" style="height: 26px; box-sizing: border-box; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">PROTECTED BASE</span><input type="text" value="main" style="height: 26px; box-sizing: border-box; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">CLASSIFICATION</span><select style="height: 26px; padding: 0 7px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px;"><option>internal</option><option>public</option><option>confidential</option></select></label>
+          <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">WORKSPACE SCOPE</span><select style="height: 26px; padding: 0 7px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px;"><option>project</option><option>isolated_repository</option></select></label>
+        </div>
+      </sc-if>
+
+      <div style="padding: 9px 11px; border-top: 1px solid #17394e; background: #081420; display: flex; align-items: center; gap: 9px;">
+        <span style="font-family: 'IBM Plex Sans', sans-serif; font-size: 10.5px; line-height: 1.45; color: #8fa8bd;">Switching an agent off lets its current step finish, then pauses the task.</span>
+        <button type="button" style="flex-shrink: 0; height: 24px; padding: 0 9px; background: #1d0f16; border: 1px solid #5c2430; color: #ff6070; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.08em; cursor: pointer;">FORCE STOP</button>
+      </div>
+    </div>
+  </sc-if>
+
   <!-- ============ STATUS STRIP ============ -->
   <div style="height: 34px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 0; padding: 0 16px; background: #09121c; border-top: 1px solid {{accent}}; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.08em;">
     <sc-for list="{{ footer }}" as="f" hint-placeholder-count="7">
@@ -375,7 +467,11 @@
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { view: 'agents', term: 0, agent: 0, mode: null, fleet: null, sys: null };
+    this.state = {
+      view: 'agents', term: 0, agent: 0, mode: null, fleet: null, sys: null,
+      panel: false, rounds: 3,
+      open: { fleet: true, systems: false, workflow: false, services: false },
+    };
   }
 
   mode() {
@@ -390,6 +486,17 @@ class Component extends DCLogic {
 
   knob(on) {
     return 'width: 11px; height: 11px; margin: 0 1px; background: ' + (on ? '#43e39a' : '#4a6076') + '; display: block;';
+  }
+
+  section(key) {
+    const open = this.state.open[key];
+    return {
+      open,
+      chevron: open ? '\u25be' : '\u25b8',
+      headStyle: 'display: flex; align-items: center; gap: 9px; width: 100%; box-sizing: border-box; height: 28px; padding: 0 11px; background: '
+        + (open ? '#0f2436' : 'transparent') + '; border: 0; border-top: 1px solid #17394e; cursor: pointer; text-align: left;',
+      toggle: () => this.setState({ open: Object.assign({}, this.state.open, { [key]: !open }) }),
+    };
   }
 
   cells(filled, total, color) {
@@ -731,11 +838,57 @@ class Component extends DCLogic {
     const chip = (color, bg, border) => 'display: flex; align-items: center; gap: 8px; padding: 5px 11px; border: 1px solid '
       + border + '; background: ' + bg + "; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: " + color + ';';
 
+    const fleetSection = this.section('fleet');
+    const systemsSection = this.section('systems');
+    const workflowSection = this.section('workflow');
+    const servicesSection = this.section('services');
+    const systemsOn = systemDefs.filter(([key]) => sys[key]).length;
+    const panelOpen = this.state.panel;
+
     return {
       accent: this.props.accent ?? '#1f4d66',
       fleet,
       systems,
       assignableLabel: assignableCount + ' OF 6 ON',
+      panelOpen,
+      togglePanel: () => this.setState({ panel: !panelOpen }),
+      barStyle: 'display: flex; align-items: center; gap: 9px; width: 100%; box-sizing: border-box; height: 40px; flex-shrink: 0; padding: 0 11px; background: '
+        + (panelOpen ? '#103049' : '#0b1622') + '; border: 1px solid ' + (panelOpen ? '#2f6f8c' : '#1f4d66') + '; cursor: pointer; text-align: left;',
+      barSummary: offline
+        ? 'OFFLINE · ' + assignableCount + '/6 · ' + systemsOn + '/5'
+        : 'ONLINE · ' + assignableCount + '/6 · ' + systemsOn + '/5',
+      barSummaryColor: assignableCount ? (offline ? green : cyan) : red,
+      barChevron: panelOpen ? '\u25be' : '\u25b8',
+      fleetOpen: fleetSection.open,
+      fleetChevron: fleetSection.chevron,
+      fleetHeadStyle: fleetSection.headStyle,
+      fleetToggle: fleetSection.toggle,
+      systemsOpen: systemsSection.open,
+      systemsChevron: systemsSection.chevron,
+      systemsHeadStyle: systemsSection.headStyle,
+      systemsToggle: systemsSection.toggle,
+      systemsLabel: systemsOn + ' OF 5 ON',
+      workflowOpen: workflowSection.open,
+      workflowChevron: workflowSection.chevron,
+      workflowHeadStyle: workflowSection.headStyle,
+      workflowToggle: workflowSection.toggle,
+      servicesOpen: servicesSection.open,
+      servicesChevron: servicesSection.chevron,
+      servicesHeadStyle: servicesSection.headStyle,
+      servicesToggle: servicesSection.toggle,
+      servicesLabel: sys.github ? 'GITHUB ON' : 'GITHUB OFF',
+      changes: [
+        ['M', 'acc/core.py', '#ffb84d'],
+        ['M', 'acc/workflow.py', '#ffb84d'],
+        ['M', 'acc/controls.py', '#ffb84d'],
+        ['M', 'acc/web/app.js', '#ffb84d'],
+        ['M', 'tests/test_workflow.py', '#ffb84d'],
+        ['?', 'docs/UI-SHELL-DRAFT.md', '#43e39a'],
+        ['?', 'docs/ui-drafts/Main.dc.html', '#43e39a'],
+      ].map(([mark, path, color]) => ({ mark, path, color })),
+      rounds: this.state.rounds,
+      roundsUp: () => this.setState({ rounds: Math.min(10, this.state.rounds + 1) }),
+      roundsDown: () => this.setState({ rounds: Math.max(1, this.state.rounds - 1) }),
       health,
       models,
       agents,

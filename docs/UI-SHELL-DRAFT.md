@@ -13,7 +13,7 @@ These four were fixed before the draft and each has a home in the layout:
 | Agent view / task view | Centre column, tabbed, fills the upper two-thirds | `Main.dc.html` |
 | Agent token usage meter | Right rail, aggregate over per-agent meters | `Main.dc.html`, `Tokens.dc.html` |
 | Offline terminal (Cursor-shaped) | Centre column, lower third, tabbed | `Main.dc.html`, `Terminal.dc.html` |
-| Master command panel | Full-screen panel; a compact strip of the same toggles sits at the top of the left rail | `Command.dc.html`, `Main.dc.html` |
+| Master command panel | A 40px bar at the top of the left rail that expands into a flyout; the full panel is a separate screen | `Main.dc.html`, `Command.dc.html` |
 
 Everything else on the draft — system health, model infrastructure, alert log,
 status strip — is a proposal, not a decision.
@@ -24,12 +24,27 @@ status strip — is a proposal, not a decision.
 
 - Top bar, 54px: workspace path, Git branch and dirty count, project mode,
   lease countdown, clock.
-- Left rail, 300px: master command, system health, model infrastructure.
+- Left rail, 300px: the collapsed master command bar, system health, model
+  infrastructure, local changes.
 - Centre, fluid: agent/task tabs above, terminal (330px) below.
 - Right rail, 320px: token usage, alert log.
 - Status strip, 34px: fleet and task counters, session tokens, billed cost.
 
 ## The master command panel
+
+It is collapsed by default: a 40px bar in the left rail carrying the state it
+is responsible for — project mode, how many agents are assignable, how many
+systems are on — and a chevron. Clicking it opens a 430px flyout anchored
+beside the rail, over the centre column, so the rail keeps its room for health,
+models and local changes whether the panel is open or shut.
+
+Inside the flyout, project mode sits at the top and the rest are sections that
+open independently: FLEET, SYSTEMS, WORKFLOW ROLES, SERVICES. Each section
+header carries its own summary, so a shut section still tells you where it
+stands. A FULL PANEL button opens the whole thing as its own screen, which is
+where the less frequent settings live — the provider catalog, the probe column,
+eligible roles, contingency.
+
 
 It is a panel of toggles, not one switch. Every agent has its own, and so does
 every setting ACC already carries:
@@ -113,6 +128,9 @@ from hairlines and header strips.
   it today: `available` is probed, and the only per-agent policy that exists is
   whether a role is configured. It needs a home in the settings table and a
   check at assignment time.
-- The rail shows six of the nine configured agents. Whether the job-backed and
-  tool adapters belong in the rail at all, or only in the full panel, is open.
+- The flyout shows six of the nine configured agents; the job-backed and tool
+  adapters appear only in the full panel. Whether that split is the right one is
+  open.
+- The flyout closes only by its own bar or × today. Click-away, Esc and a
+  pinned mode are undecided.
 - Left and right rails are otherwise the least settled parts of the draft.
