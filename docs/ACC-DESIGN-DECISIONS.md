@@ -33,6 +33,8 @@ human is not in the normal path — only in the exceptions.
 | Exposure | The ACC **never listens to the outside world**. The phone talks to ChatGPT, ChatGPT reaches the desktop through its own remote channel, and the orchestrator drives the ACC locally. The listener stays bound to localhost. |
 | Credentials | Provider keys live in the **OS keychain**, handed to a driver only as it runs. |
 | Concurrency | ACC **watches the machine** — CPU, memory and VRAM headroom decide how much runs at once, with local models serial underneath. Because the limit is dynamic, the shell must always say *why* a run is waiting. |
+| Configuration | **Files for shape, database for state.** Agent definitions and the work-type routing table stay files, version-controllable and portable; allowances, usage, assignable flags and everything that changes hourly live in the database. |
+| Retention | **Prune noise, keep the record.** Routine events age out; reports, reviews, evidence, usage and task history are kept permanently. |
 | Migration | **None needed.** The ACC has not been built yet — there is no deployed state, so schemas and task numbering can be designed freely. |
 | Identity | **One ACC.** A single program on the desktop running every project and every agent as one entity. There is never more than one ACC. |
 | Replaces | `acc/web` entirely. Not a second UI, not a re-skin. |
@@ -155,6 +157,10 @@ interrupt. An error an agent cannot resolve causes reassignment, not a question.
   way any other hold works.
 - The meter's primary unit is **percentage of an agent's own allowance**, not
   raw tokens, because the failover rule is written against percentages.
+- **Reporting usage is part of the driver contract.** Every cloud driver that
+  can report tokens must, rather than discarding what the provider returns. A
+  cloud driver that cannot report is marked unmetered and is excluded from
+  cost-escalating failover.
 - **The meter is for cloud agents only.** Local agents cost nothing and are not
   metered.
 - Its purpose is watching the **rate of depletion**, so the operator can switch
@@ -162,6 +168,13 @@ interrupt. An error an agent cannot resolve causes reassignment, not a question.
   allowance faster than expected.
 
 ## 10. Projects, branches and concurrency
+
+- **Project priority decides what runs first.** When the machine has room for
+  everything ready, everything runs; when it does not, the task belonging to the
+  higher-priority project goes first. In practice a project usually has only one
+  or two tasks in flight, so contention is the exception. *How a project's
+  priority is set — by the orchestrator, from the projects list, or both — is
+  not yet decided.*
 
 - **Multiple projects at once.** Every task is labelled with its project —
   colour coding is fine — and the default is one list showing task, agent and
@@ -227,7 +240,9 @@ work it cannot interrupt.
 
 ## 14. Backlog — what the code must gain
 
-1. **Usage accounting** — per-run usage records, per-task caps, pause at the cap.
+1. **Usage accounting** — per-run usage records, per-task caps, pause at the cap,
+   and a driver contract requiring every capable cloud driver to report usage
+   instead of discarding it.
 2. **Agent allowances** — stored weekly or monthly allowance per paid agent and a
    rolling percentage used, so the 5-point failover band can be enforced.
 3. **Task-type routing table** — type → preferred agent → backup, with separate
@@ -242,6 +257,8 @@ work it cannot interrupt.
     local file access.
 17. **Keychain-backed credentials**, replacing key-file paths while keeping the
     credential-filtered subprocess environment.
+19. **Project priority** as a scheduling input, and an event-retention policy
+    that prunes routine chatter while keeping the record.
 18. **Load-aware scheduling** — admission based on CPU, memory and VRAM headroom,
     with the waiting reason exposed to the UI.
 16. **A background service lifetime** — the core survives the window closing and
