@@ -1,6 +1,6 @@
 """acc/grok_api.py: unit tests for its own response-handling, plus a full workflow cycle driven
-through a fake local Chat Completions server standing in for the real thing (no network
-dependency, no real model calls) -- mirroring test_claude_api_adapter.py's rigor."""
+through a fake local Responses API server standing in for the real thing (no network dependency,
+no real model calls) -- mirroring test_claude_api_adapter.py's rigor."""
 import json
 from pathlib import Path
 import subprocess
@@ -15,7 +15,7 @@ from acc.core import Coordinator
 from test_acc import eventually
 
 
-class FakeChatCompletionsHandler(BaseHTTPRequestHandler):
+class FakeResponsesHandler(BaseHTTPRequestHandler):
     """Answers each workflow stage exactly like test_claude_api_adapter.py's own fake server
     does, so the same task/workflow cycle can be exercised end to end against this driver too."""
 
@@ -23,11 +23,11 @@ class FakeChatCompletionsHandler(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        assert self.path == '/v1/chat/completions'
+        assert self.path == '/v1/responses'
         assert self.headers['Authorization'] == 'Bearer fake-key'
         length = int(self.headers['Content-Length'])
         body = json.loads(self.rfile.read(length))
-        prompt = body['messages'][0]['content']
+        prompt = body['input']
         packet = json.loads(prompt[prompt.index('{'):])
         w = packet['workflow']
         stage = w['stage']
@@ -42,8 +42,9 @@ class FakeChatCompletionsHandler(BaseHTTPRequestHandler):
         elif stage == 'coordinate':
             review = w['review_result']
             r['action'] = 'request_review' if review is None else 'accept'
-        payload = json.dumps({'choices': [{'finish_reason': 'stop',
-                                            'message': {'content': json.dumps(r)}}]}).encode()
+        payload = json.dumps({'status': 'completed', 'output': [
+            {'type': 'message', 'role': 'assistant',
+             'content': [{'type': 'output_text', 'text': json.dumps(r)}]}]}).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(payload)))
@@ -59,10 +60,10 @@ class GrokApiWorkflowTests(unittest.TestCase):
         self.project.mkdir()
         subprocess.run(['git', 'init', '-q', str(self.project)], check=True)
         self.state = self.root / 'state'
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), FakeChatCompletionsHandler)
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), FakeResponsesHandler)
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.server_thread.start()
-        endpoint = f'http://127.0.0.1:{self.server.server_port}/v1/chat/completions'
+        endpoint = f'http://127.0.0.1:{self.server.server_port}/v1/responses'
         self.key_file = self.root / 'grok.key'
         self.key_file.write_text('fake-key')
         agents = [{'id': a, 'name': a, 'driver': 'grok', 'api_key_file': str(self.key_file),
@@ -83,7 +84,7 @@ class GrokApiWorkflowTests(unittest.TestCase):
                           self.c.store.get(task_id).get('workflow', {}).get('phase') in
                           ('complete', 'held') else None, timeout=12)
 
-    def test_full_cycle_through_a_fake_chat_completions_server_reaches_accepted(self):
+    def test_full_cycle_through_a_fake_responses_server_reaches_accepted(self):
         task = self.c.create({'title': 'Exercise grok', 'instruction': 'Reconstruct the answer.'})
         self.c.workflows.configure(task['id'], {'implementer': 'builder', 'reviewer': 'reviewer',
                                    'coordinator': 'coordinator'})
@@ -127,13 +128,13 @@ class GrokApiUnitTests(unittest.TestCase):
         self.packet_path.write_text(json.dumps(packet))
         return packet
 
-    def args(self, model='grok-4.6', max_tokens=16000, timeout_seconds=5, endpoint=grok_api.ENDPOINT):
+    def args(self, model='grok-4.7', max_tokens=16000, timeout_seconds=5, endpoint=grok_api.ENDPOINT):
         import argparse
         return argparse.Namespace(packet=str(self.packet_path), api_key_file=str(self.key_file),
                                    model=model, max_tokens=max_tokens, timeout_seconds=timeout_seconds,
                                    endpoint=endpoint)
 
-    def test_result_is_extracted_from_message_content(self):
+    def test_result_is_extracted_from_output_text_blocks(self):
         packet = self.write_packet()
         content = json.dumps({'task_id': 't1', 'run_id': 'r1', 'revision': 1,
                                'snapshot_id': None, 'summary': 'done', 'checks': []})
@@ -156,14 +157,30 @@ class GrokApiUnitTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 grok_api.run(self.args())
 
-    def test_truncated_response_is_rejected(self):
+    def test_incomplete_status_is_rejected(self):
         self.write_packet()
         with patch.object(grok_api.urllib.request, 'urlopen') as urlopen:
             urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
-                {'choices': [{'finish_reason': 'length', 'message': {'content': '{"incompl'}}]}).encode()
+                {'status': 'incomplete', 'incomplete_details': {'reason': 'max_output_tokens'},
+                 'output': []}).encode()
             with self.assertRaises(ValueError) as ctx:
                 grok_api.run(self.args())
-        self.assertIn('truncated', str(ctx.exception))
+        self.assertIn('incomplete', str(ctx.exception))
+
+    def test_error_field_is_rejected(self):
+        self.write_packet()
+        with patch.object(grok_api.urllib.request, 'urlopen') as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
+                {'status': 'completed', 'error': {'message': 'model overloaded'}, 'output': []}).encode()
+            with self.assertRaises(ValueError) as ctx:
+                grok_api.run(self.args())
+        self.assertIn('model overloaded', str(ctx.exception))
+
+    def test_extract_text_ignores_non_message_output_items(self):
+        body = {'output': [{'type': 'reasoning', 'content': [{'type': 'output_text', 'text': 'nope'}]},
+                            {'type': 'message', 'role': 'assistant',
+                             'content': [{'type': 'output_text', 'text': 'yes'}]}]}
+        self.assertEqual(grok_api._extract_text(body), 'yes')
 
     def test_http_error_reports_the_api_message(self):
         import urllib.error
