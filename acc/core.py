@@ -301,6 +301,32 @@ class Coordinator:
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'Ollama host not reachable: ' + host}
                     continue
+                elif driver == 'grok':
+                    api_key_file = agent.get('api_key_file')
+                    if not api_key_file:
+                        raise ValueError('A grok-driver agent needs an api_key_file.')
+                    model = agent.get('model', 'grok-4.6')
+                    argv = [sys.executable, str(Path(__file__).with_name('grok_api.py')),
+                            '--packet', '{prompt_file}', '--api-key-file', api_key_file, '--model', model]
+                    if agent.get('endpoint'):
+                        argv += ['--endpoint', agent['endpoint']]
+                    agent['argv'] = argv
+                    # A local credential-reference file, not a PATH-resolvable command.
+                    available = Path(api_key_file).is_file()
+                    self.agents[key] = {**agent, 'kind': 'model', 'available': available,
+                                        'description': 'Configured command adapter; provider readiness not verified.'
+                                                        if available else 'Grok API key file not found: ' + api_key_file}
+                    continue
+                elif driver == 'grok-build':
+                    executable = agent.get('executable', 'grok')
+                    argv = [sys.executable, str(Path(__file__).with_name('grok_build.py')),
+                            '--packet', '{prompt_file}', '--executable', executable]
+                    if agent.get('model'):
+                        argv += ['--model', agent['model']]
+                    if agent.get('api_key_file'):
+                        argv += ['--api-key-file', agent['api_key_file']]
+                    agent['argv'] = argv
+                    check_executable = executable
                 elif driver == 'claude':
                     api_key_file = agent.get('api_key_file')
                     if not api_key_file:
