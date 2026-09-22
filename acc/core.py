@@ -325,7 +325,7 @@ class Coordinator:
                         argv += ['--endpoint', agent['endpoint']]
                     agent['argv'] = argv
                     # A local credential-reference file, not a PATH-resolvable command.
-                    available = Path(api_key_file).is_file()
+                    available = Path(api_key_file).expanduser().is_file()
                     self.agents[key] = {**agent, 'kind': 'model', 'available': available,
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'Grok API key file not found: ' + api_key_file}
@@ -351,7 +351,7 @@ class Coordinator:
                         argv += ['--endpoint', agent['endpoint']]
                     agent['argv'] = argv
                     # A local credential-reference file, not a PATH-resolvable command.
-                    available = Path(api_key_file).is_file()
+                    available = Path(api_key_file).expanduser().is_file()
                     self.agents[key] = {**agent, 'kind': 'model', 'available': available,
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'Claude API key file not found: ' + api_key_file}
@@ -377,7 +377,7 @@ class Coordinator:
                         argv += ['--endpoint', agent['endpoint']]
                     agent['argv'] = argv
                     # A local credential-reference file, not a PATH-resolvable command.
-                    available = Path(api_key_file).is_file()
+                    available = Path(api_key_file).expanduser().is_file()
                     self.agents[key] = {**agent, 'kind': 'model', 'available': available,
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'Gemini API key file not found: ' + api_key_file}
@@ -404,7 +404,7 @@ class Coordinator:
                     agent['argv'] = argv
                     # launch.py is a cloned script, not a PATH-resolvable command; shutil.which
                     # would wrongly require it be chmod +x, unlike how it's actually invoked here.
-                    available = Path(launcher).is_file()
+                    available = Path(launcher).expanduser().is_file()
                     self.agents[key] = {**agent, 'kind': 'model', 'available': available,
                                         'description': 'Configured command adapter; provider readiness not verified.'
                                                         if available else 'DeepAstra launcher not found: ' + launcher}

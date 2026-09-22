@@ -207,6 +207,19 @@ class DeepAstraUnitTests(unittest.TestCase):
         return argparse.Namespace(packet=str(self.packet_path), launcher=launcher,
                                    provider='deepseek', key_file=None, timeout_seconds=900)
 
+    def test_tilde_launcher_path_is_expanded(self):
+        self.write_packet()
+        home = self.root / 'home'
+        home.mkdir()
+        (home / 'launch.py').write_text('# stand-in launcher, never actually executed')
+        proc = MagicMock()
+        proc.pid = 424244
+        proc.wait.return_value = 1
+        with patch.dict('os.environ', {'HOME': str(home)}), \
+                patch('acc.deepastra.subprocess.Popen', return_value=proc) as popen:
+            deepastra.run(self.args(launcher='~/launch.py'))
+        self.assertEqual(popen.call_args.args[0][1], str(home / 'launch.py'))
+
     def test_broken_wait_kills_the_subprocess_before_reraising(self):
         self.write_packet()
         proc = MagicMock()

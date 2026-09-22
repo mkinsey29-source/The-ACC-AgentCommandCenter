@@ -72,7 +72,7 @@ def run(args):
     (packet_path.with_name('claude-query.txt')).write_text(prompt, encoding='utf-8')
     # A local credential-reference file, not an ambient env var -- consistent with the project's
     # own "store credentials through local credential references" convention.
-    api_key = Path(args.api_key_file).read_text(encoding='utf-8').strip()
+    api_key = Path(args.api_key_file).expanduser().read_text(encoding='utf-8').strip()
     if not api_key:
         raise ValueError('Claude API key file was empty: ' + args.api_key_file)
     content = _generate(api_key, args.model, prompt, args.max_tokens, args.timeout_seconds, args.endpoint)

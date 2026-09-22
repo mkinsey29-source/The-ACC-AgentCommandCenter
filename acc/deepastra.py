@@ -89,7 +89,7 @@ def run(args):
     log_dir = packet_path.with_name('deepastra-logs')
     log_dir.mkdir(exist_ok=True)
     status_file = packet_path.with_name('deepastra-status.json')
-    argv = [sys.executable, args.launcher, 'exec', '--cwd', packet['project'],
+    argv = [sys.executable, str(Path(args.launcher).expanduser()), 'exec', '--cwd', packet['project'],
             '--prompt-file', str(query), '--status-file', str(status_file),
             '--log-dir', str(log_dir), '--timeout', str(args.timeout_seconds),
             '--provider', args.provider]

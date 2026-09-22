@@ -206,6 +206,19 @@ class ClaudeCodeUnitTests(unittest.TestCase):
             claude_code.run(self.args(api_key_file=str(key_file)))
         self.assertEqual(popen.call_args.kwargs['env']['ANTHROPIC_API_KEY'], 'the-real-key')
 
+    def test_tilde_api_key_file_is_expanded(self):
+        self.write_packet()
+        home = self.root / 'home'
+        home.mkdir()
+        (home / 'claude.key').write_text('expanded-key')
+        proc = MagicMock()
+        proc.stdout.read.return_value = json.dumps({'type': 'result', 'subtype': 'success', 'result': '{}'})
+        proc.wait.return_value = 0
+        with patch.dict('os.environ', {'HOME': str(home)}), \
+                patch('acc.claude_code.subprocess.Popen', return_value=proc) as popen:
+            claude_code.run(self.args(api_key_file='~/claude.key'))
+        self.assertEqual(popen.call_args.kwargs['env']['ANTHROPIC_API_KEY'], 'expanded-key')
+
 
 if __name__ == '__main__':
     unittest.main()
