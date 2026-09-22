@@ -32,7 +32,7 @@ human is not in the normal path — only in the exceptions.
 | Transport | The core **keeps its local HTTP server and token**. The window is a client like any other, and the existing MCP bridge already speaks it, so the orchestrator connection comes free. |
 | Exposure | The ACC **never listens to the outside world**. The phone talks to ChatGPT, ChatGPT reaches the desktop through its own remote channel, and the orchestrator drives the ACC locally. The listener stays bound to localhost. |
 | Credentials | Provider keys live in the **OS keychain**, handed to a driver only as it runs. |
-| Concurrency | ACC **watches the machine** — CPU, memory and VRAM headroom decide how much runs at once, with local models serial underneath. Because the limit is dynamic, the shell must always say *why* a run is waiting. |
+| Concurrency | ACC **watches the machine** — CPU, memory, VRAM headroom and the network decide how much runs at once, with local models serial underneath. **As many as the machine will allow**: if it can carry five, it carries five. Because the limit is dynamic, the shell must always say *why* a run is waiting. |
 | Configuration | **Files for shape, database for state.** Agent definitions and the work-type routing table stay files, version-controllable and portable; allowances, usage, assignable flags and everything that changes hourly live in the database. |
 | Retention | **Prune noise, keep the record.** Routine events age out; reports, reviews, evidence, usage and task history are kept permanently. |
 | Migration | **None needed.** The ACC has not been built yet — there is no deployed state, so schemas and task numbering can be designed freely. |
@@ -41,7 +41,7 @@ human is not in the normal path — only in the exceptions.
 | Target display | One laptop screen, roughly 1440px wide |
 | Density | Dense. Maximum readouts per screen, small type, mission-console aesthetic — hairlines, mono numerics, bracketed panel headers, no gradients |
 | Fleet size | 8–9 agents configured today; design for 6–12 |
-| Concurrency | Up to ~20 tasks in flight across projects and branches |
+| Concurrency | As many tasks in flight as the machine can carry, across projects and branches |
 
 ## 3. Shell layout
 
@@ -50,7 +50,10 @@ human is not in the normal path — only in the exceptions.
 - **Bottom rail, split in two**: the orchestrator input line on one side, the
   activity feed on the other.
 - **Side rails** are contextual — they may hold different panels in agent view
-  than in task view. *Their contents are not yet decided.*
+  than in task view. *Most of their contents are not yet decided.*
+- One rail module is settled: an **issues panel** carrying anything erroring or
+  blocked, visually emphasised — highlighted or blinking — so it is noticeable
+  without being interrupting.
 - The centre reads as list plus detail, the detail taking most of the width. Its
   shape **does not change with task stage**: many tasks across many projects are
   live at once, so the view stays stable and scannable.
@@ -101,6 +104,11 @@ cannot be cleared without a human**:
 - no agent is available to take the work
 - a usage cap is hit
 - the orchestrator asked you a question
+
+A blocker reaches you three ways at once, none of them modal: **the orchestrator
+tells you**, including on your phone through ChatGPT when you are away from the
+desk; the **issues module** in the rail lights up; and it is **noted in the
+play-by-play** along the bottom.
 
 Routine agent activity, ordinary errors, and "shall I push this?" never
 interrupt. An error an agent cannot resolve causes reassignment, not a question.
@@ -198,6 +206,9 @@ agent's own copy  →  [agent review]  →  your local clone  →  [agent review
 ```
 
 - **Both gates are run by an agent, not by you.**
+- A finished branch becomes a **local pull request inside the ACC**: a reviewable
+  item the reviewer agent approves and merges into your local clone, leaving the
+  diff on record to read afterwards.
 - The default path is **seamless**: completed, reviewed, merged and pushed
   without waiting on your approval.
 - **You opt into reviewing**, either when you issue the task, or later from the
@@ -213,8 +224,10 @@ agent's own copy  →  [agent review]  →  your local clone  →  [agent review
 - **Task view** — the whole centre console is tasks across all projects, each
   labelled with its project, agent and state. Selecting one expands it into most
   of the width. A task at review stage opens its review there.
-- **Terminal view** — the full Cursor-like page. The same session also shows as
-  the live strip in the shell.
+- **Terminal view** — a **Cursor-shaped page**, not a terminal in a box: file
+  columns down the side, a project selector (each project already has its folder
+  attached) or a file manager to pick from, the working area, and the shell. The
+  same session also shows as the live strip in the shell. It works offline.
 
 ## 13. Conflicts with the current implementation
 
@@ -281,6 +294,8 @@ work it cannot interrupt.
     the machine and the provider can run.
 
 ## 15. Open questions
+
+- How the concurrency work gets proven before it is trusted with real projects.
 
 - What happens to in-flight runs when the laptop actually sleeps, as opposed to
   the window being closed: local subprocesses suspend with the machine, and
