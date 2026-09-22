@@ -32,16 +32,24 @@ def run(args):
     # Inherit ACC's process group so stop/timeout reaches Hermes and its children.
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True, encoding='utf-8')
     final = None
-    for line in proc.stdout:
-        print(line, end='', flush=True)
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(event, dict) and event.get('type') == 'result':
-            final = event
-    code = proc.wait()
-    proc.stdout.close()
+    try:
+        for line in proc.stdout:
+            print(line, end='', flush=True)
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict) and event.get('type') == 'result':
+                final = event
+        code = proc.wait()
+    except BaseException:
+        # A broken pipe or other mid-stream failure must not leave Hermes running unsupervised
+        # until ACC's own outer timeout eventually reaches it via the process group.
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        proc.stdout.close()
     if code:
         return code
     if not final or final.get('exit_code') != 0:
