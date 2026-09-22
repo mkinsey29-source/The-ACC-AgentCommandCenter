@@ -51,9 +51,17 @@ human is not in the normal path — only in the exceptions.
   activity feed on the other.
 - **Side rails** are contextual — they may hold different panels in agent view
   than in task view. *Most of their contents are not yet decided.*
-- One rail module is settled: an **issues panel** carrying anything erroring or
-  blocked, visually emphasised — highlighted or blinking — so it is noticeable
-  without being interrupting.
+- One rail module is settled: an **issues panel** carrying **only what needs
+  you** — blocked, waiting, or failed with nowhere to fail over to — visually
+  emphasised so it is noticeable without interrupting. An empty panel means
+  nothing needs you.
+- Rail modules are **glanceable, and expand when there is more to see**. GitHub
+  activity is the worked example: a small readout in the rail, a full panel when
+  clicked.
+- Candidates accepted for rail space, none final: token usage meters, local pull
+  requests, machine headroom, GitHub activity. *Exact sizes, expansion
+  behaviour and how a module signals trouble are deliberately left until the
+  rail contents are settled.*
 - The centre reads as list plus detail, the detail taking most of the width. Its
   shape **does not change with task stage**: many tasks across many projects are
   live at once, so the view stays stable and scannable.
@@ -227,7 +235,9 @@ agent's own copy  →  [agent review]  →  your local clone  →  [agent review
 - **Terminal view** — a **Cursor-shaped page**, not a terminal in a box: file
   columns down the side, a project selector (each project already has its folder
   attached) or a file manager to pick from, the working area, and the shell. The
-  same session also shows as the live strip in the shell. It works offline.
+  same session also shows as the live strip in the shell.
+  **It is a real editor** — open a file, write code in it, save it — and it
+  works offline. Cursor's capabilities without Cursor's network.
 
 ## 13. Conflicts with the current implementation
 
@@ -265,6 +275,8 @@ work it cannot interrupt.
 6. **One-program architecture** — a single ACC owning every project and every
    agent, with one scheduler and one cross-project task list, replacing the
    one-coordinator-per-project model.
+20. **An offline code editor** in the terminal page — open, edit and save files
+    with local completions, not just a shell and a file list.
 15. **Desktop application shell** — Tauri, with the Python core bundled as a
     background process, giving a real PTY, the microphone, OS notifications and
     local file access.
@@ -293,9 +305,15 @@ work it cannot interrupt.
 14. **Per-agent task concurrency** — local models serial; others bounded by what
     the machine and the provider can run.
 
-## 15. Open questions
+## 14a. Definition of done for the first working version
 
-- How the concurrency work gets proven before it is trusted with real projects.
+Several agents complete their tasks on one project **concurrently, each in its
+own branch**: the orchestrator plans, delegates to sub-agents, they go off and
+finish, the reviewers review the pull requests, the work merges to main, is
+reviewed and synced — and nothing goes wrong. That is the bar for trusting it
+with real work.
+
+## 15. Open questions
 
 - What happens to in-flight runs when the laptop actually sleeps, as opposed to
   the window being closed: local subprocesses suspend with the machine, and
