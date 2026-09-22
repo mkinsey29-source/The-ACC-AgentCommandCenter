@@ -13,7 +13,7 @@ These four were fixed before the draft and each has a home in the layout:
 | Agent view / task view | Centre column, tabbed, fills the upper two-thirds | `Main.dc.html` |
 | Agent token usage meter | Right rail, aggregate over per-agent meters | `Main.dc.html`, `Tokens.dc.html` |
 | Offline terminal (Cursor-shaped) | Centre column, lower third, tabbed | `Main.dc.html`, `Terminal.dc.html` |
-| Master command panel | Left rail, top, one arm/halt toggle over six subsystem switches | `Main.dc.html`, `Command.dc.html` |
+| Master command panel | Full-screen panel; a compact strip of the same toggles sits at the top of the left rail | `Command.dc.html`, `Main.dc.html` |
 
 Everything else on the draft — system health, model infrastructure, alert log,
 status strip — is a proposal, not a decision.
@@ -29,10 +29,49 @@ status strip — is a proposal, not a decision.
 - Right rail, 320px: token usage, alert log.
 - Status strip, 34px: fleet and task counters, session tokens, billed cost.
 
-The master toggle is wired through the whole draft: halting flips agent
-statuses to HELD, empties the health meters, unloads the model list, and turns
-the terminal's completion source off. That is the behaviour the panel is
-claiming, so the draft demonstrates it rather than describing it.
+## The master command panel
+
+It is a panel of toggles, not one switch. Every agent has its own, and so does
+every setting ACC already carries:
+
+- **Fleet** — one row per configured agent (nine: seven model drivers, one
+  job-backed adapter, one local command tool). Each row carries the agent's
+  kind, its probe result, its eligible workflow roles, and an *assignable*
+  toggle. Assignable is policy and the probe is fact: `ollama` and `lmstudio`
+  are live reachability calls, the CLI drivers are executable or key-file
+  checks, and an unreachable agent stays unassignable whatever the switch says.
+  That is why the panel shows both instead of one merged state.
+- **Project mode** — online/offline as two positions, since `acc/controls.py`
+  treats it as one authoritative project-wide setting rather than a feature to
+  switch off.
+- **Conversation routing** — route-to-agents on/off, preferred agent, local
+  fallback (which must declare `local: true`).
+- **Managed workflow defaults** — implementer, reviewer, coordinator,
+  correction rounds 1–10, with the constraints ACC enforces stated in the panel
+  rather than hidden behind a validation error.
+- **GitHub** — sync toggle, remote, source branch, protected base, refresh
+  interval 15–300s.
+- **Integration queue** — queue toggle, default data classification and
+  workspace scope, and the provider catalog with its policy caps.
+- **Capture and terminal** — voice capture, terminal writes, inline
+  suggestions.
+- **Contingency** — force stop and recovery handoff, kept apart from the
+  ordinary toggles.
+
+## Switching an agent off follows the code, not a new invention
+
+`stop()` already decided this, and the draft shows what it decided. Toggling an
+agent off stops it being offered new work; a run in flight finishes; background
+coordination is disabled so the task pauses *before* the next step; a job
+already claimed by a remote worker keeps running and a success it produces is
+still accepted. Force stop is the separate escalation, and even then a remote
+job is asked to stop itself, because ACC has no process there to kill. The
+agent row reads FINISHING, the task reads PAUSING AFTER STEP, and the detail
+pane says why.
+
+Offline mode behaves the same way for the same reason: the supervised cloud
+step in flight reaches a safe boundary, the next one is blocked, and queued
+provider jobs move to `blocked_offline` instead of failing.
 
 ## Vocabulary
 
@@ -70,6 +109,10 @@ from hairlines and header strips.
 - The terminal's inline suggestion implies a local completion model attached to
   the shell. Which local model, and whether suggestions are per-keystroke or
   only on demand, is undecided.
-- The master panel's six subsystems are a guess at the right seams. Terminal
-  writes and cloud egress are the two that clearly matter; the rest are open.
-- Left and right rails are the least settled parts of the draft.
+- Per-agent *assignable* is a new stored setting. Nothing in `core.py` holds
+  it today: `available` is probed, and the only per-agent policy that exists is
+  whether a role is configured. It needs a home in the settings table and a
+  check at assignment time.
+- The rail shows six of the nine configured agents. Whether the job-backed and
+  tool adapters belong in the rail at all, or only in the full panel, is open.
+- Left and right rails are otherwise the least settled parts of the draft.

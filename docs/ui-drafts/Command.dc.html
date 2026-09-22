@@ -14,112 +14,441 @@
   <style>
     body { margin: 0; background: #060b14; font-family: "IBM Plex Sans", system-ui, sans-serif; }
     a { color: #5fd0e8; } a:hover { color: #9ae6f7; }
+    select { appearance: none; }
   </style>
 </helmet>
 
-<div style="width: 460px; height: 760px; box-sizing: border-box; display: flex; flex-direction: column; background: #0b1622; border: 1px solid #1f4d66; color: #d6e7f4; overflow: hidden;">
+<div style="width: 1600px; height: 1000px; box-sizing: border-box; display: flex; flex-direction: column; background: #060b14; border: 1px solid #1f4d66; color: #d6e7f4; overflow: hidden;">
 
-  <div style="height: 34px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 12px; background: #103049; border-bottom: 1px solid #1f4d66;">
-    <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
-    <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 12px; letter-spacing: 0.18em; color: #7fdcf0;">MASTER COMMAND</span>
-    <span style="flex-grow: 1;"></span>
-    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #8fa8bd;">SCOPE: WORKSPACE</span>
+  <!-- header -->
+  <div style="height: 46px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: #103049; border-bottom: 1px solid #1f4d66;">
+    <span style="width: 7px; height: 7px; background: #5fd0e8;"></span>
+    <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 14px; letter-spacing: 0.2em; color: #9ae6f7;">MASTER COMMAND</span>
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #8fa8bd;">~/projects/the-acc</span>
+    <div style="flex-grow: 1;"></div>
+    <label for="cmd-find" style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; color: #7fa5bd;">FIND SETTING</label>
+    <input id="cmd-find" type="search" placeholder="reviewer, interval, classification…" style="width: 260px; height: 28px; box-sizing: border-box; padding: 0 10px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">
+    <button type="button" style="height: 28px; padding: 0 14px; background: #0d2334; border: 1px solid #2f6f8c; color: #7fdcf0; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.14em; cursor: pointer;">CLOSE ⌘M</button>
   </div>
 
-  <div style="flex-grow: 1; min-height: 0; padding: 14px; display: flex; flex-direction: column; gap: 14px;">
+  <!-- body -->
+  <div style="flex-grow: 1; min-height: 0; box-sizing: border-box; display: flex; gap: 14px; padding: 14px;">
 
-    <button type="button" onClick="{{ toggle }}" style="{{ armStyle }}">
-      <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 700; font-size: 19px; letter-spacing: 0.16em;">{{ armLabel }}</span>
-      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.1em; opacity: 0.9;">{{ armHint }}</span>
-    </button>
+    <!-- ===== COLUMN 1 · FLEET ===== -->
+    <div style="width: 600px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; min-height: 0;">
 
-    <div style="display: flex; flex-direction: column; gap: 2px;">
-      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
-        <div style="display: flex; align-items: flex-start; gap: 11px; padding: 10px 2px; border-bottom: 1px solid #10283a;">
-          <span style="width: 5px; height: 5px; margin-top: 6px; flex-shrink: 0; background: {{ r.dot }};"></span>
-          <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;">
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.04em; color: #d6e7f4;">{{ r.label }}</span>
-            <span style="font-family: 'IBM Plex Sans', sans-serif; font-size: 11.5px; line-height: 1.45; color: #8fa8bd;">{{ r.help }}</span>
-          </span>
-          <span style="display: flex; align-items: center; gap: 9px; flex-shrink: 0; padding-top: 1px;">
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: {{ r.dot }}; width: 42px; text-align: right;">{{ r.state }}</span>
-            <button type="button" onClick="{{ r.toggle }}" aria-label="Toggle {{ r.label }}" style="{{ r.trackStyle }}"><span style="{{ r.knobStyle }}"></span></button>
-          </span>
+      <div style="flex-grow: 1; min-height: 0; border: 1px solid #1f4d66; background: #0b1622; display: flex; flex-direction: column;">
+        <div style="height: 30px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #0f2436; border-bottom: 1px solid #1f4d66;">
+          <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">FLEET</span>
+          <span style="flex-grow: 1;"></span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #8fa8bd;">{{ assignableCount }} ASSIGNABLE · 9 CONFIGURED</span>
+          <button type="button" onClick="{{ allOff }}" style="height: 20px; padding: 0 9px; background: #0d2334; border: 1px solid #25445a; color: #8fa8bd; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.08em; cursor: pointer;">NONE</button>
+          <button type="button" onClick="{{ allOn }}" style="height: 20px; padding: 0 9px; background: #0d2334; border: 1px solid #25445a; color: #8fa8bd; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.08em; cursor: pointer;">ALL</button>
         </div>
-      </sc-for>
-    </div>
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) 118px 132px 92px; gap: 10px; padding: 7px 11px; border-bottom: 1px solid #17394e; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.12em; color: #6b8299;">
+          <span>AGENT</span><span>PROBE</span><span>ELIGIBLE ROLES</span><span style="text-align: right;">ASSIGNABLE</span>
+        </div>
+        <div style="flex-grow: 1; min-height: 0; padding: 2px 0;">
+          <sc-for list="{{ fleet }}" as="a" hint-placeholder-count="9">
+            <div style="{{ a.rowStyle }}">
+              <span style="min-width: 0; display: flex; flex-direction: column; gap: 3px;">
+                <span style="display: flex; align-items: baseline; gap: 7px;">
+                  <span style="font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; font-size: 12.5px; color: #e2eef8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ a.name }}</span>
+                  <span style="{{ a.kindStyle }}">{{ a.kind }}</span>
+                </span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: {{ a.subColor }}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ a.sub }}</span>
+              </span>
+              <span style="display: flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; color: {{ a.probeColor }};">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: {{ a.probeColor }}; flex-shrink: 0;"></span>{{ a.probe }}
+              </span>
+              <span style="display: flex; gap: 3px;">
+                <sc-for list="{{ a.roles }}" as="r" hint-placeholder-count="3">
+                  <span style="{{ r.style }}">{{ r.label }}</span>
+                </sc-for>
+              </span>
+              <span style="display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.08em; color: {{ a.toggleColor }}; width: 26px; text-align: right;">{{ a.toggleLabel }}</span>
+                <button type="button" onClick="{{ a.toggle }}" aria-label="Assignable: {{ a.name }}" style="{{ a.trackStyle }}"><span style="{{ a.knobStyle }}"></span></button>
+              </span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="flex-shrink: 0; padding: 9px 11px; border-top: 1px solid #17394e; background: #081420; font-family: 'IBM Plex Sans', sans-serif; font-size: 11.5px; line-height: 1.5; color: #8fa8bd;">
+          Assignable is policy; the probe is fact. ACC re-probes each host — a reachability call for <span style="font-family: 'IBM Plex Mono', monospace; color: #b9cdde;">ollama</span> and <span style="font-family: 'IBM Plex Mono', monospace; color: #b9cdde;">lmstudio</span>, an executable or key-file check for the CLI drivers — and an unreachable agent stays unassignable whatever this switch says.
+        </div>
+      </div>
 
-    <div style="border: 1px solid #17394e; background: #081420; padding: 11px 12px;">
-      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #6b8299;">WHAT HALT DOES</div>
-      <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
-        <div style="display: flex; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.5; color: #cfe0ee;"><span style="color: #43e39a;">·</span>Signals every running worker to stop at its next checkpoint.</div>
-        <div style="display: flex; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.5; color: #cfe0ee;"><span style="color: #43e39a;">·</span>Keeps the writer lease, so work resumes in place on re-arm.</div>
-        <div style="display: flex; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.5; color: #cfe0ee;"><span style="color: #43e39a;">·</span>Leaves the terminal readable — scrollback and history stay.</div>
-        <div style="display: flex; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.5; color: #cfe0ee;"><span style="color: #ffb84d;">·</span>Does not kill a process tree. That stays a deliberate act.</div>
+      <div style="flex-shrink: 0; border: 1px solid #5c4420; background: #140f06;">
+        <div style="height: 28px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #1c1508; border-bottom: 1px solid #5c4420;">
+          <span style="width: 6px; height: 6px; background: #ffb84d;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #ffcf85;">WHAT SWITCHING AN AGENT OFF DOES</span>
+        </div>
+        <div style="padding: 11px 12px; display: flex; flex-direction: column; gap: 7px;">
+          <div style="display: flex; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.5; color: #f0dcb8;"><span style="color: #43e39a;">1</span>It stops being offered new work, and any pending role switch still waits for the current step.</div>
+          <div style="display: flex; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.5; color: #f0dcb8;"><span style="color: #43e39a;">2</span>A run in flight finishes. Background coordination is disabled, so the task pauses before the next step rather than mid-step.</div>
+          <div style="display: flex; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.5; color: #f0dcb8;"><span style="color: #43e39a;">3</span>A job already claimed by a remote worker keeps running, and a success it produces is still accepted.</div>
+          <div style="display: flex; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.5; color: #f0dcb8;"><span style="color: #ff6070;">4</span>Only Force stop escalates, and for a remote job it asks the worker to stop itself — ACC has no process there to kill.</div>
+        </div>
       </div>
     </div>
 
-    <div style="flex-grow: 1;"></div>
+    <!-- ===== COLUMN 2 · PROJECT + ROUTING + WORKFLOW ===== -->
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
 
-    <div style="display: flex; flex-direction: column; gap: 8px;">
-      <button type="button" style="height: 38px; background: #1d0f16; border: 1px solid #5c2430; color: #ff6070; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 12px; letter-spacing: 0.14em; cursor: pointer;">HALT AND RELEASE ALL LEASES</button>
-      <button type="button" style="height: 38px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 12px; letter-spacing: 0.14em; cursor: pointer;">SAVE THIS AS A PRESET</button>
-      <div style="display: flex; align-items: center; gap: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #6b8299;">
-        <span>PRESETS</span>
-        <span style="padding: 3px 9px; border: 1px solid #2f6f8c; color: #7fdcf0;">OFFLINE ONLY</span>
-        <span style="padding: 3px 9px; border: 1px solid #25445a; color: #8fa8bd;">FULL FLEET</span>
-        <span style="padding: 3px 9px; border: 1px solid #25445a; color: #8fa8bd;">REVIEW ONLY</span>
+      <!-- project mode -->
+      <div style="border: 1px solid #1f4d66; background: #0b1622;">
+        <div style="height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #0f2436; border-bottom: 1px solid #1f4d66;">
+          <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">PROJECT MODE</span>
+          <span style="flex-grow: 1;"></span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: #6b8299;">ONE AUTHORITATIVE SETTING</span>
+        </div>
+        <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; gap: 0;">
+            <button type="button" onClick="{{ goOnline }}" style="{{ onlineStyle }}">ONLINE</button>
+            <button type="button" onClick="{{ goOffline }}" style="{{ offlineStyle }}">OFFLINE</button>
+          </div>
+          <div style="font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.55; color: #b9cdde;">{{ modeCopy }}</div>
+        </div>
+      </div>
+
+      <!-- conversation routing -->
+      <div style="border: 1px solid #17394e; background: #0b1622;">
+        <div style="height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #0f2436; border-bottom: 1px solid #17394e;">
+          <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">CONVERSATION ROUTING</span>
+        </div>
+        <div style="padding: 12px; display: flex; flex-direction: column; gap: 11px;">
+          <sc-for list="{{ routing }}" as="r" hint-placeholder-count="1">
+            <div style="display: flex; align-items: center; gap: 11px;">
+              <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #d6e7f4;">{{ r.label }}</span>
+                <span style="font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; color: #8fa8bd;">{{ r.help }}</span>
+              </span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: {{ r.color }}; width: 32px; text-align: right;">{{ r.state }}</span>
+              <button type="button" onClick="{{ r.toggle }}" aria-label="Toggle {{ r.label }}" style="{{ r.trackStyle }}"><span style="{{ r.knobStyle }}"></span></button>
+            </div>
+          </sc-for>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
+            <label style="display: flex; flex-direction: column; gap: 5px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">PREFERRED AGENT</span>
+              <select style="height: 30px; padding: 0 9px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">
+                <option>claude-code</option><option>claude-api</option><option>grok-build</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 5px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">LOCAL FALLBACK · local: true</span>
+              <select style="height: 30px; padding: 0 9px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">
+                <option>deepseek-ollama</option><option>local-lmstudio</option><option>deepseek-harness</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- managed workflow defaults -->
+      <div style="flex-grow: 1; min-height: 0; border: 1px solid #17394e; background: #0b1622; display: flex; flex-direction: column;">
+        <div style="height: 30px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #0f2436; border-bottom: 1px solid #17394e;">
+          <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">MANAGED WORKFLOW DEFAULTS</span>
+        </div>
+        <div style="padding: 12px; display: flex; flex-direction: column; gap: 11px;">
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;">
+            <label style="display: flex; flex-direction: column; gap: 5px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">IMPLEMENTER</span>
+              <select style="height: 30px; padding: 0 9px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">
+                <option>claude-code</option><option>agent3d-job</option><option>deepseek-harness</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 5px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">REVIEWER</span>
+              <select style="height: 30px; padding: 0 9px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">
+                <option>deepseek-ollama</option><option>local-lmstudio</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 5px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">COORDINATOR</span>
+              <select style="height: 30px; padding: 0 9px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">
+                <option>claude-api</option><option>local-lmstudio</option>
+              </select>
+            </label>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">CORRECTION ROUNDS</span>
+            <div style="display: flex; align-items: center; gap: 0;">
+              <button type="button" onClick="{{ roundsDown }}" aria-label="Fewer rounds" style="width: 28px; height: 28px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'IBM Plex Mono', monospace; font-size: 14px; cursor: pointer;">−</button>
+              <span style="width: 42px; height: 28px; display: flex; align-items: center; justify-content: center; background: #081420; border-top: 1px solid #1f4d66; border-bottom: 1px solid #1f4d66; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #d6e7f4;">{{ rounds }}</span>
+              <button type="button" onClick="{{ roundsUp }}" aria-label="More rounds" style="width: 28px; height: 28px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'IBM Plex Mono', monospace; font-size: 14px; cursor: pointer;">+</button>
+            </div>
+            <span style="font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; color: #8fa8bd;">1–10 · a reviewer rejection past this count stops the cycle</span>
+          </div>
+          <div style="padding: 9px 10px; background: #081420; border: 1px solid #142f43; display: flex; flex-direction: column; gap: 5px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">ENFORCED BY ACC, NOT BY THIS PANEL</span>
+            <span style="font-family: 'IBM Plex Sans', sans-serif; font-size: 11.5px; line-height: 1.5; color: #b9cdde;">The reviewer must differ from the implementer. Job-backed adapters serve as implementer only. Fallbacks must declare <span style="font-family: 'IBM Plex Mono', monospace; color: #7fdcf0;">local: true</span>. A role switch applies after the current step, never inside it.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- scheduling -->
+      <div style="flex-shrink: 0; border: 1px solid #17394e; background: #0b1622;">
+        <div style="height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #0f2436; border-bottom: 1px solid #17394e;">
+          <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">SCHEDULING</span>
+        </div>
+        <div style="padding: 12px; display: flex; align-items: center; gap: 14px;">
+          <label style="display: flex; align-items: center; gap: 9px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">DEFAULT PRIORITY</span>
+            <input type="number" value="50" min="0" max="100" style="width: 70px; height: 28px; box-sizing: border-box; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 12px;">
+          </label>
+          <span style="font-family: 'IBM Plex Sans', sans-serif; font-size: 11.5px; color: #8fa8bd;">0–100, higher runs first. Dependencies are per task and refuse cycles.</span>
+        </div>
       </div>
     </div>
+
+    <!-- ===== COLUMN 3 · SERVICES ===== -->
+    <div style="width: 440px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; min-height: 0;">
+
+      <!-- github -->
+      <div style="border: 1px solid #17394e; background: #0b1622;">
+        <div style="height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #0f2436; border-bottom: 1px solid #17394e;">
+          <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">GITHUB</span>
+          <span style="flex-grow: 1;"></span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: {{ ghColor }};">{{ ghState }}</span>
+          <button type="button" onClick="{{ ghToggle }}" aria-label="Toggle GitHub sync" style="{{ ghTrack }}"><span style="{{ ghKnob }}"></span></button>
+        </div>
+        <div style="padding: 11px 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px;">
+          <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">REMOTE</span><input type="text" value="origin" style="height: 28px; box-sizing: border-box; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">REFRESH · 15–300s</span><input type="number" value="30" style="height: 28px; box-sizing: border-box; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">SOURCE BRANCH</span><input type="text" value="temporary" style="height: 28px; box-sizing: border-box; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">PROTECTED BASE</span><input type="text" value="main" style="height: 28px; box-sizing: border-box; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;"></label>
+          <span style="grid-column: 1 / -1; font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; color: #8fa8bd;">Source must differ from the base and can never be main or master.</span>
+        </div>
+      </div>
+
+      <!-- integration queue -->
+      <div style="flex-grow: 1; min-height: 0; border: 1px solid #17394e; background: #0b1622; display: flex; flex-direction: column;">
+        <div style="height: 30px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #0f2436; border-bottom: 1px solid #17394e;">
+          <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">INTEGRATION QUEUE</span>
+          <span style="flex-grow: 1;"></span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: {{ jobColor }};">{{ jobState }}</span>
+          <button type="button" onClick="{{ jobToggle }}" aria-label="Toggle integration queue" style="{{ jobTrack }}"><span style="{{ jobKnob }}"></span></button>
+        </div>
+        <div style="padding: 11px 12px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px;">
+            <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">DATA CLASSIFICATION</span>
+              <select style="height: 28px; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;"><option>internal</option><option>public</option><option>confidential</option></select></label>
+            <label style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #6b8299;">WORKSPACE SCOPE</span>
+              <select style="height: 28px; padding: 0 8px; background: #081420; border: 1px solid #1f4d66; color: #d6e7f4; font-family: 'IBM Plex Mono', monospace; font-size: 11px;"><option>project</option><option>isolated_repository</option></select></label>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 1px;">
+            <sc-for list="{{ providers }}" as="p" hint-placeholder-count="8">
+              <div style="display: flex; align-items: center; gap: 9px; height: 26px; border-bottom: 1px solid #10283a;">
+                <span style="width: 5px; height: 5px; background: {{ p.color }}; flex-shrink: 0;"></span>
+                <span style="flex-grow: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #b9cdde; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ p.name }}</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: {{ p.color }};">{{ p.state }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding: 8px 10px; background: #1c1508; border: 1px solid #5c4420; font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; line-height: 1.5; color: #f0dcb8;">Muse Spark Contributor is capped at public data in an isolated repository — its provider may train on what it receives. The cap is policy in the catalog; this panel cannot raise it.</div>
+        </div>
+      </div>
+
+      <!-- voice + terminal -->
+      <div style="flex-shrink: 0; border: 1px solid #17394e; background: #0b1622;">
+        <div style="height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #0f2436; border-bottom: 1px solid #17394e;">
+          <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">CAPTURE AND TERMINAL</span>
+        </div>
+        <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 9px;">
+          <sc-for list="{{ capture }}" as="c" hint-placeholder-count="3">
+            <div style="display: flex; align-items: center; gap: 11px;">
+              <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #d6e7f4;">{{ c.label }}</span>
+                <span style="font-family: 'IBM Plex Sans', sans-serif; font-size: 10.5px; color: #8fa8bd;">{{ c.help }}</span>
+              </span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: {{ c.color }}; width: 32px; text-align: right;">{{ c.state }}</span>
+              <button type="button" onClick="{{ c.toggle }}" aria-label="Toggle {{ c.label }}" style="{{ c.trackStyle }}"><span style="{{ c.knobStyle }}"></span></button>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- contingency -->
+      <div style="flex-shrink: 0; border: 1px solid #5c2430; background: #12080c;">
+        <div style="height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 11px; background: #1d0f16; border-bottom: 1px solid #5c2430;">
+          <span style="width: 6px; height: 6px; background: #ff6070;"></span>
+          <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #ff8a96;">CONTINGENCY</span>
+        </div>
+        <div style="padding: 11px 12px; display: flex; flex-direction: column; gap: 9px;">
+          <div style="display: flex; gap: 8px;">
+            <button type="button" style="flex-grow: 1; height: 32px; background: #1d0f16; border: 1px solid #5c2430; color: #ff6070; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: 0.12em; cursor: pointer;">FORCE STOP ACTIVE RUN</button>
+            <button type="button" style="flex-grow: 1; height: 32px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: 0.12em; cursor: pointer;">RECOVERY HANDOFF</button>
+          </div>
+          <div style="font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; line-height: 1.5; color: #d6a8b0;">A replacement worker can only be named once the previous writer has stopped, and recovery asks you to confirm you inspected the process tree first.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- footer -->
+  <div style="height: 40px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 14px; padding: 0 16px; background: #09121c; border-top: 1px solid #1f4d66; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">
+    <span style="color: #6b8299;">Settings apply on change and are written to the event log.</span>
+    <span style="flex-grow: 1;"></span>
+    <span style="color: #8fa8bd;">LAST CHANGE</span>
+    <span style="color: #d6e7f4;">{{ lastChange }}</span>
+    <span style="color: #5c748b;">09:15:22</span>
   </div>
 </div>
 </x-dc>
 
-<script type="text/x-dc" data-dc-script data-props='{"startArmed":{"editor":"boolean","default":true},"$preview":{"width":460,"height":760}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1600,"height":1000}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { armed: null, sw: null };
+    this.state = {
+      fleet: null,
+      mode: 'offline',
+      rounds: 3,
+      flags: { conversation: true, github: true, jobs: true, voice: true, writes: true, suggest: true },
+      last: 'project mode → offline',
+    };
+  }
+
+  track(on) {
+    return 'width: 34px; height: 17px; flex-shrink: 0; padding: 0; background: ' + (on ? '#12503c' : '#0e1f2c')
+      + '; border: 1px solid ' + (on ? '#2c7f5f' : '#25445a') + '; display: flex; align-items: center; justify-content: '
+      + (on ? 'flex-end' : 'flex-start') + '; cursor: pointer;';
+  }
+
+  knob(on) {
+    return 'width: 13px; height: 13px; margin: 0 1px; background: ' + (on ? '#43e39a' : '#4a6076') + '; display: block;';
+  }
+
+  flag(key, label, help) {
+    const on = this.state.flags[key];
+    return {
+      label,
+      help,
+      state: on ? 'ON' : 'OFF',
+      color: on ? '#43e39a' : '#6b8299',
+      trackStyle: this.track(on),
+      knobStyle: this.knob(on),
+      toggle: () => this.setState({
+        flags: Object.assign({}, this.state.flags, { [key]: !on }),
+        last: label.toLowerCase() + (on ? ' → off' : ' → on'),
+      }),
+    };
   }
 
   renderVals() {
-    const armed = this.state.armed === null ? (this.props.startArmed ?? true) : this.state.armed;
-    const sw = this.state.sw || { workers: true, cloud: false, github: true, voice: true, jobs: true, writes: true };
     const green = '#43e39a';
     const amber = '#ffb84d';
+    const red = '#ff6070';
+    const cyan = '#5fd0e8';
     const dim = '#6b8299';
+    const offline = this.state.mode === 'offline';
 
     const defs = [
-      ['workers', 'WORKER PROCESSES', 'Launch and supervise local workers. Off means nothing new starts.'],
-      ['cloud', 'CLOUD EGRESS', 'Allow cloud drivers to leave the machine. Off is true offline.'],
-      ['github', 'GITHUB SYNC', 'Poll activity and publish branches. Off keeps Git local.'],
-      ['voice', 'VOICE CAPTURE', 'Microphone and transcription for dictated instructions.'],
-      ['jobs', 'INTEGRATION JOBS', 'Durable job queue with fenced leases.'],
-      ['writes', 'TERMINAL WRITES', 'Let an agent apply edits from the terminal. Off is read-only.'],
+      ['claude-code', 'Claude Code', 'model', 'driver: claude-code · executable claude', 'REACHABLE', green, ['IMP', 'REV', 'COORD'], false, 'TASK 41 · step 3 of 5'],
+      ['claude-api', 'Claude (direct API)', 'model', 'driver: claude · api.anthropic.com', offline ? 'BLOCKED' : 'REACHABLE', offline ? red : green, ['IMP', 'REV', 'COORD'], false, ''],
+      ['deepseek-ollama', 'DeepSeek R1 · Ollama', 'model', 'driver: ollama · 127.0.0.1:11434', 'REACHABLE', green, ['IMP', 'REV', 'COORD'], true, 'TASK 42 · review'],
+      ['local-lmstudio', 'Qwen3 Coder · LM Studio', 'model', 'driver: lmstudio · localhost:1234', 'REACHABLE', green, ['IMP', 'REV', 'COORD'], true, ''],
+      ['deepseek-harness', 'DeepSeek Harness', 'model', 'driver: dsh · executable dsh', 'REACHABLE', green, ['IMP', 'REV', 'COORD'], true, 'TASK 44 · failed'],
+      ['grok-build', 'Grok Build', 'model', 'driver: grok-build · executable grok', offline ? 'BLOCKED' : 'REACHABLE', offline ? red : green, ['IMP', 'REV', 'COORD'], false, 'TASK 45 · held'],
+      ['gemini-api', 'Gemini (direct API)', 'model', 'driver: gemini · key file present', offline ? 'BLOCKED' : 'REACHABLE', offline ? red : green, ['IMP', 'REV', 'COORD'], false, ''],
+      ['agent3d-job', 'Agent 3D Studio', 'job', 'capability: mesh.generate · leased', 'QUEUE OK', cyan, ['IMP'], true, ''],
+      ['local-command', 'Local command', 'tool', 'runs an explicit argv · no inference', 'ALWAYS', cyan, [], true, ''],
     ];
 
-    const rows = defs.map(([key, label, help]) => {
-      const on = armed && sw[key];
+    const chosen = this.state.fleet || {
+      'claude-code': true, 'claude-api': true, 'deepseek-ollama': true, 'local-lmstudio': true,
+      'deepseek-harness': false, 'grok-build': true, 'gemini-api': true, 'agent3d-job': true, 'local-command': true,
+    };
+
+    const fleet = defs.map(([id, name, kind, sub, probe, probeColor, roles, local, onTask]) => {
+      const wanted = chosen[id];
+      const blocked = probe === 'BLOCKED';
+      const on = wanted && !blocked;
+      const running = onTask && onTask.indexOf('step') >= 0;
       return {
-        label,
-        help,
-        state: on ? 'ON' : (armed ? 'OFF' : 'HELD'),
-        dot: on ? green : (armed ? dim : amber),
-        trackStyle: 'width: 38px; height: 18px; flex-shrink: 0; padding: 0; background: ' + (on ? '#12503c' : '#0e1f2c')
-          + '; border: 1px solid ' + (on ? '#2c7f5f' : '#25445a') + '; display: flex; align-items: center; justify-content: '
-          + (on ? 'flex-end' : 'flex-start') + '; cursor: pointer;',
-        knobStyle: 'width: 14px; height: 14px; margin: 0 1px; background: ' + (on ? green : '#4a6076') + '; display: block;',
-        toggle: () => this.setState({ sw: Object.assign({}, sw, { [key]: !sw[key] }) }),
+        name,
+        kind: kind === 'job' ? 'JOB' : (kind === 'tool' ? 'TOOL' : (local ? 'LOCAL' : 'CLOUD')),
+        kindStyle: 'padding: 1px 6px; font-family: "IBM Plex Mono", monospace; font-size: 8.5px; letter-spacing: 0.1em; border: 1px solid '
+          + (kind === 'job' ? '#4a3a7a' : (local ? '#1d5a49' : '#2f6f8c')) + '; color: '
+          + (kind === 'job' ? '#a98bff' : (local ? green : cyan)) + ';',
+        sub: !wanted && running ? 'finishing step 3, then pausing' : (onTask || sub),
+        subColor: !wanted && running ? amber : (onTask ? '#b9cdde' : dim),
+        probe,
+        probeColor,
+        roles: roles.map((label) => ({
+          label,
+          style: 'padding: 2px 5px; font-family: "IBM Plex Mono", monospace; font-size: 8.5px; letter-spacing: 0.06em; border: 1px solid '
+            + (on ? '#2f6f8c' : '#22384a') + '; color: ' + (on ? '#7fdcf0' : '#4a6076') + ';',
+        })),
+        toggleLabel: blocked ? 'N/A' : (wanted ? 'ON' : 'OFF'),
+        toggleColor: blocked ? dim : (wanted ? green : dim),
+        trackStyle: this.track(on),
+        knobStyle: this.knob(on),
+        toggle: () => this.setState({
+          fleet: Object.assign({}, chosen, { [id]: !wanted }),
+          last: id + (wanted ? ' → not assignable' : ' → assignable'),
+        }),
+        rowStyle: 'display: grid; grid-template-columns: minmax(0, 1fr) 118px 132px 92px; gap: 10px; align-items: center; height: 54px; padding: 0 11px; border-bottom: 1px solid #10283a; background: '
+          + (blocked ? '#12080c' : 'transparent') + ';',
       };
     });
 
+    const segment = (on) => 'flex-grow: 1; height: 36px; background: ' + (on ? '#0d2334' : 'transparent')
+      + '; border: 1px solid ' + (on ? '#2f6f8c' : '#1f4d66') + '; color: ' + (on ? '#7fdcf0' : '#5c748b')
+      + "; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 12px; letter-spacing: 0.16em; cursor: pointer;";
+
+    const providerDefs = [
+      ['DeepSeek Harness', 'LOCAL', green],
+      ['Agent 3D Studio (img2threejs)', 'LOCAL', green],
+      ['Hearth and Havoc Pipeline', 'LOCAL', green],
+      ['Gemini', offline ? 'HELD' : 'READY', offline ? amber : cyan],
+      ['Aura', offline ? 'HELD' : 'READY', offline ? amber : cyan],
+      ['TypeSafe Jev', offline ? 'HELD' : 'READY', offline ? amber : cyan],
+      ['RunPod', offline ? 'HELD' : 'READY', offline ? amber : cyan],
+      ['Muse Spark 1.3 Contributor', 'PUBLIC ONLY', amber],
+    ];
+
     return {
-      rows,
-      armLabel: armed ? 'ALL SYSTEMS ARMED' : 'ALL SYSTEMS HALTED',
-      armHint: armed ? 'EVERY SUBSYSTEM FOLLOWS ITS OWN SWITCH' : 'RE-ARM TO RESTORE THE SWITCHES BELOW',
-      armStyle: 'width: 100%; height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; background: '
-        + (armed ? '#0c2c22' : '#2a0d13') + '; border: 1px solid ' + (armed ? '#2c7f5f' : '#7a2634') + '; color: ' + (armed ? green : '#ff8a96') + ';',
-      toggle: () => this.setState({ armed: !armed }),
+      fleet,
+      assignableCount: fleet.filter((f) => f.toggleLabel === 'ON').length,
+      allOn: () => this.setState({ fleet: Object.fromEntries(defs.map(([id]) => [id, true])), last: 'fleet → all assignable' }),
+      allOff: () => this.setState({ fleet: Object.fromEntries(defs.map(([id]) => [id, false])), last: 'fleet → none assignable' }),
+      onlineStyle: segment(!offline),
+      offlineStyle: segment(offline),
+      goOnline: () => this.setState({ mode: 'online', last: 'project mode → online' }),
+      goOffline: () => this.setState({ mode: 'offline', last: 'project mode → offline' }),
+      modeCopy: offline
+        ? 'Offline blocks every new cloud start — direct tasks, managed workflow steps and conversation routing alike. A supervised cloud step already running is allowed to reach a safe boundary instead of being killed, and queued provider jobs move to blocked_offline rather than failing.'
+        : 'Online lets cloud drivers and provider jobs start normally. Local drivers are unaffected either way, and the local fallback stays configured so a switch back to offline never leaves routing without an owner.',
+      routing: [this.flag('conversation', 'ROUTE MESSAGES TO AGENTS', 'Off keeps the conversation as notes only. Active turns keep their owner.')],
+      rounds: this.state.rounds,
+      roundsUp: () => this.setState({ rounds: Math.min(10, this.state.rounds + 1), last: 'correction rounds → ' + Math.min(10, this.state.rounds + 1) }),
+      roundsDown: () => this.setState({ rounds: Math.max(1, this.state.rounds - 1), last: 'correction rounds → ' + Math.max(1, this.state.rounds - 1) }),
+      ghState: this.state.flags.github ? 'ON' : 'OFF',
+      ghColor: this.state.flags.github ? green : dim,
+      ghTrack: this.track(this.state.flags.github),
+      ghKnob: this.knob(this.state.flags.github),
+      ghToggle: () => this.setState({ flags: Object.assign({}, this.state.flags, { github: !this.state.flags.github }), last: 'github sync → ' + (this.state.flags.github ? 'off' : 'on') }),
+      jobState: this.state.flags.jobs ? 'ON' : 'OFF',
+      jobColor: this.state.flags.jobs ? green : dim,
+      jobTrack: this.track(this.state.flags.jobs),
+      jobKnob: this.knob(this.state.flags.jobs),
+      jobToggle: () => this.setState({ flags: Object.assign({}, this.state.flags, { jobs: !this.state.flags.jobs }), last: 'integration queue → ' + (this.state.flags.jobs ? 'off' : 'on') }),
+      providers: providerDefs.map(([name, state, color]) => ({ name, state, color })),
+      capture: [
+        this.flag('voice', 'VOICE CAPTURE', 'Microphone and local transcription for dictated instructions.'),
+        this.flag('writes', 'TERMINAL WRITES', 'Let an attached agent apply edits. Off makes the terminal read-only.'),
+        this.flag('suggest', 'INLINE SUGGESTIONS', 'Local completion model proposes commands and edits in the terminal.'),
+      ],
+      lastChange: this.state.last,
     };
   }
 }

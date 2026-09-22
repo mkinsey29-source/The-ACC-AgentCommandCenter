@@ -35,8 +35,8 @@
       <span style="color: #ffb84d;">+7 changed</span>
     </div>
     <div style="flex-grow: 1;"></div>
-    <div style="display: flex; align-items: center; gap: 8px; padding: 5px 11px; border: 1px solid #1d5a49; background: #0a1f1a; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: #43e39a;">
-      <span style="width: 7px; height: 7px; border-radius: 50%; background: #43e39a;"></span>OFFLINE MODE · LOCAL ONLY
+    <div style="{{ modeChipStyle }}">
+      <span style="{{ modeDotStyle }}"></span>{{ modeChipText }}
     </div>
     <div style="padding: 5px 11px; border: 1px solid #17394e; background: #0b1622; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: #8fa8bd;">LEASE 00:41:06</div>
     <div style="font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 500; letter-spacing: 0.08em; color: #5fd0e8;">09:15:22</div>
@@ -53,20 +53,43 @@
         <div style="height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #103049; border-bottom: 1px solid #1f4d66;">
           <span style="width: 6px; height: 6px; background: #5fd0e8;"></span>
           <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.18em; color: #7fdcf0;">MASTER COMMAND</span>
+          <span style="flex-grow: 1;"></span>
+          <button type="button" style="height: 20px; padding: 0 8px; background: #0d2334; border: 1px solid #2f6f8c; color: #7fdcf0; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.08em; cursor: pointer;">FULL PANEL ⌘M</button>
         </div>
-        <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
-          <button type="button" onClick="{{ toggleMaster }}" style="{{ armStyle }}">
-            <span style="font-family: 'Chakra Petch', sans-serif; font-weight: 700; font-size: 15px; letter-spacing: 0.16em;">{{ armLabel }}</span>
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; opacity: 0.85;">{{ armHint }}</span>
-          </button>
-          <sc-for list="{{ switches }}" as="sw" hint-placeholder-count="6">
-            <div style="display: flex; align-items: center; gap: 10px; height: 28px;">
-              <span style="width: 5px; height: 5px; background: {{ sw.dot }}; flex-shrink: 0;"></span>
-              <span style="flex-grow: 1; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: 0.04em; color: #b9cdde;">{{ sw.label }}</span>
-              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: {{ sw.dot }}; width: 44px; text-align: right;">{{ sw.state }}</span>
-              <button type="button" onClick="{{ sw.toggle }}" aria-label="Toggle {{ sw.label }}" style="{{ sw.trackStyle }}"><span style="{{ sw.knobStyle }}"></span></button>
-            </div>
-          </sc-for>
+        <div style="padding: 11px 11px 12px 11px; display: flex; flex-direction: column; gap: 9px;">
+          <div style="display: flex; gap: 0;">
+            <button type="button" onClick="{{ goOnline }}" style="{{ onlineStyle }}">ONLINE</button>
+            <button type="button" onClick="{{ goOffline }}" style="{{ offlineStyle }}">OFFLINE</button>
+          </div>
+          <div style="display: flex; align-items: baseline; gap: 7px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.14em; color: #6b8299;">FLEET</span>
+            <span style="flex-grow: 1; height: 1px; background: #17394e;"></span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #6b8299;">{{ assignableLabel }}</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 0;">
+            <sc-for list="{{ fleet }}" as="f" hint-placeholder-count="6">
+              <div style="display: flex; align-items: center; gap: 9px; height: 24px;">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: {{ f.dot }}; flex-shrink: 0;"></span>
+                <span style="flex-grow: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: {{ f.nameColor }}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ f.short }}</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: {{ f.stateColor }}; width: 52px; text-align: right;">{{ f.state }}</span>
+                <button type="button" onClick="{{ f.toggle }}" aria-label="Assignable: {{ f.short }}" style="{{ f.trackStyle }}"><span style="{{ f.knobStyle }}"></span></button>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display: flex; align-items: baseline; gap: 7px; margin-top: 2px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.14em; color: #6b8299;">SYSTEMS</span>
+            <span style="flex-grow: 1; height: 1px; background: #17394e;"></span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 0;">
+            <sc-for list="{{ systems }}" as="s" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; height: 24px;">
+                <span style="width: 5px; height: 5px; background: {{ s.dot }}; flex-shrink: 0;"></span>
+                <span style="flex-grow: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #b9cdde; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ s.label }}</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: {{ s.stateColor }}; width: 30px; text-align: right;">{{ s.state }}</span>
+                <button type="button" onClick="{{ s.toggle }}" aria-label="Toggle {{ s.label }}" style="{{ s.trackStyle }}"><span style="{{ s.knobStyle }}"></span></button>
+              </div>
+            </sc-for>
+          </div>
         </div>
       </div>
 
@@ -196,9 +219,10 @@
               </div>
 
               <div style="display: flex; gap: 8px;">
-                <button type="button" style="flex-grow: 1; height: 34px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.14em; cursor: pointer;">REASSIGN</button>
+                <button type="button" style="flex-grow: 1; height: 34px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.14em; cursor: pointer;">SWITCH ROLE AFTER STEP</button>
                 <button type="button" style="flex-grow: 1; height: 34px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.14em; cursor: pointer;">ATTACH TERMINAL</button>
-                <button type="button" style="flex-grow: 1; height: 34px; background: #1d0f16; border: 1px solid #5c2430; color: #ff6070; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.14em; cursor: pointer;">STOP WORKER</button>
+                <button type="button" style="flex-grow: 1; height: 34px; background: #0d2334; border: 1px solid #1f4d66; color: #7fdcf0; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.14em; cursor: pointer;">STOP AFTER STEP</button>
+                <button type="button" style="width: 92px; height: 34px; background: #1d0f16; border: 1px solid #5c2430; color: #ff6070; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.14em; cursor: pointer;">FORCE</button>
               </div>
             </div>
           </div>
@@ -241,7 +265,8 @@
           </sc-for>
           <div style="flex-grow: 1;"></div>
           <div style="display: flex; align-items: center; gap: 10px; padding: 0 12px;">
-            <span style="padding: 3px 8px; border: 1px solid #1d5a49; background: #0a1f1a; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #43e39a;">LOCAL SHELL · NO EGRESS</span>
+            <span style="{{ egressStyle }}">{{ egressLabel }}</span>
+            <span style="{{ writesStyle }}">{{ writesLabel }}</span>
             <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #6b8299;">COMPLETIONS: {{ completionSource }}</span>
           </div>
         </div>
@@ -346,39 +371,36 @@
 </div>
 </x-dc>
 
-<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#1f4d66","options":["#1f4d66","#2a5f3f","#5a3a1f","#3a2a5f"]},"startArmed":{"editor":"boolean","default":true},"$preview":{"width":1600,"height":1000}}'>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#1f4d66","options":["#1f4d66","#2a5f3f","#5a3a1f","#3a2a5f"]},"startOffline":{"editor":"boolean","default":true},"$preview":{"width":1600,"height":1000}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { view: 'agents', armed: null, term: 0, agent: 0, switches: null };
+    this.state = { view: 'agents', term: 0, agent: 0, mode: null, fleet: null, sys: null };
   }
 
-  armed() {
-    return this.state.armed === null ? (this.props.startArmed ?? true) : this.state.armed;
+  mode() {
+    return this.state.mode || (this.props.startOffline ?? true ? 'offline' : 'online');
   }
 
-  switchState() {
-    return this.state.switches || {
-      workers: true, cloud: false, github: true, voice: true, jobs: true, writes: true,
-    };
+  track(on, w) {
+    return 'width: ' + w + 'px; height: 15px; flex-shrink: 0; padding: 0; background: ' + (on ? '#12503c' : '#0e1f2c')
+      + '; border: 1px solid ' + (on ? '#2c7f5f' : '#25445a') + '; display: flex; align-items: center; justify-content: '
+      + (on ? 'flex-end' : 'flex-start') + '; cursor: pointer;';
+  }
+
+  knob(on) {
+    return 'width: 11px; height: 11px; margin: 0 1px; background: ' + (on ? '#43e39a' : '#4a6076') + '; display: block;';
   }
 
   cells(filled, total, color) {
     const out = [];
     for (let i = 0; i < total; i += 1) {
-      const on = i < filled;
-      out.push({
-        style: 'flex-grow: 1; background: ' + (on ? color : '#10283a') + '; opacity: ' + (on ? 1 : 0.9) + ';',
-      });
+      out.push({ style: 'flex-grow: 1; background: ' + (i < filled ? color : '#10283a') + ';' });
     }
     return out;
   }
 
   renderVals() {
-    const armed = this.armed();
-    const sw = this.switchState();
-    const view = this.state.view;
-    const term = this.state.term;
     const cyan = '#5fd0e8';
     const green = '#43e39a';
     const amber = '#ffb84d';
@@ -386,54 +408,22 @@ class Component extends DCLogic {
     const violet = '#a98bff';
     const dim = '#6b8299';
 
-    const tabStyle = (on) => 'height: 100%; padding: 0 22px; background: ' + (on ? '#0b1622' : 'transparent')
-      + '; border: 0; border-right: 1px solid #1f4d66; border-bottom: 2px solid ' + (on ? cyan : 'transparent')
-      + "; color: " + (on ? cyan : '#7d95ab')
-      + "; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 12px; letter-spacing: 0.16em; cursor: pointer;";
+    const mode = this.mode();
+    const offline = mode === 'offline';
+    const view = this.state.view;
+    const term = this.state.term;
 
-    const switchDefs = [
-      ['workers', 'WORKER PROCESSES', 'workers'],
-      ['cloud', 'CLOUD EGRESS', 'cloud'],
-      ['github', 'GITHUB SYNC', 'github'],
-      ['voice', 'VOICE CAPTURE', 'voice'],
-      ['jobs', 'INTEGRATION JOBS', 'jobs'],
-      ['writes', 'TERMINAL WRITES', 'writes'],
-    ];
-
-    const switches = switchDefs.map(([key, label]) => {
-      const on = armed && sw[key];
-      return {
-        label,
-        state: on ? 'ON' : (armed ? 'OFF' : 'HELD'),
-        dot: on ? green : (armed ? dim : amber),
-        trackStyle: 'width: 34px; height: 16px; flex-shrink: 0; padding: 0; background: ' + (on ? '#12503c' : '#0e1f2c')
-          + '; border: 1px solid ' + (on ? '#2c7f5f' : '#25445a') + '; display: flex; align-items: center; justify-content: '
-          + (on ? 'flex-end' : 'flex-start') + '; cursor: pointer;',
-        knobStyle: 'width: 12px; height: 12px; margin: 0 1px; background: ' + (on ? green : '#4a6076') + '; display: block;',
-        toggle: () => this.setState({ switches: Object.assign({}, sw, { [key]: !sw[key] }) }),
-      };
-    });
-
-    const health = [
-      { label: 'CPU LOAD', value: armed ? '38%' : '4%', color: cyan, cells: this.cells(armed ? 7 : 1, 18, cyan) },
-      { label: 'MEMORY', value: armed ? '21.4 / 32 GB' : '6.1 / 32 GB', color: cyan, cells: this.cells(armed ? 11 : 3, 18, cyan) },
-      { label: 'DISK WRITE', value: armed ? '44 MB/s' : 'idle', color: armed ? amber : dim, cells: this.cells(armed ? 6 : 0, 18, amber) },
-      { label: 'VRAM RESIDENT', value: armed ? '17.8 / 24 GB' : '0 GB', color: armed ? green : dim, cells: this.cells(armed ? 13 : 0, 18, green) },
-    ];
-
-    const models = [
-      { name: 'deepseek-r1:32b', size: 'ollama', state: armed ? 'LOADED' : 'UNLOADED', color: armed ? green : dim },
-      { name: 'qwen3-coder:14b', size: 'lm studio', state: armed ? 'LOADED' : 'UNLOADED', color: armed ? green : dim },
-      { name: 'llama3.1:8b', size: 'ollama', state: 'IDLE', color: amber },
-      { name: 'whisper-large-v3', size: 'voice', state: sw.voice && armed ? 'STANDBY' : 'OFF', color: sw.voice && armed ? cyan : dim },
-      { name: 'claude-opus-5', size: 'api', state: sw.cloud && armed ? 'REACHABLE' : 'BLOCKED', color: sw.cloud && armed ? cyan : red },
-    ];
+    const chosen = this.state.fleet || {
+      'claude-code': true, 'deepseek-ollama': true, 'local-lmstudio': true,
+      'deepseek-harness': true, 'grok-build': true, 'gemini-api': true,
+    };
+    const sys = this.state.sys || { routing: true, github: true, jobs: true, voice: true, writes: true };
 
     const agentDefs = [
-      { mark: 'CC', name: 'Claude Code', driver: 'driver: claude-code · local CLI · lease held', where: 'LOCAL', live: 'RUNNING', liveColor: green,
+      { id: 'claude-code', mark: 'CC', short: 'Claude Code', name: 'Claude Code', local: true, busy: true, base: 'RUNNING', baseColor: green,
+        driver: 'driver: claude-code · local CLI · lease held',
         activity: 'Task 41 · resolving publish preview conflict',
-        taskNumber: 'TASK 41', taskTitle: 'Recover Task 38: publish preview',
-        stage: 2,
+        taskNumber: 'TASK 41', taskTitle: 'Recover Task 38: publish preview', stage: 2,
         note: 'Writer lease acquired 00:41 ago. Baseline commit 329aeee. Seven files changed, none staged.',
         stats: [['TOKENS', '186.2K', cyan], ['CONTEXT', '61%', amber], ['RUNTIME', '00:41:06', '#d6e7f4'], ['COST', '$2.04', violet]],
         reports: [
@@ -442,11 +432,11 @@ class Component extends DCLogic {
           ['08:58', 'LEASE', 'Fenced lease 8821 acquired for task 41.'],
           ['08:58', 'START', 'Worker launched from ~/projects/the-acc'],
         ] },
-      { mark: 'DS', name: 'DeepSeek R1 · Ollama', driver: 'driver: ollama · 127.0.0.1:11434 · local', where: 'LOCAL', live: 'RUNNING', liveColor: green,
-        activity: 'Task 42 · reviewing workflow driver tests',
-        taskNumber: 'TASK 42', taskTitle: 'Tighten workflow driver tests',
-        stage: 3,
-        note: 'Independent reviewer. Runs entirely on local VRAM; no tokens billed.',
+      { id: 'deepseek-ollama', mark: 'DS', short: 'DeepSeek R1', name: 'DeepSeek R1 · Ollama', local: true, busy: true, base: 'RUNNING', baseColor: green,
+        driver: 'driver: ollama · 127.0.0.1:11434 · local',
+        activity: 'Task 42 · independent review in progress',
+        taskNumber: 'TASK 42', taskTitle: 'Tighten workflow driver tests', stage: 3,
+        note: 'Independent reviewer, separate from the implementer as the workflow requires. Runs on local VRAM; no tokens billed.',
         stats: [['TOKENS', '94.7K', cyan], ['CONTEXT', '38%', green], ['RUNTIME', '00:18:22', '#d6e7f4'], ['COST', 'local', green]],
         reports: [
           ['09:12', 'REVIEW', 'Two assertions cover the same branch; suggest merge.'],
@@ -454,61 +444,135 @@ class Component extends DCLogic {
           ['08:55', 'START', 'Review handoff accepted from task 42.'],
           ['08:55', 'SNAPSHOT', 'Read-only snapshot mounted.'],
         ] },
-      { mark: 'QW', name: 'Qwen3 Coder · LM Studio', driver: 'driver: lmstudio · localhost:1234 · local', where: 'LOCAL', live: 'IDLE', liveColor: amber,
-        activity: 'Queued · waiting for writer lease',
-        taskNumber: 'TASK 43', taskTitle: 'Document offline terminal contract',
-        stage: 0,
-        note: 'Next in queue. Will not start while another worker holds the lease.',
+      { id: 'local-lmstudio', mark: 'QW', short: 'Qwen3 Coder', name: 'Qwen3 Coder · LM Studio', local: true, busy: false, base: 'IDLE', baseColor: amber,
+        driver: 'driver: lmstudio · localhost:1234 · local',
+        activity: 'Queued · waiting for the writer lease',
+        taskNumber: 'TASK 43', taskTitle: 'Document offline terminal contract', stage: 0,
+        note: 'Next in queue. One writer at a time, so it will not start while another worker holds the lease.',
         stats: [['TOKENS', '12.1K', cyan], ['CONTEXT', '8%', green], ['RUNTIME', '—', '#8fa8bd'], ['COST', 'local', green]],
         reports: [
           ['08:41', 'QUEUED', 'Task 43 created and assigned.'],
           ['08:40', 'MODEL', 'qwen3-coder:14b loaded into LM Studio.'],
         ] },
-      { mark: 'DH', name: 'DeepSeek Harness', driver: 'driver: dsh · local executable', where: 'LOCAL', live: 'ALERT', liveColor: red,
+      { id: 'deepseek-harness', mark: 'DH', short: 'DS Harness', name: 'DeepSeek Harness', local: true, busy: false, base: 'ALERT', baseColor: red,
+        driver: 'driver: dsh · local executable',
         activity: 'Task 44 · exited 1 · snapshot manifest mismatch',
-        taskNumber: 'TASK 44', taskTitle: 'Regenerate snapshot manifest',
-        stage: 4,
-        note: 'Worker exited non-zero. Inspect the process tree before recovery; ACC will not restart it for you.',
+        taskNumber: 'TASK 44', taskTitle: 'Regenerate snapshot manifest', stage: 4,
+        note: 'Worker exited non-zero. A replacement can only be named once this writer has stopped, and recovery asks you to confirm you inspected the process tree.',
         stats: [['TOKENS', '48.9K', cyan], ['CONTEXT', '22%', green], ['RUNTIME', '00:06:11', '#d6e7f4'], ['COST', 'local', green]],
         reports: [
           ['09:09', 'FAILED', 'exit code 1 · manifest.json checksum mismatch'],
-          ['09:04', 'STDERR', "FileNotFoundError: accepted-snapshot/manifest.json"],
+          ['09:04', 'STDERR', 'FileNotFoundError: accepted-snapshot/manifest.json'],
           ['09:02', 'START', 'Worker launched.'],
         ] },
-      { mark: 'GB', name: 'Grok Build', driver: 'driver: grok-build · cloud API', where: 'CLOUD', live: 'HELD', liveColor: amber,
-        activity: 'Held by offline mode · no cloud step will start',
-        taskNumber: 'TASK 45', taskTitle: 'Sweep GitHub activity for review comments',
-        stage: 1,
-        note: 'Offline mode blocks cloud egress. Re-arm CLOUD EGRESS in the master panel to release it.',
-        stats: [['TOKENS', '70.7K', cyan], ['CONTEXT', '—', '#8fa8bd'], ['RUNTIME', 'paused', amber], ['COST', '$1.14', violet]],
+      { id: 'grok-build', mark: 'GB', short: 'Grok Build', name: 'Grok Build', local: false, busy: true, base: 'RUNNING', baseColor: green,
+        driver: 'driver: grok-build · cloud CLI',
+        activity: 'Task 45 · sweeping GitHub review threads',
+        taskNumber: 'TASK 45', taskTitle: 'Sweep GitHub review threads', stage: 1,
+        note: 'Cloud driver. Offline mode lets the step in flight reach a safe boundary and blocks the next one.',
+        stats: [['TOKENS', '70.7K', cyan], ['CONTEXT', '44%', amber], ['RUNTIME', '00:12:48', '#d6e7f4'], ['COST', '$1.14', violet]],
         reports: [
-          ['08:36', 'PAUSED', 'Project switched to offline; cloud step withheld.'],
-          ['08:31', 'REPORT', 'Fetched 4 review threads before pause.'],
+          ['08:36', 'HELD', 'Project switched to offline; next cloud step withheld.'],
+          ['08:31', 'REPORT', 'Fetched 4 review threads before the hold.'],
         ] },
-      { mark: 'GM', name: 'Gemini (direct API)', driver: 'driver: gemini · cloud API', where: 'CLOUD', live: 'OFFLINE', liveColor: dim,
-        activity: 'Not connected · key present, egress blocked',
-        taskNumber: 'UNASSIGNED', taskTitle: 'No task assigned',
-        stage: 0,
-        note: 'Configured in agents.json but unreachable while cloud egress is off.',
+      { id: 'gemini-api', mark: 'GM', short: 'Gemini', name: 'Gemini (direct API)', local: false, busy: false, base: 'IDLE', baseColor: amber,
+        driver: 'driver: gemini · cloud API · key file present',
+        activity: 'No task assigned',
+        taskNumber: 'UNASSIGNED', taskTitle: 'No task assigned', stage: 0,
+        note: 'Configured in agents.json. Availability is probed at assignment time, not cached.',
         stats: [['TOKENS', '0', '#8fa8bd'], ['CONTEXT', '—', '#8fa8bd'], ['RUNTIME', '—', '#8fa8bd'], ['COST', '$0.00', '#8fa8bd']],
         reports: [
           ['08:30', 'CONFIG', 'Key loaded from ~/.config/acc/gemini.key'],
         ] },
     ];
 
-    const stageNames = ['QUEUED', 'RUNNING', 'REVIEW', 'ACCEPTED', 'FAILED'];
+    const resolve = (a) => {
+      const wanted = chosen[a.id];
+      const reachable = a.local || !offline;
+      if (a.base === 'ALERT') {
+        return { status: 'ALERT', color: red, activity: a.activity, held: false };
+      }
+      if (!reachable) {
+        return a.busy
+          ? { status: 'HELD', color: amber, activity: 'Step in flight finishes; the next one is blocked offline', held: true }
+          : { status: 'BLOCKED', color: red, activity: 'Cloud egress blocked by offline mode', held: true };
+      }
+      if (!wanted) {
+        return a.busy
+          ? { status: 'FINISHING', color: amber, activity: 'Finishes the current step, then pauses', held: true }
+          : { status: 'OFF', color: dim, activity: 'Not assignable; no new work offered', held: true };
+      }
+      return { status: a.base, color: a.baseColor, activity: a.activity, held: false };
+    };
+
+    const resolved = agentDefs.map(resolve);
+
+    const fleet = agentDefs.map((a, i) => {
+      const r = resolved[i];
+      const wanted = chosen[a.id];
+      const reachable = a.local || !offline;
+      return {
+        short: a.short,
+        dot: r.color,
+        nameColor: wanted && reachable ? '#d6e7f4' : '#7d95ab',
+        state: r.status,
+        stateColor: r.color,
+        trackStyle: this.track(wanted && reachable, 30),
+        knobStyle: this.knob(wanted && reachable),
+        toggle: () => this.setState({ fleet: Object.assign({}, chosen, { [a.id]: !wanted }) }),
+      };
+    });
+
+    const systemDefs = [
+      ['routing', 'CONVERSATION ROUTING'],
+      ['github', 'GITHUB SYNC'],
+      ['jobs', 'INTEGRATION QUEUE'],
+      ['voice', 'VOICE CAPTURE'],
+      ['writes', 'TERMINAL WRITES'],
+    ];
+
+    const systems = systemDefs.map(([key, label]) => {
+      const on = sys[key];
+      return {
+        label,
+        state: on ? 'ON' : 'OFF',
+        stateColor: on ? green : dim,
+        dot: on ? green : '#3a5268',
+        trackStyle: this.track(on, 30),
+        knobStyle: this.knob(on),
+        toggle: () => this.setState({ sys: Object.assign({}, sys, { [key]: !on }) }),
+      };
+    });
+
+    const activeCount = resolved.filter((r) => r.status === 'RUNNING').length;
+    const assignableCount = agentDefs.filter((a, i) => chosen[a.id] && (a.local || !offline)).length;
+    const busy = activeCount > 0;
+
+    const health = [
+      { label: 'CPU LOAD', value: busy ? (activeCount > 1 ? '38%' : '21%') : '4%', color: cyan, cells: this.cells(busy ? (activeCount > 1 ? 7 : 4) : 1, 18, cyan) },
+      { label: 'MEMORY', value: busy ? '21.4 / 32 GB' : '6.1 / 32 GB', color: cyan, cells: this.cells(busy ? 11 : 3, 18, cyan) },
+      { label: 'DISK WRITE', value: sys.writes && busy ? '44 MB/s' : 'idle', color: sys.writes && busy ? amber : dim, cells: this.cells(sys.writes && busy ? 6 : 0, 18, amber) },
+      { label: 'VRAM RESIDENT', value: busy ? '17.8 / 24 GB' : '2.1 / 24 GB', color: busy ? green : dim, cells: this.cells(busy ? 13 : 2, 18, green) },
+    ];
+
+    const models = [
+      { name: 'deepseek-r1:32b', size: 'ollama', state: chosen['deepseek-ollama'] ? 'LOADED' : 'IDLE', color: chosen['deepseek-ollama'] ? green : amber },
+      { name: 'qwen3-coder:14b', size: 'lm studio', state: chosen['local-lmstudio'] ? 'LOADED' : 'IDLE', color: chosen['local-lmstudio'] ? green : amber },
+      { name: 'llama3.1:8b', size: 'ollama', state: 'IDLE', color: amber },
+      { name: 'whisper-large-v3', size: 'voice', state: sys.voice ? 'STANDBY' : 'OFF', color: sys.voice ? cyan : dim },
+      { name: 'grok-4.7 · claude-opus-5', size: 'cloud', state: offline ? 'BLOCKED' : 'REACHABLE', color: offline ? red : cyan },
+    ];
 
     const agents = agentDefs.map((a, i) => {
-      const status = armed ? a.live : (a.live === 'ALERT' ? 'ALERT' : 'HALTED');
-      const color = armed ? a.liveColor : (a.live === 'ALERT' ? red : dim);
+      const r = resolved[i];
       const on = i === this.state.agent;
       return {
         mark: a.mark,
         name: a.name,
-        activity: armed ? a.activity : 'Halted by master command',
-        status,
-        color,
-        where: a.where,
+        activity: r.activity,
+        status: r.status,
+        color: r.color,
+        where: a.local ? 'LOCAL' : 'CLOUD',
         rowStyle: 'display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; padding: 11px 12px; background: '
           + (on ? '#12314a' : 'transparent') + '; border: 0; border-left: 3px solid ' + (on ? cyan : 'transparent')
           + '; border-bottom: 1px solid #10283a; cursor: pointer; text-align: left;',
@@ -517,22 +581,26 @@ class Component extends DCLogic {
     });
 
     const a = agentDefs[this.state.agent];
-    const selStatus = armed ? a.live : (a.live === 'ALERT' ? 'ALERT' : 'HALTED');
-    const selColor = armed ? a.liveColor : (a.live === 'ALERT' ? red : dim);
+    const r = resolved[this.state.agent];
+    const stageNames = ['QUEUED', 'RUNNING', 'REVIEW', 'ACCEPTED', 'FAILED'];
 
     const sel = {
       name: a.name,
       driver: a.driver,
-      status: selStatus,
-      color: selColor,
+      status: r.status,
+      color: r.color,
       taskNumber: a.taskNumber,
       taskTitle: a.taskTitle,
-      note: armed ? a.note : 'Master command is halted. The worker was signalled to stop; its lease is retained so work can resume in place.',
+      note: r.held && r.status === 'FINISHING'
+        ? 'Switched off while working. The run in flight finishes and further scheduling is disabled, so the task pauses before its next step rather than losing the step. Force stop is the separate, deliberate escalation.'
+        : (r.held && r.status === 'HELD'
+          ? 'Offline mode blocks the next cloud step. The supervised step already running reaches a safe boundary first; a success it produces is still accepted.'
+          : a.note),
       stats: a.stats.map(([label, value, color]) => ({ label, value, color })),
       stages: stageNames.map((label, i) => ({
         label,
         style: 'padding: 3px 9px; font-family: "IBM Plex Mono", monospace; font-size: 9.5px; letter-spacing: 0.1em; border: 1px solid '
-          + (i === a.stage ? selColor : '#1b3a4f') + '; color: ' + (i === a.stage ? selColor : '#4a6076')
+          + (i === a.stage ? r.color : '#1b3a4f') + '; color: ' + (i === a.stage ? r.color : '#4a6076')
           + '; background: ' + (i === a.stage ? '#0d2334' : 'transparent') + ';',
       })),
       reports: a.reports.map(([time, kind, text]) => ({
@@ -544,28 +612,34 @@ class Component extends DCLogic {
     };
 
     const taskDefs = [
-      ['TASK 41', 'Recover Task 38: publish preview', 'Claude Code', 'RUNNING', green, '00:41:06', '186.2K'],
-      ['TASK 42', 'Tighten workflow driver tests', 'DeepSeek R1 · Ollama', 'AWAITING REVIEW', cyan, '00:18:22', '94.7K'],
-      ['TASK 43', 'Document offline terminal contract', 'Qwen3 · LM Studio', 'QUEUED', amber, '—', '12.1K'],
-      ['TASK 44', 'Regenerate snapshot manifest', 'DeepSeek Harness', 'FAILED', red, '00:06:11', '48.9K'],
-      ['TASK 45', 'Sweep GitHub review threads', 'Grok Build', 'PAUSED', amber, '00:12:48', '70.7K'],
-      ['TASK 40', 'Add MiMo Code workflow driver', 'Claude Code', 'ACCEPTED', violet, '01:22:15', '241.0K'],
+      ['TASK 41', 'Recover Task 38: publish preview', 'Claude Code', 0, 'ACCEPTED', violet, '00:41:06', '186.2K'],
+      ['TASK 42', 'Tighten workflow driver tests', 'DeepSeek R1 · Ollama', 1, 'AWAITING REVIEW', cyan, '00:18:22', '94.7K'],
+      ['TASK 43', 'Document offline terminal contract', 'Qwen3 · LM Studio', 2, 'QUEUED', amber, '—', '12.1K'],
+      ['TASK 44', 'Regenerate snapshot manifest', 'DeepSeek Harness', 3, 'FAILED', red, '00:06:11', '48.9K'],
+      ['TASK 45', 'Sweep GitHub review threads', 'Grok Build', 4, 'RUNNING', green, '00:12:48', '70.7K'],
+      ['TASK 40', 'Add MiMo Code workflow driver', 'Claude Code', 0, 'ACCEPTED', violet, '01:22:15', '241.0K'],
     ];
 
-    const tasks = taskDefs.map(([number, title, agent, status, color, elapsed, tokens], i) => ({
-      number, title, agent, elapsed, tokens,
-      status: armed || status === 'FAILED' || status === 'ACCEPTED' ? status : 'HELD',
-      color: armed || status === 'FAILED' || status === 'ACCEPTED' ? color : dim,
-      rowStyle: 'display: grid; grid-template-columns: 74px minmax(0, 1fr) 150px 120px 88px 96px; gap: 10px; align-items: center; height: 42px; padding: 0 10px; background: '
-        + (i === 0 ? '#0f2436' : 'transparent') + '; border-left: 3px solid ' + (i === 0 ? cyan : 'transparent') + '; border-bottom: 1px solid #10283a;',
-    }));
+    const tasks = taskDefs.map(([number, title, agentName, owner, status, color, elapsed, tokens], i) => {
+      const own = resolved[owner];
+      let shown = status;
+      let shownColor = color;
+      if (status !== 'FAILED' && status !== 'ACCEPTED') {
+        if (own.status === 'FINISHING') { shown = 'PAUSING AFTER STEP'; shownColor = amber; }
+        else if (own.status === 'HELD') { shown = 'HELD OFFLINE'; shownColor = amber; }
+        else if (own.status === 'OFF' || own.status === 'BLOCKED') { shown = 'UNASSIGNED'; shownColor = dim; }
+      }
+      if (number === 'TASK 41') { shown = own.status === 'FINISHING' ? 'PAUSING AFTER STEP' : 'RUNNING'; shownColor = own.status === 'FINISHING' ? amber : green; }
+      return {
+        number, title, agent: agentName, elapsed, tokens,
+        status: shown,
+        color: shownColor,
+        rowStyle: 'display: grid; grid-template-columns: 74px minmax(0, 1fr) 150px 120px 88px 96px; gap: 10px; align-items: center; height: 42px; padding: 0 10px; background: '
+          + (i === 0 ? '#0f2436' : 'transparent') + '; border-left: 3px solid ' + (i === 0 ? cyan : 'transparent') + '; border-bottom: 1px solid #10283a;',
+      };
+    });
 
-    const termDefs = [
-      ['bash · task-41', green],
-      ['pytest · watch', amber],
-      ['git · main', cyan],
-    ];
-
+    const termDefs = [['bash · task-41', green], ['pytest · watch', amber], ['git · main', cyan]];
     const terms = termDefs.map(([label, dot], i) => ({
       label,
       dot: i === term ? dot : '#3a5268',
@@ -628,9 +702,9 @@ class Component extends DCLogic {
     }));
 
     const alertDefs = [
-      ['CRITICAL', red, '09:09', 'DeepSeek Harness exited 1 on Task 44. Inspect the process tree before recovery.'],
+      ['CRITICAL', red, '09:09', 'DeepSeek Harness exited 1 on Task 44. Inspect the process tree before naming a replacement.'],
       ['HANDLED', amber, '08:47', 'Ollama memory pressure — llama3.1:8b unloaded to free VRAM.'],
-      ['HANDLED', amber, '08:36', 'Cloud egress blocked; Task 45 paused instead of failing.'],
+      ['HANDLED', amber, '08:36', 'Cloud egress blocked; Task 45 held after its current step instead of failing.'],
       ['INFO', cyan, '08:30', 'Offline mode engaged. Local drivers only for new assignments.'],
     ];
 
@@ -640,9 +714,9 @@ class Component extends DCLogic {
     }));
 
     const footer = [
-      { label: 'AGENTS', value: '6', color: '#d6e7f4' },
-      { label: 'ACTIVE', value: armed ? '2' : '0', color: armed ? green : dim },
-      { label: 'IDLE', value: armed ? '3' : '5', color: amber },
+      { label: 'FLEET', value: '6', color: '#d6e7f4' },
+      { label: 'ASSIGNABLE', value: String(assignableCount), color: assignableCount ? green : red },
+      { label: 'RUNNING', value: String(activeCount), color: activeCount ? green : dim },
       { label: 'ALERT', value: '1', color: red },
       { label: 'TASKS', value: '6', color: '#d6e7f4' },
       { label: 'QUEUE', value: '00:04:12', color: '#8fa8bd' },
@@ -650,9 +724,18 @@ class Component extends DCLogic {
       { label: 'BILLED', value: '$3.18', color: violet },
     ];
 
+    const segment = (on) => 'flex-grow: 1; height: 28px; background: ' + (on ? '#0d2334' : 'transparent')
+      + '; border: 1px solid ' + (on ? '#2f6f8c' : '#1f4d66') + '; color: ' + (on ? '#7fdcf0' : '#5c748b')
+      + "; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: 0.14em; cursor: pointer;";
+
+    const chip = (color, bg, border) => 'display: flex; align-items: center; gap: 8px; padding: 5px 11px; border: 1px solid '
+      + border + '; background: ' + bg + "; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: " + color + ';';
+
     return {
       accent: this.props.accent ?? '#1f4d66',
-      switches,
+      fleet,
+      systems,
+      assignableLabel: assignableCount + ' OF 6 ON',
       health,
       models,
       agents,
@@ -667,17 +750,34 @@ class Component extends DCLogic {
       isTasks: view === 'tasks',
       showAgents: () => this.setState({ view: 'agents' }),
       showTasks: () => this.setState({ view: 'tasks' }),
-      agentTabStyle: tabStyle(view === 'agents'),
-      taskTabStyle: tabStyle(view === 'tasks'),
-      armLabel: armed ? 'ALL SYSTEMS ARMED' : 'ALL SYSTEMS HALTED',
-      armHint: armed ? 'CLICK TO HALT EVERY WORKER' : 'CLICK TO RE-ARM · LEASES RETAINED',
-      armStyle: 'width: 100%; height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; background: '
-        + (armed ? '#0c2c22' : '#2a0d13') + '; border: 1px solid ' + (armed ? '#2c7f5f' : '#7a2634') + '; color: ' + (armed ? green : '#ff8a96') + ';',
-      toggleMaster: () => this.setState({ armed: !armed }),
-      completionSource: armed ? 'qwen3-coder:14b (local)' : 'disabled',
+      agentTabStyle: 'height: 100%; padding: 0 22px; background: ' + (view === 'agents' ? '#0b1622' : 'transparent')
+        + '; border: 0; border-right: 1px solid #1f4d66; border-bottom: 2px solid ' + (view === 'agents' ? cyan : 'transparent')
+        + '; color: ' + (view === 'agents' ? cyan : '#7d95ab')
+        + "; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 12px; letter-spacing: 0.16em; cursor: pointer;",
+      taskTabStyle: 'height: 100%; padding: 0 22px; background: ' + (view === 'tasks' ? '#0b1622' : 'transparent')
+        + '; border: 0; border-right: 1px solid #1f4d66; border-bottom: 2px solid ' + (view === 'tasks' ? cyan : 'transparent')
+        + '; color: ' + (view === 'tasks' ? cyan : '#7d95ab')
+        + "; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 12px; letter-spacing: 0.16em; cursor: pointer;",
+      onlineStyle: segment(!offline),
+      offlineStyle: segment(offline),
+      goOnline: () => this.setState({ mode: 'online' }),
+      goOffline: () => this.setState({ mode: 'offline' }),
+      modeChipStyle: chip(offline ? green : cyan, offline ? '#0a1f1a' : '#0d2334', offline ? '#1d5a49' : '#2f6f8c'),
+      modeDotStyle: 'width: 7px; height: 7px; border-radius: 50%; background: ' + (offline ? green : cyan) + ';',
+      modeChipText: offline ? 'OFFLINE · LOCAL DRIVERS ONLY' : 'ONLINE · CLOUD STARTS ALLOWED',
+      egressStyle: 'padding: 3px 8px; border: 1px solid ' + (offline ? '#1d5a49' : '#2f6f8c') + '; background: '
+        + (offline ? '#0a1f1a' : '#0d2334') + "; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: "
+        + (offline ? green : cyan) + ';',
+      egressLabel: offline ? 'LOCAL SHELL · NO EGRESS' : 'LOCAL SHELL · EGRESS ALLOWED',
+      writesStyle: 'padding: 3px 8px; border: 1px solid ' + (sys.writes ? '#2c7f5f' : '#5c2430') + '; background: '
+        + (sys.writes ? '#0a1f1a' : '#1d0f16') + "; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: "
+        + (sys.writes ? green : red) + ';',
+      writesLabel: sys.writes ? 'WRITES ON' : 'READ ONLY',
+      completionSource: chosen['local-lmstudio'] ? 'qwen3-coder:14b (local)' : 'off',
       footerState: 'padding: 4px 12px; font-family: "Chakra Petch", sans-serif; font-weight: 600; letter-spacing: 0.16em; font-size: 11px; background: '
-        + (armed ? '#0c2c22' : '#2a0d13') + '; border: 1px solid ' + (armed ? '#2c7f5f' : '#7a2634') + '; color: ' + (armed ? green : '#ff8a96') + ';',
-      footerStateText: armed ? 'SYSTEMS NOMINAL' : 'MASTER HALT ENGAGED',
+        + (assignableCount ? '#0c2c22' : '#2a0d13') + '; border: 1px solid ' + (assignableCount ? '#2c7f5f' : '#7a2634')
+        + '; color: ' + (assignableCount ? green : '#ff8a96') + ';',
+      footerStateText: assignableCount ? 'FLEET ACCEPTING WORK' : 'FLEET STOOD DOWN',
     };
   }
 }
