@@ -24,6 +24,8 @@ human is not in the normal path — only in the exceptions.
 
 | Decision | Value |
 | --- | --- |
+| Program shape | A **desktop app** (Electron or Tauri). Not a web app, not a browser page. |
+| Identity | **One ACC.** A single program on the desktop running every project and every agent as one entity. There is never more than one ACC. |
 | Replaces | `acc/web` entirely. Not a second UI, not a re-skin. |
 | Target display | One laptop screen, roughly 1440px wide |
 | Density | Dense. Maximum readouts per screen, small type, mission-console aesthetic — hairlines, mono numerics, bracketed panel headers, no gradients |
@@ -129,7 +131,9 @@ interrupt. An error an agent cannot resolve causes reassignment, not a question.
 - The routing table gets **its own screen**, reachable from agent view.
 - Failover normally walks **down** the cost ladder.
 - Failover may escalate to a pricier agent **only if that agent reports its own
-  usage**, and only within **5 percentage points of that agent's current
+  usage**. An agent that does not report usage is **not eligible for
+  cost-escalating failover at all** — there is no way to hold it to a limit.
+  Escalation is bounded to **5 percentage points of that agent's current
   allowance**. An agent at 25% of its weekly or monthly allowance may reach 30%
   on a failover task, then stops.
 - **Every agent has a backup.**
@@ -142,6 +146,11 @@ interrupt. An error an agent cannot resolve causes reassignment, not a question.
   way any other hold works.
 - The meter's primary unit is **percentage of an agent's own allowance**, not
   raw tokens, because the failover rule is written against percentages.
+- **The meter is for cloud agents only.** Local agents cost nothing and are not
+  metered.
+- Its purpose is watching the **rate of depletion**, so the operator can switch
+  an agent off, reassign its task, or investigate why it is burning through an
+  allowance faster than expected.
 
 ## 10. Projects, branches and concurrency
 
@@ -198,6 +207,8 @@ These are decisions the current code contradicts. Each needs a deliberate change
 | Routing by work type | Roles are configured per task; there is no task-type concept and no preferred/backup table | `acc/workflow.py` |
 | Review is automatic | `review()` requires a human-supplied decision, and managed acceptance requires the bound reviewer result plus a coordinator decision | `acc/core.py` |
 | The UI is one dense shell | `acc/web` is a stacked document-flow dashboard with dialogs | `acc/web/*` |
+| The ACC is a desktop app | A Python `http.server` on localhost with a token, opened in a browser | `acc/server.py`, `acc/web/*` |
+| One ACC runs everything | The program is one `Coordinator` bound to one project folder, started per project with its own state directory and SQLite file | `acc/core.py`, `acc/__main__.py` |
 
 Not conflicts, but worth knowing: the offline rule already behaves the way the
 design wants (a supervised cloud step reaches a safe boundary, the next is
@@ -213,7 +224,11 @@ work it cannot interrupt.
    offline assignments.
 4. **Automatic failover** down the cost ladder, with the capped escalation rule.
 5. **Per-agent assignable flag**, distinct from the probe result.
-6. **Multi-project coordinator** and a cross-project task list.
+6. **One-program architecture** — a single ACC owning every project and every
+   agent, with one scheduler and one cross-project task list, replacing the
+   one-coordinator-per-project model.
+15. **Desktop application shell** — Electron or Tauri, giving a real PTY, the
+    microphone, OS notifications and local file access.
 7. **Branch-scoped writer leases** — one writer per branch per repository,
    replacing one runner per coordinator. No checkout management required.
 8. **A real PTY**, plus a local completion model for the terminal's inline
