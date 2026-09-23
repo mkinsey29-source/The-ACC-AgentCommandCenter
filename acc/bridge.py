@@ -15,10 +15,12 @@ TOOLS = [
       'implementer': {'type': 'string'}, 'reviewer': {'type': 'string'}, 'coordinator': {'type': 'string'},
       'max_rounds': {'type': 'integer'}, 'mode': {'type': 'string', 'enum': ['online', 'offline']},
       'fallbacks': {'type': 'object', 'properties': {r: {'type': 'string'} for r in ('implementer', 'reviewer', 'coordinator')}, 'additionalProperties': False}}, ['task_id']),
-    ('acc_state', 'Read tasks, workers, local Git state, and current event cursor.', {}, []),
+    ('acc_state', 'Read tasks, workers, autonomous-routing profiles, local Git state, and current event cursor.', {}, []),
     ('acc_create_task', 'Record an instruction and optional explicit local command. Does not start it.',
      {'title': {'type': 'string'}, 'instruction': {'type': 'string'}, 'agent': {'type': 'string'},
-      'argv': {'type': 'array', 'items': {'type': 'string'}}}, ['title', 'instruction']),
+      'argv': {'type': 'array', 'items': {'type': 'string'}}, 'task_area': {'type': 'string'},
+      'required_capabilities': {'type': 'array', 'items': {'type': 'string'}},
+      'risk': {'type': 'string', 'enum': ['low', 'medium', 'high']}}, ['title', 'instruction']),
     ('acc_start_task', 'Start the assigned configured worker. Executes local commands.', {'task_id': {'type': 'string'}}, ['task_id']),
     ('acc_stop_task', 'Stop the supervised worker and retain its files.', {'task_id': {'type': 'string'}}, ['task_id']),
     ('acc_assign_task', 'Assign an idle task to an available configured agent.',
@@ -42,13 +44,18 @@ CONVERSATION_TOOLS = [
      {'owner': {'type': 'string'}}, ['owner']),
     ('acc_conversation_renew', 'Extend your lease by 120 seconds and refresh the pending message batch. Renew while reasoning; expired owners cannot commit.',
      {'token': {'type': 'string'}}, ['token']),
-    ('acc_conversation_complete', 'Atomically save your reply and requested task actions, mark the captured messages handled, and release ownership. Execution uses configured roles. Retrying the identical result is idempotent.',
+    ('acc_conversation_complete', 'Atomically save your reply and a dependency-aware task decomposition, route agents automatically, mark captured messages handled, and release ownership. Retrying the identical result is idempotent.',
      {'token': {'type': 'string'}, 'reply': {'type': 'string'},
       'intent': {'type': 'string', 'enum': ['discussion', 'clarification', 'request']},
       'actions': {'type': 'array', 'items': {'type': 'object', 'properties': {
           'type': {'type': 'string', 'enum': ['create', 'revise']}, 'title': {'type': 'string'},
           'instruction': {'type': 'string'}, 'source_ids': {'type': 'array', 'items': {'type': 'string'}},
-          'task_id': {'type': 'string'}, 'revision': {'type': 'integer'}},
+          'task_id': {'type': 'string'}, 'revision': {'type': 'integer'},
+          'action_id': {'type': 'string'}, 'task_area': {'type': 'string'},
+          'required_capabilities': {'type': 'array', 'items': {'type': 'string'}},
+          'risk': {'type': 'string', 'enum': ['low', 'medium', 'high']},
+          'priority': {'type': 'integer', 'minimum': 0, 'maximum': 100},
+          'depends_on': {'type': 'array', 'items': {'type': 'string'}}},
           'required': ['type', 'instruction', 'source_ids'], 'additionalProperties': False}}},
      ['token', 'reply', 'intent', 'actions']),
     ('acc_conversation_release', 'Release your external lease without consuming pending messages.', {'token': {'type': 'string'}}, ['token']),
@@ -124,7 +131,7 @@ def dispatch(message, url, token):
         supported = ('2024-11-05', '2025-03-26', '2025-06-18')
         requested = message.get('params', {}).get('protocolVersion')
         return result({'protocolVersion': requested if requested in supported else supported[-1],
-                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.6.0'}})
+                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.7.0'}})
     if method == 'ping':
         return result({})
     if method == 'tools/list':

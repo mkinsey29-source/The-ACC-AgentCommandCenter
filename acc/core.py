@@ -472,6 +472,8 @@ class Coordinator:
         self.controls = Controls(self)
         from .integrations import IntegrationHub
         self.integrations = IntegrationHub(self, settings.get('integrations'))
+        from .routing import AgentRouter
+        self.router = AgentRouter(self, settings.get('routing'))
         from .github import GitHub
         self.github = GitHub(self, settings.get('github'))
         from .archive import Archive
@@ -481,7 +483,8 @@ class Coordinator:
         self.workflows.thread.start()
 
     def public_agents(self):
-        return [{k: a.get(k) for k in ('id', 'name', 'kind', 'available', 'description', 'local', 'driver')} for a in self.agents.values()]
+        return [{k: a.get(k) for k in ('id', 'name', 'kind', 'available', 'description',
+                                        'local', 'driver', 'routing')} for a in self.agents.values()]
 
     def snapshot(self):
         with self.lock:
@@ -490,11 +493,13 @@ class Coordinator:
                     'tasks': [t for t in self.store.tasks() if not t.get('internal')],
                     'conversation': self.conversation.state(), 'github': self.github.snapshot(),
                     'integrations': self.integrations.snapshot(),
+                    'routing': self.router.snapshot(),
                     'agents': self.public_agents(), 'git': self.git, 'cursor': seq,
                     'events': self.store.events(max(0, seq - 100)),
                     'recovery_required': self.recovery_required,
                     'capabilities': {'github': True, 'switch_after_step': True, 'automatic_offline': bool(self.conversation.settings.get('local_agent')), 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True,
-                                     'integration_jobs': True, 'shared_memory': True, 'fenced_job_leases': True}}
+                                     'integration_jobs': True, 'shared_memory': True, 'fenced_job_leases': True,
+                                     'autonomous_routing': self.router.enabled}}
 
     def build_task(self, payload):
         title, instruction = payload.get('title', '').strip(), payload.get('instruction', '').strip()
@@ -514,6 +519,9 @@ class Coordinator:
                 'argv': argv, 'status': 'queued', 'activity': 'Ready to start.', 'next_step': 'Run assigned worker',
                 'created': now(), 'run_id': None, 'pid': None, 'exit_code': None, 'evidence': [], 'runs': [],
                 'review': None, 'timeout_seconds': timeout, 'timed_out': False}
+        for key, default in (('task_area', 'general'), ('required_capabilities', []),
+                             ('risk', 'medium'), ('priority', 50), ('depends_on', [])):
+            task[key] = payload.get(key, default)
         return task
 
     def create(self, payload):
@@ -820,7 +828,7 @@ class Coordinator:
                     try:
                         self.workflows.finish(task, folder, code, stopped)
                     except Exception as exc:
-                        self.workflows.hold(task, str(exc))
+                        self.workflows.fail_step(task, str(exc))
                 if task.get('internal'):
                     try:
                         if task['internal'] == 'transcription':

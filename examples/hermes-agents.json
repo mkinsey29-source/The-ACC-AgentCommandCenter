@@ -5,44 +5,56 @@
       "name": "Preferred online orchestrator",
       "driver": "hermes",
       "profile": "acc-online",
-      "local": false
+      "local": false,
+      "routing": {"roles": ["coordinator"], "quality_tier": 5, "cost_tier": 4}
     },
     {
       "id": "deepseek",
       "name": "DeepSeek implementation",
       "driver": "hermes",
       "profile": "acc-deepseek",
-      "local": false
+      "local": false,
+      "routing": {"roles": ["implementer"], "quality_tier": 4, "cost_tier": 2}
     },
     {
       "id": "claude",
       "name": "Claude review",
       "driver": "hermes",
       "profile": "acc-claude",
-      "local": false
+      "local": false,
+      "routing": {"roles": ["reviewer"], "quality_tier": 5, "cost_tier": 5}
     },
     {
       "id": "hermes-coordinator",
       "name": "Hermes local coordinator",
       "driver": "hermes",
       "profile": "acc-coordinator",
-      "local": true
+      "local": true,
+      "routing": {"roles": ["coordinator"], "quality_tier": 4, "cost_tier": 1}
     },
     {
       "id": "local-builder",
       "name": "Local implementation",
       "driver": "hermes",
       "profile": "acc-local-builder",
-      "local": true
+      "local": true,
+      "routing": {"roles": ["implementer"], "quality_tier": 2, "cost_tier": 1}
     },
     {
       "id": "local-reviewer",
       "name": "Local review",
       "driver": "hermes",
       "profile": "acc-local-reviewer",
-      "local": true
+      "local": true,
+      "routing": {"roles": ["reviewer"], "quality_tier": 2, "cost_tier": 1}
     }
   ],
+  "routing": {
+    "enabled": true,
+    "confidence_threshold": 0.55,
+    "max_failures": 3,
+    "typesafe": {"api_key_env": "TYPESAFE_API_KEY", "model": "jev-latest"}
+  },
   "conversation": {
     "enabled": true,
     "preferred_agent": "online-orchestrator",

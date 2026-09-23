@@ -44,7 +44,8 @@ class Workflows:
     def initial(spec):
         return {**spec, 'enabled': True, 'stage': 'implement', 'phase': 'queued', 'round': 1,
                 'snapshot': None, 'implementation': None, 'review_result': None,
-                'fallback_used': False, 'history': []}
+                'fallback_used': False, 'history': [], 'route_failures': [],
+                'routing_history': []}
 
     def configure(self, task_id, payload):
         c = self.c
@@ -125,23 +126,53 @@ class Workflows:
         task.update(status='paused', activity=message, next_step='Inspect the report, then resume or change assignment')
         self.c.store.save(task, 'workflow_held', {'message': message})
 
-    def finish(self, task, folder, code, stopped):
+    def fail_step(self, task, reason):
+        """Replace a failed bounded step after its runner has fully released the workspace."""
         w = task['workflow']
-        if stopped or task['timed_out']:
-            self.hold(task, 'Workflow stopped or timed out; retained files need inspection.')
+        stage = w['stage']
+        role = {'implement': 'implementer', 'review': 'reviewer', 'coordinate': 'coordinator'}[stage]
+        self.c.router.record_outcome(task, role, False, error=reason)
+        replacement = self.c.router.reroute(task, role, reason) if self.c.router.enabled else None
+        if not replacement:
+            self.hold(task, reason)
+            return False
+        if stage != 'implement' and w.get('snapshot'):
+            try:
+                snapshots.verify(w['snapshot'], self.c.project)
+            except ValueError:
+                # A replacement cannot trust a changed review copy or project. Return through
+                # implementation so retained work is inspected and a fresh snapshot is made.
+                w.update(stage='implement', snapshot=None, implementation=None, review_result=None)
+        w.update(fallback_used=False, phase='queued', enabled=True)
+        task.update(status='queued', activity=reason + ' Automatically reassigned to ' + replacement + '.',
+                    next_step='Retry ' + w['stage'] + ' with replacement agent')
+        self.c.store.save(task, 'automatic_agent_replacement',
+                          {'message': task['activity'], 'role': role,
+                           'failed_agent': task['runs'][-1]['agent'], 'replacement': replacement})
+        self.wake.set()
+        return True
+
+    def finish(self, task, folder, code, stopped):
+        c, w = self.c, task['workflow']
+        if stopped:
+            self.hold(task, 'Workflow stopped; retained files need inspection.')
             return
-        if code:
+        if code or task['timed_out']:
             role = {'implement': 'implementer', 'review': 'reviewer', 'coordinate': 'coordinator'}[w['stage']]
-            # Only coordinator failure can safely retry automatically: workers may have partial edits.
+            reason = ('Runner timed out.' if task['timed_out'] else
+                      'Runner exited with code ' + str(code) + '.')
+            c.router.record_outcome(task, role, False, error=reason)
+            # Preserve the explicit coordinator fallback before asking the general router.
             fallback = w['fallbacks'].get(role)
             if w['stage'] == 'coordinate' and not w.get('fallback_used') and fallback and task['runs'][-1]['agent'] != fallback:
+                c.router.record_outcome(task, role, False, switched=True, error=reason)
                 snapshots.verify(w['snapshot'], self.c.project)
                 w.update(fallback_used=True, phase='queued')
                 task.update(status='queued', next_step='Use the permitted local coordinator fallback')
                 self.c.store.save(task, 'coordinator_fallback', {'message': task['next_step']})
                 self.wake.set()
                 return
-            self.hold(task, 'Runner failed. Inspect output and partial work before retrying.')
+            self.fail_step(task, reason)
             return
         result_file = folder / 'result.json'
         if result_file.is_symlink() or not result_file.is_file() or result_file.stat().st_size > 100000:
@@ -158,6 +189,10 @@ class Workflows:
             snapshots.verify(w['snapshot'], self.c.project)
         if stage in ('implement', 'review') and not isinstance(result.get('checks'), list):
             raise ValueError('Worker result must list actual checks (an empty list means none).')
+        role = {'implement': 'implementer', 'review': 'reviewer', 'coordinate': 'coordinator'}[stage]
+        c.router.record_outcome(task, role, True,
+                                accepted=(result.get('verdict') == 'approve') if stage == 'review' else None,
+                                cost=result.get('cost'), usage=result.get('usage'))
         w['history'].append({'stage': stage, 'agent': task['runs'][-1]['agent'], 'at': now(), 'result': result})
         if stage == 'implement':
             w['snapshot'] = snapshots.freeze(self.c.project, folder / 'snapshot')
@@ -175,7 +210,22 @@ class Workflows:
             if action == 'request_review' and w['review_result'] is None:
                 w['stage'] = 'review'
             elif action == 'request_changes' and w['review_result'] is not None:
+                c.router.mark_acceptance((w.get('implementation') or {}).get('run_id'), False)
                 if w['round'] >= w['max_rounds']:
+                    replacement = (c.router.reroute(
+                        task, 'implementer', 'Correction limit reached.',
+                        failed_agent=w.get('implementation_agent')) if c.router.enabled else None)
+                    if replacement:
+                        w.update(round=1, stage='implement', snapshot=None, review_result=None,
+                                 phase='queued', enabled=True, fallback_used=False)
+                        task.update(status='queued', activity='Correction limit reached; reassigned to ' + replacement + '.',
+                                    next_step='Replacement implementer will inspect and continue retained work')
+                        c.store.save(task, 'automatic_agent_replacement',
+                                     {'message': task['activity'], 'role': 'implementer',
+                                      'failed_agent': w.get('implementation_agent'),
+                                      'replacement': replacement})
+                        self.wake.set()
+                        return
                     self.hold(task, 'Correction limit reached; main orchestrator needs to inspect findings.')
                     return
                 w['round'] += 1
@@ -184,6 +234,7 @@ class Workflows:
                 w['snapshot'] = None
                 w['review_result'] = None
             elif action == 'accept' and w['review_result'] and w['review_result']['verdict'] == 'approve':
+                c.router.mark_acceptance((w.get('implementation') or {}).get('run_id'), True)
                 w.update(enabled=False, phase='complete')
                 task['review'] = {'source': 'managed independent review', 'reference': w['snapshot']['id'],
                                   'revision': task['revision'], 'run_id': w['implementation']['run_id'],
@@ -212,6 +263,22 @@ class Workflows:
             self.hold(task, message + (' ' + detail if detail else ''))
             return
         if job['status'] != 'succeeded':
+            self.c.router.record_outcome(task, 'implementer', False,
+                                         cost=job.get('cost'), error=job.get('last_error'))
+            if self.c.router.enabled:
+                replacement = self.c.router.reroute(
+                    task, 'implementer', job.get('last_error') or 'Job-backed implementer failed.')
+                if replacement:
+                    w.pop('job_id', None)
+                    w.update(fallback_used=False, phase='queued', enabled=True)
+                    task.update(status='queued', active_agent=None,
+                                activity='Job-backed implementer failed; automatically reassigned to ' + replacement + '.',
+                                next_step='Retry implementation with replacement agent')
+                    self.c.store.save(task, 'automatic_agent_replacement',
+                                      {'message': task['activity'], 'role': 'implementer',
+                                       'replacement': replacement})
+                    self.wake.set()
+                    return
             self.hold(task, 'Job-backed implementer failed: ' + (job.get('last_error') or 'Unknown error.'))
             return
         artifacts = job.get('artifacts', [])
@@ -223,6 +290,7 @@ class Workflows:
                   'snapshot_id': None, 'summary': summary,
                   'checks': [{'artifact': a['uri'], 'kind': a['kind'], 'sha256': a['sha256']}
                              for a in artifacts], 'artifacts': artifacts}
+        self.c.router.record_outcome(task, 'implementer', True, cost=job.get('cost'))
         w['history'].append({'stage': 'implement', 'agent': task['active_agent'], 'at': now(), 'result': result})
         w['snapshot'] = snapshots.freeze(self.c.project, Path(self.c.state) / 'runs' / task['run_id'] / 'snapshot')
         w['implementation'] = result

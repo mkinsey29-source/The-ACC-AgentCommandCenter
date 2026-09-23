@@ -1,6 +1,7 @@
 """Durable conversation inbox and fenced, transactional orchestration turns."""
 import json
 from pathlib import Path
+import re
 from .core import Conflict, identifier, now
 from .snapshots import inventory
 
@@ -161,19 +162,27 @@ class Conversation:
         return {'pending': pending, 'recent_history': history,
                 'tasks': [{k: t.get(k) for k in ('id', 'task_number', 'task_kind', 'parent_task_id',
                           'parent_task_number', 'title', 'instruction', 'revision', 'status', 'activity',
-                          'next_step', 'review', 'source_ids')}
+                          'next_step', 'review', 'source_ids', 'task_area', 'required_capabilities',
+                          'risk', 'priority', 'depends_on', 'routing')}
                           for t in self.c.store.tasks() if not t.get('internal')],
                 'workflow_defaults': self.settings.get('workflow'),
                 'offline': lease['offline'],
                 'result_contract': {
                     'token': lease['token'], 'reply': 'Plain-language response to the user, including next step.',
                     'intent': 'discussion, clarification, or request. Only request may contain actions.',
-                    'actions': [{'type': 'create or revise', 'title': 'For create only',
+                    'actions': [{'type': 'create or revise', 'action_id': 'Unique short id within this turn.',
+                                 'title': 'For create only',
                                  'instruction': 'Concrete requirements; do not broaden user authorization.',
                                  'source_ids': 'Nonempty array of pending message ids that request this work.',
-                                 'task_id': 'For revise only', 'revision': 'Current integer revision for revise only'}],
+                                 'task_id': 'For revise only', 'revision': 'Current integer revision for revise only',
+                                 'task_area': 'Dotted lowercase area such as code.python or ui.desktop.',
+                                 'required_capabilities': 'Array of dotted lowercase capabilities.',
+                                 'risk': 'low, medium, or high.', 'priority': 'Integer 0–100.',
+                                 'depends_on': 'Array of action_id values that must finish first.'}],
                     'rules': ['Return token, reply, intent, actions as JSON. Do not run code or mutate files yourself.',
-                              'Use discussion for ideas; ask in reply if intent is unclear. Actions execute with configured workflow roles.',
+                              'For a project request, decompose independent deliverables into bounded actions and connect real prerequisites with depends_on.',
+                              'Use discussion for ideas. Ask only when essential information is missing; do not request approval for decomposition or agent assignment.',
+                              'Actions execute autonomously through routing, implementation, correction, and independent review.',
                               'Read existing tasks and outcomes before creating work; revise existing work instead of duplicating it.',
                               'To inspect older history use acc_conversation_read with an after cursor.']}}
 
@@ -202,21 +211,42 @@ class Conversation:
             ids = lease['message_ids']
             if not ids:
                 raise Conflict('No messages were captured. Renew the turn after saving the user message.')
-            tasks, changed = [], set()
-            spec = None
+            tasks, changed, action_ids = [], set(), {}
+            default_spec = None
             if actions:
-                if not self.settings.get('workflow'):
+                if not self.settings.get('workflow') and not self.c.router.enabled:
                     raise ValueError('Set default implementation, review, and coordinator roles before starting conversational work.')
-                spec = self.c.workflows.specification(self.settings['workflow'])
-                spec['mode'] = 'offline' if lease['offline'] else 'online'
-            for action in actions:
+                if self.settings.get('workflow'):
+                    default_spec = self.c.workflows.specification(self.settings['workflow'])
+                    default_spec['mode'] = 'offline' if lease['offline'] else 'online'
+            action_records = []
+            for index, action in enumerate(actions):
                 if not isinstance(action, dict):
                     raise ValueError('Each action must be an object.')
+                action_id = action.get('action_id', 'action-' + str(index + 1))
+                if not isinstance(action_id, str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}', action_id):
+                    raise ValueError('Each action_id must be a short identifier.')
+                if action_id in action_ids:
+                    raise ValueError('action_id values must be unique within a turn.')
                 sources = action.get('source_ids')
                 if not isinstance(sources, list) or not sources or any(x not in ids for x in sources):
                     raise ValueError('Every action must cite pending user message ids in this turn.')
+                fields = {key: action.get(key, default) for key, default in (
+                    ('task_area', 'general'), ('required_capabilities', []), ('risk', 'medium'),
+                    ('priority', 50), ('depends_on', []))}
+                self.c.router._task_fields(fields)
+                if type(fields['priority']) is not int or not 0 <= fields['priority'] <= 100:
+                    raise ValueError('Action priority must be an integer from 0 to 100.')
+                if not isinstance(fields['depends_on'], list) or not all(isinstance(x, str) for x in fields['depends_on']):
+                    raise ValueError('Action depends_on must contain action_id strings.')
                 if action.get('type') == 'create':
-                    task = self.c.build_task({'title': action.get('title'), 'instruction': action.get('instruction'), 'agent': spec['implementer']})
+                    initial_agent = default_spec['implementer'] if default_spec else next(
+                        (key for key, value in self.c.agents.items()
+                         if key != 'local-command' and value.get('available')), 'local-command')
+                    task = self.c.build_task({'title': action.get('title'),
+                                              'instruction': action.get('instruction'),
+                                              'agent': initial_agent, **fields})
+                    dependency_refs = fields['depends_on']
                 elif action.get('type') == 'revise':
                     task = self.c.store.get(action.get('task_id'))
                     if task.get('internal') or type(action.get('revision')) is not int or task['revision'] != action['revision']:
@@ -226,17 +256,51 @@ class Conversation:
                     instruction = action.get('instruction')
                     if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 50000:
                         raise ValueError('Revised instruction must contain 1–50,000 characters.')
+                    for key in ('task_area', 'required_capabilities', 'risk', 'priority'):
+                        if key not in action:
+                            fields[key] = task.get(key, fields[key])
+                    dependency_refs = fields['depends_on'] if 'depends_on' in action else None
                     task['requirements_history'].append({'revision': task['revision'], 'instruction': task['instruction']})
-                    task.update(revision=task['revision'] + 1, instruction=instruction, review=None)
+                    task.update(revision=task['revision'] + 1, instruction=instruction, review=None,
+                                **{key: value for key, value in fields.items() if key != 'depends_on'})
                 else:
                     raise ValueError('Unknown conversation action.')
                 if task['id'] in changed:
                     raise ValueError('Revise a task at most once per turn.')
                 changed.add(task['id'])
+                if self.c.router.enabled:
+                    spec, routing = self.c.router.route(task, default_spec)
+                    spec = self.c.workflows.specification(spec)
+                    task['routing'] = routing
+                else:
+                    spec = default_spec
                 task.update(workflow=self.c.workflows.initial(spec), agent=spec['implementer'], status='queued',
                             source_ids=list(dict.fromkeys(task.get('source_ids', []) + sources)),
                             activity='Requested through conversation.', next_step='Run implementation, then independent review')
                 tasks.append(task)
+                action_ids[action_id] = task['id']
+                action_records.append((task, action_id, dependency_refs))
+            for task, action_id, dependencies in action_records:
+                if dependencies is None:
+                    continue
+                if len(dependencies) != len(set(dependencies)) or any(item not in action_ids for item in dependencies):
+                    raise ValueError('Action dependencies must be distinct action_id values from this turn.')
+                if action_id in dependencies:
+                    raise ValueError('An action cannot depend on itself.')
+                task['depends_on'] = [action_ids[item] for item in dependencies]
+            dependency_map = {action_id: set(dependencies or []) for _, action_id, dependencies in action_records}
+            def visit(action_id, visiting, visited):
+                if action_id in visiting:
+                    raise ValueError('Action dependencies cannot contain a cycle.')
+                if action_id in visited:
+                    return
+                visiting.add(action_id)
+                for dependency in dependency_map[action_id]:
+                    visit(dependency, visiting, visited)
+                visiting.remove(action_id); visited.add(action_id)
+            visited = set()
+            for action_id in dependency_map:
+                visit(action_id, set(), visited)
             response = {'reply': reply, 'task_ids': [t['id'] for t in tasks], 'message_ids': ids}
             with self.c.store.connect() as db:
                 for task in tasks:
