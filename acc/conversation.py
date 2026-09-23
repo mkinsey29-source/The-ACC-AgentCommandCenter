@@ -398,16 +398,30 @@ class Conversation:
         path = folder / 'result.json'
         if path.is_symlink() or not path.is_file() or path.stat().st_size > 100000:
             raise ValueError('Conversation runner must return result.json of at most 100 KB.')
-        self.complete(json.loads(path.read_text(encoding='utf-8')), task)
+        result = json.loads(path.read_text(encoding='utf-8'))
+        self.complete(result, task)
+        self.c.router.record_outcome(task, 'coordinator', True, accepted=True,
+                                     cost=result.get('cost'), usage=result.get('usage'))
 
     def fail(self, task, reason, retry=False):
         lease = self.meta('conversation_lease')
-        local = self.settings.get('local_agent')
-        if retry and lease and local and lease['owner'] != local and self.c.agents[local]['available']:
+        with self.c.store.connect() as db:
+            pending_messages = [dict(row) for row in db.execute(
+                "SELECT id,text FROM messages WHERE status='pending' ORDER BY seq LIMIT 10")]
+        offline = self.c.controls.mode() == 'offline' or self.settings.get('mode') == 'offline'
+        replacement = (self.c.orchestrators.fallback_agent(
+            self.settings, lease['owner'], offline, pending_messages)
+            if retry and lease else None)
+        self.c.router.record_outcome(task, 'coordinator', False, switched=bool(replacement),
+                                     error=reason)
+        if replacement:
             # The failed planner has no authority to execute its proposed tasks.
-            lease.update(owner=local, offline=True)
-            task.update(agent=local, status='queued', activity='Online planner unavailable; trying configured local planner.', internal_retry=True)
+            lease.update(owner=replacement,
+                         offline=offline or self.c.agents[replacement].get('local') is True)
+            task.update(agent=replacement, status='queued',
+                        activity='Planner unavailable; trying ' + replacement + '.', internal_retry=True)
             with self.c.store.connect() as db:
+                self.c.orchestrators.complete_pending(db)
                 self.put(db, 'conversation_lease', lease)
                 db.execute('INSERT OR REPLACE INTO tasks VALUES (?,?)', (task['id'], json.dumps(task)))
                 self.event(db, 'conversation_fallback', {'message': task['activity']})

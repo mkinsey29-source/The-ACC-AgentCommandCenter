@@ -12,7 +12,7 @@ The conversation header selects one orchestration session:
 
 The native ChatGPT transcript and an ACC Direct transcript are not the same provider session. They share ACC's durable messages, task ledger, results, and handoff envelope. An idle switch is immediate. Switching away from an active external lease fences its old token; switching during a supervised direct turn queues the handoff until that decision reaches its process boundary. Running implementation or review workers are not cancelled merely because the orchestrator changes.
 
-Only adapters whose routing roles include `coordinator` appear as Direct sessions. A failed direct planner may use the configured fallback and the next turn retries the selected session. Full takeover when the entire desktop host is offline still requires ACC state and repository access on an always-on or cloud host.
+Only adapters whose routing roles include `coordinator` appear as Direct sessions. A failed direct planner can reroute to the next eligible cloud coordinator, then the configured local fallback; the next turn retries the selected session. Planner success, failure, replacement, duration, reported usage, and cost feed the coordinator profiles used by Automatic. Full takeover when the entire desktop host is offline still requires ACC state and repository access on an always-on or cloud host.
 
 ## Everyday operation
 

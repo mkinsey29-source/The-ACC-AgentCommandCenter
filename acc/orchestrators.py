@@ -13,10 +13,17 @@ class OrchestratorSessions:
         saved = self._meta('orchestrator_sessions')
         initial = (defaults or {}).get('selected', self.AUTO)
         self.data = saved or {'selected': initial, 'pending': None, 'handoff': None,
-                              'generation': 0, 'automatic_decision': None}
+                              'generation': 0, 'automatic_decision': None, 'recovery': None}
         self.data.setdefault('pending', None)
         self.data.setdefault('automatic_decision', None)
-        self._validate(self.data['selected'])
+        self.data.setdefault('recovery', None)
+        try:
+            self._validate(self.data['selected'])
+        except ValueError:
+            stale = self.data['selected']
+            self.data.update(selected=self.AUTO, pending=None,
+                             recovery={'stale_session': stale, 'at': now()})
+            self._save()
         if not saved:
             self._save()
 
@@ -96,6 +103,7 @@ class OrchestratorSessions:
                     'pending': None,
                     'generation': self.data.get('generation', 0) + 1,
                     'automatic_decision': self.data.get('automatic_decision'),
+                    'recovery': self.data.get('recovery'),
                     'handoff': {'from': previous, 'to': session_id, 'at': now(),
                                 'pending_message_ids': pending},
                 }
@@ -152,6 +160,26 @@ class OrchestratorSessions:
                 pass
         return (settings.get('local_agent') if offline else
                 settings.get('preferred_agent') or settings.get('local_agent'))
+
+    def fallback_agent(self, settings, failed_agent, offline=False, pending_messages=()):
+        pending = self.data.get('pending')
+        if pending and pending.startswith('agent:'):
+            candidate = pending.removeprefix('agent:')
+            if candidate != failed_agent and self.c.agents.get(candidate, {}).get('available'):
+                return candidate
+        if self.c.router.enabled and pending_messages:
+            try:
+                candidate, _ = self.c.router.select_orchestrator(
+                    '\n\n'.join(item['text'] for item in pending_messages),
+                    preferred=settings.get('preferred_agent'), force_offline=offline,
+                    exclude=(failed_agent,))
+                return candidate
+            except ValueError:
+                pass
+        local = settings.get('local_agent')
+        if local != failed_agent and self.c.agents.get(local, {}).get('available'):
+            return local
+        return None
 
     def snapshot(self):
         sessions = [

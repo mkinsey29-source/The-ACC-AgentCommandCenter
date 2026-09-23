@@ -271,6 +271,33 @@ class AgentRouter:
         except RuntimeError as exc:
             return {}, None, 'deterministic_typesafe_error', str(exc)
 
+    def _rank_candidates(self, task, role, candidates, evidence, answer, preferred, required=()):
+        probabilities = answer.get('probabilities', {}) if answer.get('type') == 'choice' else {}
+        confidence = answer.get('confidence') if isinstance(answer.get('confidence'), (int, float)) else None
+        scored = []
+        for agent, profile in candidates:
+            history = evidence.get((agent['id'], role), {})
+            semantic = probabilities.get(agent['id'])
+            lexical = self._lexical_fit(task, profile, required)
+            if not isinstance(semantic, (int, float)) or isinstance(semantic, bool) or not 0 <= semantic <= 1:
+                semantic = lexical
+            elif confidence is not None:
+                semantic = confidence * semantic + (1 - confidence) * lexical
+            reliability = history.get('reliability', .5)
+            acceptance = history.get('acceptance_rate')
+            if acceptance is not None:
+                reliability = (reliability + acceptance) / 2
+            dimensions = {'semantic_fit': semantic, 'quality': profile['quality'],
+                          'reliability': reliability,
+                          'cost_efficiency': profile['cost_efficiency'],
+                          'continuity': 1. if preferred == agent['id'] else .5}
+            score = sum(self.weights[key] * value for key, value in dimensions.items())
+            scored.append({'agent': agent['id'], 'score': round(score, 6),
+                           'dimensions': {key: round(value, 6) for key, value in dimensions.items()},
+                           'samples': history.get('samples', 0)})
+        scored.sort(key=lambda item: (-item['score'], item['agent']))
+        return scored, confidence
+
     def route(self, task, defaults=None, exclude=None):
         """Return a complete workflow specification and an auditable routing record."""
         area, required, risk = self._task_fields(task)
@@ -287,32 +314,8 @@ class AgentRouter:
         rankings, selected, confidences = {}, {}, {}
         for role in ROLES:
             answer = answers.get(role, {})
-            probabilities = answer.get('probabilities', {}) if answer.get('type') == 'choice' else {}
-            confidence = answer.get('confidence') if isinstance(answer.get('confidence'), (int, float)) else None
-            scored = []
-            for agent, profile in pools[role]:
-                history = evidence.get((agent['id'], role), {})
-                semantic = probabilities.get(agent['id'])
-                lexical = self._lexical_fit(task, profile, required)
-                if not isinstance(semantic, (int, float)) or isinstance(semantic, bool) or not 0 <= semantic <= 1:
-                    semantic = lexical
-                elif confidence is not None:
-                    # A diffuse Jev distribution should not overpower declared capabilities
-                    # and measured outcomes. It still contributes without becoming an approval gate.
-                    semantic = confidence * semantic + (1 - confidence) * lexical
-                reliability = history.get('reliability', .5)
-                acceptance = history.get('acceptance_rate')
-                if acceptance is not None:
-                    reliability = (reliability + acceptance) / 2
-                continuity = 1. if defaults.get(role) == agent['id'] else .5
-                dimensions = {'semantic_fit': semantic, 'quality': profile['quality'],
-                              'reliability': reliability,
-                              'cost_efficiency': profile['cost_efficiency'], 'continuity': continuity}
-                score = sum(self.weights[key] * value for key, value in dimensions.items())
-                scored.append({'agent': agent['id'], 'score': round(score, 6),
-                               'dimensions': {k: round(v, 6) for k, v in dimensions.items()},
-                               'samples': history.get('samples', 0)})
-            scored.sort(key=lambda item: (-item['score'], item['agent']))
+            scored, confidence = self._rank_candidates(
+                task, role, pools[role], evidence, answer, defaults.get(role), required)
             if role == 'reviewer' and selected.get('implementer'):
                 scored = [item for item in scored if item['agent'] != selected['implementer']]
                 if not scored:
@@ -331,46 +334,21 @@ class AgentRouter:
                     'policy': 'Automatic assignment; confidence changes evidence weighting, not user approval.'}
         return spec, decision
 
-    def select_orchestrator(self, text, preferred=None, force_offline=False):
+    def select_orchestrator(self, text, preferred=None, force_offline=False, exclude=()):
         """Choose one coordinator-capable adapter for an ACC-owned conversation turn."""
         if not isinstance(text, str) or not text.strip():
             raise ValueError('Automatic orchestrator selection needs pending conversation text.')
         task = {'title': 'Orchestrate conversation', 'instruction': text,
                 'task_area': 'general', 'required_capabilities': [], 'risk': 'medium'}
-        candidates = self._eligible('coordinator', (), (), force_offline)
+        candidates = self._eligible('coordinator', (), exclude, force_offline)
         if not candidates:
             raise ValueError('No eligible available agent can orchestrate this conversation.')
         evidence = self.profiles('general')
         answers, usage, source, error = self._semantic_answers(
             task, {'coordinator': candidates}, evidence)
         answer = answers.get('coordinator', {})
-        probabilities = answer.get('probabilities', {}) if answer.get('type') == 'choice' else {}
-        confidence = answer.get('confidence') if isinstance(answer.get('confidence'), (int, float)) else None
-        ranked = []
-        for agent, profile in candidates:
-            history = evidence.get((agent['id'], 'coordinator'), {})
-            semantic = probabilities.get(agent['id'])
-            lexical = self._lexical_fit(task, profile, ())
-            if not isinstance(semantic, (int, float)) or isinstance(semantic, bool) or not 0 <= semantic <= 1:
-                semantic = lexical
-            elif confidence is not None:
-                semantic = confidence * semantic + (1 - confidence) * lexical
-            reliability = history.get('reliability', .5)
-            acceptance = history.get('acceptance_rate')
-            if acceptance is not None:
-                reliability = (reliability + acceptance) / 2
-            dimensions = {
-                'semantic_fit': semantic,
-                'quality': profile['quality'],
-                'reliability': reliability,
-                'cost_efficiency': profile['cost_efficiency'],
-                'continuity': 1. if preferred == agent['id'] else .5,
-            }
-            score = sum(self.weights[key] * value for key, value in dimensions.items())
-            ranked.append({'agent': agent['id'], 'score': round(score, 6),
-                           'dimensions': {key: round(value, 6) for key, value in dimensions.items()},
-                           'samples': history.get('samples', 0)})
-        ranked.sort(key=lambda item: (-item['score'], item['agent']))
+        ranked, confidence = self._rank_candidates(
+            task, 'coordinator', candidates, evidence, answer, preferred)
         selected = ranked[0]['agent']
         return selected, {
             'at': now(), 'selected': selected, 'source': source, 'confidence': confidence,

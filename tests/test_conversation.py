@@ -171,6 +171,40 @@ class ConversationTests(unittest.TestCase):
         planner = [t for t in self.c.store.tasks() if t.get('internal') == 'conversation'][0]
         self.assertEqual(planner['runs'][0]['agent'], 'local-reviewer')
         self.assertEqual(self.c.orchestrators.snapshot()['selected'], 'agent:local-reviewer')
+        self.assertEqual(self.c.router.profiles()[('local-reviewer', 'coordinator')]['samples'], 1)
+
+    def test_stale_saved_direct_session_recovers_to_automatic(self):
+        with self.c.store.connect() as db:
+            self.c.conversation.put(db, 'orchestrator_sessions', {
+                'selected': 'agent:removed-provider', 'pending': None,
+                'handoff': None, 'generation': 3, 'automatic_decision': None})
+        self.c.close()
+
+        self.c = Coordinator(self.project, self.state, self.config)
+
+        sessions = self.c.orchestrators.snapshot()
+        self.assertEqual(sessions['selected'], 'auto')
+        self.assertEqual(sessions['recovery']['stale_session'], 'agent:removed-provider')
+
+    def test_failed_direct_planner_can_fall_back_to_another_cloud_coordinator(self):
+        self.configure()
+        self.c.router.enabled = True
+        self.c.agents['hermes-coordinator']['routing'] = {
+            'roles': ['coordinator'], 'quality_tier': 3, 'cost_tier': 3}
+        self.c.agents['reviewer']['routing'] = {
+            'roles': ['coordinator'], 'quality_tier': 5, 'cost_tier': 1}
+        self.c.agents['local-coordinator']['routing'] = {
+            'roles': ['coordinator'], 'quality_tier': 1, 'cost_tier': 5}
+        for agent_id in ('builder', 'local-builder', 'local-reviewer'):
+            self.c.agents[agent_id]['routing'] = {'roles': ['implementer']}
+        self.c.orchestrators.select({'session_id': 'agent:hermes-coordinator'})
+
+        self.append('idea offline: first direct planner should fail')
+
+        eventually(lambda: self.c.conversation.state()['pending'] == 0, timeout=8)
+        planner = [t for t in self.c.store.tasks() if t.get('internal') == 'conversation'][0]
+        self.assertEqual([run['agent'] for run in planner['runs']],
+                         ['hermes-coordinator', 'reviewer'])
 
     def test_automatic_session_routes_the_planner_and_records_decision(self):
         self.configure()
