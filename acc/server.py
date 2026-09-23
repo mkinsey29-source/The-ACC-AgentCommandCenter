@@ -138,6 +138,8 @@ class Handler(BaseHTTPRequestHandler):
                 if parts[2] not in routes:
                     return self.reply(404, {'error': 'Unknown conversation operation.'})
                 return self.reply(200, routes[parts[2]](payload))
+            if parts == ['api', 'orchestrators', 'select']:
+                return self.reply(200, c.orchestrators.select(payload))
             if len(parts) == 3 and parts[:2] == ['api', 'github']:
                 routes = {'configure': c.github.configure, 'refresh': lambda _: c.github.refresh()}
                 if parts[2] not in routes:

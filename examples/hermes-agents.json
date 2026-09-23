@@ -10,19 +10,19 @@
     },
     {
       "id": "deepseek",
-      "name": "DeepSeek implementation",
+      "name": "DeepSeek",
       "driver": "hermes",
       "profile": "acc-deepseek",
       "local": false,
-      "routing": {"roles": ["implementer"], "quality_tier": 4, "cost_tier": 2}
+      "routing": {"roles": ["implementer", "coordinator"], "quality_tier": 4, "cost_tier": 2}
     },
     {
       "id": "claude",
-      "name": "Claude review",
+      "name": "Claude",
       "driver": "hermes",
       "profile": "acc-claude",
       "local": false,
-      "routing": {"roles": ["reviewer"], "quality_tier": 5, "cost_tier": 5}
+      "routing": {"roles": ["reviewer", "coordinator"], "quality_tier": 5, "cost_tier": 5}
     },
     {
       "id": "hermes-coordinator",
@@ -54,6 +54,9 @@
     "confidence_threshold": 0.55,
     "max_failures": 3,
     "typesafe": {"api_key_env": "TYPESAFE_API_KEY", "model": "jev-latest"}
+  },
+  "orchestrators": {
+    "selected": "chatgpt-remote"
   },
   "conversation": {
     "enabled": true,

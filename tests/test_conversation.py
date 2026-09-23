@@ -121,6 +121,103 @@ class ConversationTests(unittest.TestCase):
         self.c.conversation.complete(self.result(newer,actions=[action]))
         self.assertEqual(self.c.store.get(task['id'])['revision'],2)
 
+    def test_switching_orchestrator_sessions_fences_old_owner_and_preserves_handoff(self):
+        self.configure(enabled=False)
+        self.append('Please keep this exact request')
+        claim = self.c.conversation.claim({'owner': 'ChatGPT Remote',
+                                           'session_id': 'chatgpt-remote'})
+
+        switched = self.c.orchestrators.select({'session_id': 'agent:local-coordinator'})
+
+        self.assertEqual(switched['selected'], 'agent:local-coordinator')
+        self.assertEqual(switched['handoff']['from'], 'chatgpt-remote')
+        self.assertEqual(switched['handoff']['to'], 'agent:local-coordinator')
+        self.assertEqual(switched['handoff']['pending_message_ids'], ['message-1'])
+        self.assertEqual(self.c.conversation.state()['pending'], 1)
+        with self.assertRaises(Conflict):
+            self.c.conversation.complete(self.result(claim))
+
+    def test_reselecting_active_session_is_idempotent(self):
+        self.configure(enabled=False)
+        self.c.orchestrators.select({'session_id': 'chatgpt-remote'})
+        self.append()
+        claim = self.c.conversation.claim({'owner': 'ChatGPT Remote',
+                                           'session_id': 'chatgpt-remote'})
+
+        selected = self.c.orchestrators.select({'session_id': 'chatgpt-remote'})
+
+        self.assertEqual(selected['active'], 'chatgpt-remote')
+        self.c.conversation.complete(self.result(claim, intent='discussion', actions=[]))
+
+    def test_pinning_current_auto_owner_changes_preference_without_fencing_it(self):
+        self.configure(enabled=False)
+        self.append()
+        claim = self.c.conversation.claim({'owner': 'ChatGPT Remote',
+                                           'session_id': 'chatgpt-remote'})
+
+        selected = self.c.orchestrators.select({'session_id': 'chatgpt-remote'})
+
+        self.assertEqual(selected['selected'], 'chatgpt-remote')
+        self.assertEqual(selected['active'], 'chatgpt-remote')
+        self.c.conversation.complete(self.result(claim, intent='discussion', actions=[]))
+
+    def test_selected_direct_session_handles_next_turn_with_its_adapter(self):
+        self.configure()
+        self.c.orchestrators.select({'session_id': 'agent:local-reviewer'})
+
+        self.append('idea: preserve the same durable conversation')
+
+        eventually(lambda: self.c.conversation.state()['pending'] == 0, timeout=8)
+        planner = [t for t in self.c.store.tasks() if t.get('internal') == 'conversation'][0]
+        self.assertEqual(planner['runs'][0]['agent'], 'local-reviewer')
+        self.assertEqual(self.c.orchestrators.snapshot()['selected'], 'agent:local-reviewer')
+
+    def test_automatic_session_routes_the_planner_and_records_decision(self):
+        self.configure()
+
+        class Choice:
+            def configured(inner_self): return True
+            def evaluate(inner_self, state, questions):
+                return {'answers': {'coordinator': {'type': 'choice',
+                    'choice': 'local-reviewer',
+                    'probabilities': {key: (1. if key == 'local-reviewer' else 0.)
+                                      for key in questions['coordinator']['criteria']},
+                    'confidence': 1.}}}
+
+        self.c.router.enabled = True
+        self.c.router.evaluator = Choice()
+        self.append('idea: choose the strongest planner for this turn')
+
+        eventually(lambda: self.c.conversation.state()['pending'] == 0, timeout=8)
+        planner = [t for t in self.c.store.tasks() if t.get('internal') == 'conversation'][0]
+        self.assertEqual(planner['runs'][0]['agent'], 'local-reviewer')
+        self.assertEqual(self.c.orchestrators.snapshot()['automatic_decision']['selected'],
+                         'local-reviewer')
+
+    def test_switch_during_direct_turn_queues_safe_handoff_then_activates(self):
+        self.configure()
+        self.append('idea slow: finish this decision before handoff')
+        eventually(lambda: self.c.running_task is not None)
+
+        requested = self.c.orchestrators.select({'session_id': 'agent:local-reviewer'})
+
+        self.assertEqual(requested['pending'], 'agent:local-reviewer')
+        eventually(lambda: self.c.conversation.state()['pending'] == 0, timeout=8)
+        eventually(lambda: self.c.orchestrators.snapshot()['selected'] == 'agent:local-reviewer')
+        self.assertIsNone(self.c.orchestrators.snapshot()['pending'])
+
+    def test_queued_session_switch_survives_failed_outgoing_planner(self):
+        self.configure()
+        self.append('idea slow mutate: outgoing planner fails')
+        eventually(lambda: self.c.running_task is not None)
+        self.c.orchestrators.select({'session_id': 'agent:local-reviewer'})
+
+        eventually(lambda: bool(self.c.conversation.state()['held']), timeout=8)
+
+        self.assertEqual(self.c.orchestrators.snapshot()['selected'], 'agent:local-reviewer')
+        self.assertIsNone(self.c.orchestrators.snapshot()['pending'])
+        self.assertEqual(self.c.conversation.state()['pending'], 1)
+
     def test_claim_prevents_background_and_manual_runner_start(self):
         self.configure();claim=self.claim();self.append()
         time.sleep(.6)
@@ -190,7 +287,11 @@ class ConversationTests(unittest.TestCase):
             self.assertFalse(response['isError'],response)
             return json.loads(response['content'][0]['text'])
         try:
-            claim=call('acc_conversation_claim',{'owner':'ChatGPT remote fixture'})
+            selected=call('acc_orchestrator_select',{'session_id':'chatgpt-remote'})
+            self.assertEqual(selected['selected'],'chatgpt-remote')
+            claim=call('acc_conversation_claim',{'owner':'ChatGPT remote fixture',
+                                                 'session_id':'chatgpt-remote'})
+            self.assertEqual(claim['context']['orchestrator']['selected'],'chatgpt-remote')
             call('acc_conversation_send',{'id':'message-1','text':'idea: keep this exact wording'})
             call('acc_conversation_renew',{'token':claim['token']})
             call('acc_conversation_complete',self.result(claim,intent='discussion',actions=[],reply='Saved your idea.'))

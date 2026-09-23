@@ -331,6 +331,54 @@ class AgentRouter:
                     'policy': 'Automatic assignment; confidence changes evidence weighting, not user approval.'}
         return spec, decision
 
+    def select_orchestrator(self, text, preferred=None, force_offline=False):
+        """Choose one coordinator-capable adapter for an ACC-owned conversation turn."""
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError('Automatic orchestrator selection needs pending conversation text.')
+        task = {'title': 'Orchestrate conversation', 'instruction': text,
+                'task_area': 'general', 'required_capabilities': [], 'risk': 'medium'}
+        candidates = self._eligible('coordinator', (), (), force_offline)
+        if not candidates:
+            raise ValueError('No eligible available agent can orchestrate this conversation.')
+        evidence = self.profiles('general')
+        answers, usage, source, error = self._semantic_answers(
+            task, {'coordinator': candidates}, evidence)
+        answer = answers.get('coordinator', {})
+        probabilities = answer.get('probabilities', {}) if answer.get('type') == 'choice' else {}
+        confidence = answer.get('confidence') if isinstance(answer.get('confidence'), (int, float)) else None
+        ranked = []
+        for agent, profile in candidates:
+            history = evidence.get((agent['id'], 'coordinator'), {})
+            semantic = probabilities.get(agent['id'])
+            lexical = self._lexical_fit(task, profile, ())
+            if not isinstance(semantic, (int, float)) or isinstance(semantic, bool) or not 0 <= semantic <= 1:
+                semantic = lexical
+            elif confidence is not None:
+                semantic = confidence * semantic + (1 - confidence) * lexical
+            reliability = history.get('reliability', .5)
+            acceptance = history.get('acceptance_rate')
+            if acceptance is not None:
+                reliability = (reliability + acceptance) / 2
+            dimensions = {
+                'semantic_fit': semantic,
+                'quality': profile['quality'],
+                'reliability': reliability,
+                'cost_efficiency': profile['cost_efficiency'],
+                'continuity': 1. if preferred == agent['id'] else .5,
+            }
+            score = sum(self.weights[key] * value for key, value in dimensions.items())
+            ranked.append({'agent': agent['id'], 'score': round(score, 6),
+                           'dimensions': {key: round(value, 6) for key, value in dimensions.items()},
+                           'samples': history.get('samples', 0)})
+        ranked.sort(key=lambda item: (-item['score'], item['agent']))
+        selected = ranked[0]['agent']
+        return selected, {
+            'at': now(), 'selected': selected, 'source': source, 'confidence': confidence,
+            'low_confidence': confidence is not None and confidence < self.confidence_threshold,
+            'rankings': ranked, 'usage': usage, 'error': error,
+            'policy': 'Automatic orchestrator selection; explicit session choices bypass this judgment.',
+        }
+
     def reroute(self, task, role, reason, failed_agent=None):
         workflow = task['workflow']
         failures = workflow.setdefault('route_failures', [])

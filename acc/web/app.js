@@ -244,8 +244,14 @@ function modelOptions(selected, localOnly=false, emptyLabel='None'){
 }
 function renderConversation(){
   const c=state.conversation;if(!c)return;
+  const sessions=state.orchestrators||{selected:'auto',pending:null,sessions:[]};
+  const sessionSelect=$('orchestrator-session');
+  if(document.activeElement!==sessionSelect){
+    sessionSelect.innerHTML=sessions.sessions.map(s=>`<option value="${escapeHTML(s.id)}" ${s.id===sessions.selected?'selected':''} ${!s.available?'disabled':''}>${escapeHTML(s.name)}${s.available?'':' · not configured'}</option>`).join('');
+  }
   const owner=c.owner?.owner;
-  $('orchestrator-status').textContent=c.held ? 'Needs attention: '+c.held : owner ? `${name(owner)} is handling your messages.` : c.pending ? `${c.pending} saved message(s) waiting for an orchestrator.` : 'Ready for your next message. Ideas remain discussion; requested work appears in the work plan.';
+  const switchNote=sessions.pending?` Switch to ${sessions.sessions.find(s=>s.id===sessions.pending)?.name||sessions.pending} queued after this decision.`:'';
+  $('orchestrator-status').textContent=(c.held ? 'Needs attention: '+c.held : owner ? `${name(owner)} is handling your messages.` : c.pending ? `${c.pending} saved message(s) waiting for an orchestrator.` : 'Ready for your next message. Ideas remain discussion; requested work appears in the work plan.')+switchNote;
   const box=$('messages'), nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
   for(const m of c.messages)messageHistory.set(m.id,m);
   const html=[...messageHistory.values()].sort((a,b)=>a.seq-b.seq).map(m=>`<article class="message ${m.role}"><small>${m.role==='user'?'You':escapeHTML(name(m.source))} · ${new Date(m.at*1000).toLocaleTimeString()}${m.status==='pending'?' · saved, waiting':''}</small><div>${escapeHTML(m.text)}</div>${m.data?.task_ids?.length?`<small>Linked tasks: ${m.data.task_ids.map(id=>{const task=state.tasks.find(t=>t.id===id);return `<button class="task-link" data-task="${escapeHTML(id)}">${task?escapeHTML(taskLabel(task)+': '+task.title):escapeHTML(id)}</button>`;}).join(' ')}</small>`:''}</article>`).join('');
@@ -261,6 +267,7 @@ function renderConversation(){
     $('routing-fields').innerHTML=`<p class="muted">Autonomous routing: ${router.enabled?'on':'off'} · TypeSafe Jev: ${router.typesafe_configured?'ready':'deterministic fallback'} · no operator assignment approval</p><label>Preferred online orchestrator<select name="preferred_agent">${modelOptions(s.preferred_agent,false,'External session or local agent')}</select></label><label>Always-available local agent<select name="local_agent">${modelOptions(s.local_agent,true,'Save for later until configured')}</select></label><label>Connection preference<select name="mode"><option value="online" ${s.mode!=='offline'?'selected':''}>Try online, fall back locally</option><option value="offline" ${s.mode==='offline'?'selected':''}>Local only</option></select></label><label><span><input type="checkbox" name="enabled" ${s.enabled!==false?'checked':''}> Handle saved messages automatically</span></label><p class="muted">${router.enabled?'Continuity defaults; the router may select stronger matches':'Default assignments for work requested in conversation'}</p>`+['implementer','reviewer','coordinator'].map(role=>`<label>${role}<select name="${role}">${modelOptions(w[role])}</select></label><label>Local ${role}<select name="fallback_${role}">${modelOptions(w.fallbacks?.[role],true)}</select></label>`).join('');
   }
 }
+$('orchestrator-session').onchange=async e=>{try{await api('orchestrators/select',{session_id:e.target.value});error('');await refresh();}catch(err){error(err.message);await refresh();}};
 $('messages').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;render();$('detail').scrollIntoView({behavior:'smooth'});}};
 $('background-runs').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;renderDetail();$('detail').scrollIntoView({behavior:'smooth'});}};
 $('routing-form').oninput=()=>{routingDirty=true;};

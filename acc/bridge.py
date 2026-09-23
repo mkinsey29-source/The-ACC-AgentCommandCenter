@@ -41,7 +41,7 @@ CONVERSATION_TOOLS = [
     ('acc_conversation_send', "Save the user's exact words with a stable id. Retry with the same id to avoid duplication. Claim before sending a remote request, then renew to capture it.",
      {'id': {'type': 'string'}, 'text': {'type': 'string'}, 'source': {'type': 'string'}}, ['id', 'text']),
     ('acc_conversation_claim', 'Reserve the next conversation decision for this orchestrator for 120 seconds. Returns shared history, pending requests, tasks, and result contract. Never start another writer during the lease.',
-     {'owner': {'type': 'string'}}, ['owner']),
+     {'owner': {'type': 'string'}, 'session_id': {'type': 'string'}}, ['owner']),
     ('acc_conversation_renew', 'Extend your lease by 120 seconds and refresh the pending message batch. Renew while reasoning; expired owners cannot commit.',
      {'token': {'type': 'string'}}, ['token']),
     ('acc_conversation_complete', 'Atomically save your reply and a dependency-aware task decomposition, route agents automatically, mark captured messages handled, and release ownership. Retrying the identical result is idempotent.',
@@ -60,6 +60,8 @@ CONVERSATION_TOOLS = [
      ['token', 'reply', 'intent', 'actions']),
     ('acc_conversation_release', 'Release your external lease without consuming pending messages.', {'token': {'type': 'string'}}, ['token']),
     ('acc_conversation_retry', 'Retry retained messages after inspecting a held conversation. Does not bypass interrupted process recovery.', {}, []),
+    ('acc_orchestrator_select', 'Switch the ACC conversation to Automatic, ChatGPT Remote, or a configured direct model session. An external owner is fenced immediately; an active supervised direct turn hands off at its safe boundary.',
+     {'session_id': {'type': 'string'}}, ['session_id']),
 ]
 TOOLS.extend(CONVERSATION_TOOLS)
 TOOLS.extend([
@@ -131,7 +133,7 @@ def dispatch(message, url, token):
         supported = ('2024-11-05', '2025-03-26', '2025-06-18')
         requested = message.get('params', {}).get('protocolVersion')
         return result({'protocolVersion': requested if requested in supported else supported[-1],
-                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.7.0'}})
+                       'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.8.0'}})
     if method == 'ping':
         return result({})
     if method == 'tools/list':
@@ -155,6 +157,8 @@ def dispatch(message, url, token):
             path, data = '/api/conversation?after=' + str(after), None
         elif name.startswith('acc_conversation_'):
             path, data = '/api/conversation/' + name.removeprefix('acc_conversation_'), args
+        elif name == 'acc_orchestrator_select':
+            path, data = '/api/orchestrators/select', args
         elif name.startswith('acc_github_'):
             path, data = '/api/github/' + name.removeprefix('acc_github_'), args
         elif name == 'acc_set_project_mode':

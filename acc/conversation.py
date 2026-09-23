@@ -112,13 +112,14 @@ class Conversation:
         if not isinstance(owner, str) or not owner.strip() or len(owner) > 100:
             raise ValueError('Provide an orchestrator name.')
         with self.c.lock:
+            session_id = self.c.orchestrators.authorize_external(payload.get('session_id'))
             lease = self._expire()
             if lease:
                 raise Conflict('A conversation turn already belongs to ' + lease['owner'] + '. Renew it or wait for its handoff.')
             if self.c.running_task or self.c.recovery_required or self.c.github.busy:
                 raise Conflict('Wait for the current runner to finish or recover before claiming orchestration.')
             lease = {'token': identifier(), 'kind': 'external', 'owner': owner, 'expires': now() + 120,
-                     'message_ids': [], 'offline': False}
+                     'message_ids': [], 'offline': False, 'session_id': session_id}
             lease['message_ids'] = [m['id'] for m in self.context(lease)['pending']]
             with self.c.store.connect() as db:
                 self.put(db, 'conversation_lease', lease)
@@ -159,7 +160,11 @@ class Conversation:
             rows = db.execute("SELECT * FROM messages WHERE status='pending' ORDER BY seq LIMIT 10").fetchall()
         pending = [dict(r, data=json.loads(r['data'])) for r in rows]
         history = self.state()['messages']
+        orchestrator = self.c.orchestrators.snapshot()
+        orchestrator = {key: orchestrator.get(key) for key in
+                        ('selected', 'active', 'pending', 'generation', 'handoff')}
         return {'pending': pending, 'recent_history': history,
+                'orchestrator': orchestrator,
                 'tasks': [{k: t.get(k) for k in ('id', 'task_number', 'task_kind', 'parent_task_id',
                           'parent_task_number', 'title', 'instruction', 'revision', 'status', 'activity',
                           'next_step', 'review', 'source_ids', 'task_area', 'required_capabilities',
@@ -318,6 +323,7 @@ class Conversation:
                     db.execute('INSERT OR REPLACE INTO tasks VALUES (?,?)', (internal_task['id'], json.dumps(internal_task)))
                 self.put(db, 'conversation_lease', None)
                 self.put(db, 'conversation_held', '')
+                self.c.orchestrators.complete_pending(db)
                 db.execute('INSERT INTO conversation_receipts VALUES (?,?,?)', (token, serialized, json.dumps(response)))
                 self.event(db, 'conversation_replied', {'message': reply, 'task_ids': response['task_ids']})
             self.c.workflows.wake.set()
@@ -358,7 +364,13 @@ class Conversation:
         project_offline = self.c.controls.mode() == 'offline'
         preferred = self.settings.get('preferred_agent') if self.settings.get('mode', 'online') == 'online' and not project_offline else None
         local = self.settings.get('local_agent')
-        agent = preferred if preferred and self.c.agents[preferred]['available'] else local
+        with self.c.store.connect() as db:
+            pending_messages = [dict(row) for row in db.execute(
+                "SELECT id,text FROM messages WHERE status='pending' ORDER BY seq LIMIT 10")]
+        agent = self.c.orchestrators.chosen_agent(
+            self.settings, project_offline or self.settings.get('mode') == 'offline', pending_messages)
+        if agent and (agent not in self.c.agents or not self.c.agents[agent]['available']):
+            agent = local if local and self.c.agents[local]['available'] else None
         if not agent or not self.c.agents[agent]['available']:
             return False  # Messages stay saved until a host adapter or external session is available.
         task = self.c.build_task({'title': 'Respond to conversation', 'instruction': 'Read conversation packet and propose the requested next steps.', 'agent': agent, 'timeout_seconds': 180})
@@ -404,6 +416,7 @@ class Conversation:
         with self.c.store.connect() as db:
             self.put(db, 'conversation_lease', None)
             self.put(db, 'conversation_held', reason)
+            self.c.orchestrators.complete_pending(db)
             db.execute('INSERT OR REPLACE INTO tasks VALUES (?,?)', (task['id'], json.dumps(task)))
             self.event(db, 'conversation_held', {'message': reason})
 

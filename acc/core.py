@@ -466,6 +466,8 @@ class Coordinator:
         self.workflows = Workflows(self)
         from .conversation import Conversation
         self.conversation = Conversation(self, settings.get('conversation'), settings.get('transcription'))
+        from .orchestrators import OrchestratorSessions
+        self.orchestrators = OrchestratorSessions(self, settings.get('orchestrators'))
         from .voice import Voice
         self.voice = Voice(self, settings.get('transcription'))
         from .controls import Controls
@@ -492,6 +494,7 @@ class Coordinator:
             return {'project': str(self.project), 'project_mode': self.controls.mode(),
                     'tasks': [t for t in self.store.tasks() if not t.get('internal')],
                     'conversation': self.conversation.state(), 'github': self.github.snapshot(),
+                    'orchestrators': self.orchestrators.snapshot(),
                     'integrations': self.integrations.snapshot(),
                     'routing': self.router.snapshot(),
                     'agents': self.public_agents(), 'git': self.git, 'cursor': seq,
@@ -499,7 +502,8 @@ class Coordinator:
                     'recovery_required': self.recovery_required,
                     'capabilities': {'github': True, 'switch_after_step': True, 'automatic_offline': bool(self.conversation.settings.get('local_agent')), 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True,
                                      'integration_jobs': True, 'shared_memory': True, 'fenced_job_leases': True,
-                                     'autonomous_routing': self.router.enabled}}
+                                     'autonomous_routing': self.router.enabled,
+                                     'orchestrator_sessions': True}}
 
     def build_task(self, payload):
         title, instruction = payload.get('title', '').strip(), payload.get('instruction', '').strip()

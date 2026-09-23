@@ -4,7 +4,7 @@
 
 A local project window for instructions, agent assignments, live worker output, local Git changes, and review records. Windows and Linux are the intended targets; this first implementation was exercised on Linux.
 
-**v0.7 adds autonomous, evidence-backed agent routing.** A project request can become a validated dependency graph; ACC selects implementation, review, and coordination agents, records task-area outcomes/costs, and replaces failed workers without asking for task-view approval. TypeSafe Jev can add semantic-fit probabilities, with deterministic continuation when it is unavailable or uncertain. See [autonomous routing](docs/AUTONOMOUS-ROUTING.md).
+**v0.8 adds switchable orchestrator sessions.** The conversation header can select ChatGPT Remote, a coordinator-capable Claude/DeepSeek/other direct adapter, or Automatic. Switching fences an external owner immediately or waits for an active supervised decision boundary, then transfers durable history and task state. Automatic selection combines TypeSafe Jev Choice probabilities with measured reliability, cost, quality, and continuity; deterministic routing remains available without Jev.
 
 The durable provider queue and reviewed shared project memory remain available. DeepSeek Harness, Muse Spark Contributor, Gemini/Nano Banana, Agent 3D Studio (img2threejs), Aura, TypeSafe Jev, RunPod, Blender, and Unity are represented by capability-based provider profiles. Muse Contributor jobs are limited to public data in an isolated repository. Credentials and provider-specific executors remain external to ACC.
 
@@ -92,7 +92,7 @@ Run the bridge as an MCP stdio server in your host's configuration:
 
 This is the server command description; the outer configuration shape is host-specific. For Windows, use `py` with `-3` before `-m`. The actual state/token path is printed by the coordinator. Start the coordinator before the bridge. Do not commit the token.
 
-Conversation tools include `acc_conversation_read`, `acc_conversation_send`, `acc_conversation_claim`, `acc_conversation_renew`, `acc_conversation_complete`, `acc_conversation_release`, and `acc_conversation_retry`.
+Conversation tools include `acc_conversation_read`, `acc_conversation_send`, `acc_conversation_claim`, `acc_conversation_renew`, `acc_conversation_complete`, `acc_conversation_release`, `acc_conversation_retry`, and `acc_orchestrator_select`.
 
 Additional tools: `acc_switch_agent`, `acc_schedule_task`, `acc_github_refresh`, `acc_github_configure`, `acc_publish_preview`, and `acc_publish_task`.
 

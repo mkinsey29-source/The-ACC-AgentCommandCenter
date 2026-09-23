@@ -2,6 +2,18 @@
 
 ACC 0.3 makes natural language the primary input. Technical task creation remains available under **Advanced task controls**. The same saved conversation can be handled by a desktop orchestrator through MCP, a configured online command adapter, or a local adapter.
 
+## Orchestrator sessions
+
+The conversation header selects one orchestration session:
+
+- **ChatGPT Remote** uses the persistent ChatGPT project chat on the connected desktop host. The phone opens that same native conversation through Remote; ACC does not create a second phone channel.
+- **Direct sessions** run a configured coordinator-capable adapter such as Claude or DeepSeek inside ACC's supervised conversation runner.
+- **Automatic** ranks eligible coordinator adapters using the same recorded quality, reliability, cost, and continuity evidence used elsewhere. When configured, TypeSafe Jev adds a typed Choice distribution; code retains the final policy and deterministic fallback.
+
+The native ChatGPT transcript and an ACC Direct transcript are not the same provider session. They share ACC's durable messages, task ledger, results, and handoff envelope. An idle switch is immediate. Switching away from an active external lease fences its old token; switching during a supervised direct turn queues the handoff until that decision reaches its process boundary. Running implementation or review workers are not cancelled merely because the orchestrator changes.
+
+Only adapters whose routing roles include `coordinator` appear as Direct sessions. A failed direct planner may use the configured fallback and the next turn retries the selected session. Full takeover when the entire desktop host is offline still requires ACC state and repository access on an always-on or cloud host.
+
 ## Everyday operation
 
 1. Speak through ChatGPT Remote as usual. Its connected desktop session uses the local ACC MCP bridge. ACC does not add another phone connection.
@@ -39,6 +51,7 @@ Use the stdio bridge already described in `HERMES-CONNECTOR.md`. The desktop hos
 | Refresh/keep ownership | `acc_conversation_renew` | Captures new pending messages and extends the lease by 120 seconds |
 | Commit the decision | `acc_conversation_complete` | Reply, requested tasks, consumed messages, and receipt saved atomically |
 | Yield without a decision | `acc_conversation_release` | Messages remain pending for the next owner |
+| Switch session | `acc_orchestrator_select` | Select Automatic, ChatGPT Remote, or `agent:<id>` and create a fenced handoff |
 
 Claim before saving a new remote instruction, then renew to include it in the captured batch. Renew while reasoning. The result must follow the contract returned in context; create/revise actions cite the pending user message IDs. Task revision actions also include the current revision. A completed result can be retried unchanged using the same token; ACC returns its receipt without creating tasks again. A different result for that token, an expired token, or an outdated task revision is rejected.
 

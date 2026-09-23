@@ -110,6 +110,32 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(spec['reviewer'], 'reviewer')
         self.assertEqual(spec['coordinator'], 'coordinator')
 
+    def test_direct_orchestrator_session_rejects_worker_only_adapter(self):
+        with self.assertRaises(ValueError):
+            self.c.orchestrators.select({'session_id': 'agent:python-cheap'})
+
+    def test_automatic_orchestrator_selection_uses_typed_choice_as_one_signal(self):
+        self.c.agents['python-premium']['routing']['roles'].append('coordinator')
+
+        class CoordinatorChoice:
+            def configured(inner_self):
+                return True
+
+            def evaluate(inner_self, state, questions):
+                self.assertEqual(set(questions), {'coordinator'})
+                return {'answers': {'coordinator': {
+                    'type': 'choice', 'choice': 'python-premium',
+                    'probabilities': {'coordinator': .01, 'python-premium': .99},
+                    'confidence': .99}}, 'usage': {'input_tokens': 8, 'output_tokens': 2}}
+
+        self.c.router.evaluator = CoordinatorChoice()
+        agent, decision = self.c.router.select_orchestrator(
+            'Plan a difficult Python system', preferred='coordinator')
+
+        self.assertEqual(agent, 'python-premium')
+        self.assertEqual(decision['source'], 'typesafe_jev')
+        self.assertEqual(decision['selected'], 'python-premium')
+
 
 class AutonomousReplacementTests(unittest.TestCase):
     def setUp(self):

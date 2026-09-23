@@ -7,7 +7,7 @@
 <div id="error" role="alert" hidden></div>
 <div class="context"><span id="branch">Local Git</span><span>Local commands stream directly</span><span id="git-status">GitHub: checking connection</span><span id="counts"></span></div>
 <section class="conversation-panel">
- <div class="section-title"><div><h1>Conversation</h1><p id="orchestrator-status" class="muted">Your instructions and decisions, in one place.</p></div><button id="retry-conversation" hidden>Retry saved messages</button></div>
+ <div class="section-title"><div><h1>Conversation</h1><p id="orchestrator-status" class="muted">Your instructions and decisions, in one place.</p></div><div class="orchestrator-controls"><label>Orchestrator session<select id="orchestrator-session"></select></label><button id="retry-conversation" hidden>Retry saved messages</button></div></div>
  <div id="messages" class="messages" aria-live="polite"><p class="muted">Tell your orchestrator what you want to do, or save an idea for later.</p></div>
  <button id="load-history" type="button">Load earlier conversation</button>
  <div id="outbox-status" class="muted" role="status"></div>
@@ -33,7 +33,7 @@
  <aside id="detail"><div class="empty"><h2>Your instructions, clearly tracked.</h2><p>Send a message above or through the orchestrator bridge. Select it to inspect instructions, assignment, output, and evidence.</p></div></aside>
 </main>
 <section class="feed"><div class="section-title"><h2>Activity</h2><span class="muted">Observed operations and attributed reports</span></div><div id="events"><p class="muted">No events loaded.</p></div></section>
-<footer><span>ACC 0.7 · Project command center</span><span>Autonomous routing · Internal review · Durable evidence</span></footer>
+<footer><span>ACC 0.8 · Project command center</span><span>Switchable orchestrator sessions · Autonomous routing · Durable evidence</span></footer>
 <dialog id="publish-dialog"><div id="publish-content"></div><div class="actions"><button id="publish-confirm" class="primary">Publish to GitHub</button><button id="publish-close">Close</button></div></dialog>
 <dialog id="task-dialog"><form id="task-form"><div class="section-title"><h2>New task</h2><button type="button" id="close-dialog" aria-label="Close">×</button></div><p id="task-error" role="alert" hidden></p><label>Task title<input name="title" required maxlength="200" placeholder="Verify specialist staffing"></label><label>Your instruction<textarea name="instruction" required rows="5" placeholder="What should be done, preserved, and checked?"></textarea></label><label>Assigned worker<select name="agent" id="new-agent"></select></label><label id="argv-label">Command arguments (JSON array)<textarea name="argv" rows="3" placeholder='["python", "-m", "unittest", "discover", "-s", "tests"]'></textarea></label><p class="muted">Local command executes the exact argument list in this project folder. It does not call an AI model. Creating a task does not start it.</p><button class="primary">Create task</button></form></dialog>
 </body></html>
