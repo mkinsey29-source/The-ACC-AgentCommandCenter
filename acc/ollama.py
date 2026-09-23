@@ -54,7 +54,7 @@ def run(args):
     prompt = worker_prompt.build(packet)
     (packet_path.with_name('ollama-query.txt')).write_text(prompt, encoding='utf-8')
     content = _chat(args.host, args.model, prompt, args.timeout_seconds)
-    if not (packet.get('workflow') or packet.get('conversation')):
+    if not (packet.get('workflow') or packet.get('conversation') or packet.get('knowledge')):
         return 0
     result = worker_prompt.extract_json_object(content)
     if not isinstance(result, dict):

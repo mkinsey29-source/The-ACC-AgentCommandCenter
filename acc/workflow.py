@@ -119,7 +119,10 @@ class Workflows:
                     'common': 'Return a JSON object with task_id, run_id, revision, snapshot_id, summary.',
                     'implement': 'Include checks: array of actual checks and results; do not claim review approval.',
                     'review': 'Include verdict: approve or changes_requested, findings: array, checks: array. Review original requirements against snapshot; do not edit project or snapshot.',
-                    'coordinate': 'Include action from allowed_actions. Interpret reports; do not edit code, run workers directly, or claim acceptance without approving review.'}}
+                    'coordinate': 'Include action from allowed_actions. Interpret reports; do not edit code, run workers directly, or claim acceptance without approving review.',
+                    'knowledge': ('When packet.knowledge is present, include knowledge with arrays: learnings, issues, '
+                                  'solutions, loops, decisions, corrections, evidence. Use empty arrays when nothing '
+                                  'occurred; never invent a learning.') if self.c.knowledge.enabled else None}}
 
     def hold(self, task, message):
         task['workflow'].update(enabled=False, phase='held')
@@ -189,6 +192,7 @@ class Workflows:
             snapshots.verify(w['snapshot'], self.c.project)
         if stage in ('implement', 'review') and not isinstance(result.get('checks'), list):
             raise ValueError('Worker result must list actual checks (an empty list means none).')
+        self.c.knowledge.capture_result(task, result, stage, task['runs'][-1]['agent'])
         role = {'implement': 'implementer', 'review': 'reviewer', 'coordinate': 'coordinator'}[stage]
         c.router.record_outcome(task, role, True,
                                 accepted=(result.get('verdict') == 'approve') if stage == 'review' else None,
@@ -289,7 +293,9 @@ class Workflows:
         result = {'task_id': task['id'], 'run_id': task['run_id'], 'revision': task['revision'],
                   'snapshot_id': None, 'summary': summary,
                   'checks': [{'artifact': a['uri'], 'kind': a['kind'], 'sha256': a['sha256']}
-                             for a in artifacts], 'artifacts': artifacts}
+                             for a in artifacts], 'artifacts': artifacts,
+                  'knowledge': (job.get('result') or {}).get('knowledge')}
+        self.c.knowledge.capture_result(task, result, 'implement', task['active_agent'])
         self.c.router.record_outcome(task, 'implementer', True, cost=job.get('cost'))
         w['history'].append({'stage': 'implement', 'agent': task['active_agent'], 'at': now(), 'result': result})
         w['snapshot'] = snapshots.freeze(self.c.project, Path(self.c.state) / 'runs' / task['run_id'] / 'snapshot')

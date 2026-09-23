@@ -1,0 +1,16 @@
+{
+  "knowledge": {
+    "enabled": true,
+    "vault": {
+      "id": "acc-command-center",
+      "path": "/replace/with/an/absolute/Obsidian/vault/path",
+      "create": false
+    },
+    "embeddings": {
+      "provider": "ollama",
+      "host": "http://127.0.0.1:11434",
+      "model": "embeddinggemma",
+      "timeout_seconds": 30
+    }
+  }
+}

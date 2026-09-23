@@ -87,7 +87,7 @@ def run(args):
     # code in isolation.
     if not isinstance(text, str) or not text.strip():
         raise ValueError('Grok Build reported success but returned no text content.')
-    if not (packet.get('workflow') or packet.get('conversation')):
+    if not (packet.get('workflow') or packet.get('conversation') or packet.get('knowledge')):
         return 0
     result = worker_prompt.extract_json_object(text)
     if not isinstance(result, dict):

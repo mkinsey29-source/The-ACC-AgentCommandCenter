@@ -16,10 +16,19 @@ INSTRUCTIONS = (
     'Coordinators interpret the supplied reports and propose exactly one allowed action.\n'
     'Do not start other ACC tasks, use ACC mutation tools, publish, merge, or delegate detached work. '
     'ACC executes your next-step decision. Never change project or snapshot files during review or coordination.\n'
-    'Your FINAL response must be one JSON object, no markdown, no reasoning or commentary before or '
-    'after it. Follow workflow.result_contract. Copy task_id, run_id, revision, snapshot_id exactly '
-    'from workflow. Include summary. Report checks honestly; an unrun check is not a pass. '
-    'For an unmanaged task just complete it and report your result in plain language.\n\n'
+    'When the packet contains knowledge, knowledge checkout is mandatory. Before changing project files, '
+    'read the supplied sources and update the checkout note section marked ACC:CHECKOUT-SYNTHESIS with what '
+    'you learned, how it applies, conflicts or uncertainty, and known mistakes to avoid. At completion include '
+    'the required structured knowledge object. Record real issues, loops, abandoned approaches, solutions, '
+    'decisions, corrections, and evidence; use empty arrays rather than inventing entries.\n'
+    'If you cannot write the local checkout absolute_path, return knowledge.checkout_synthesis with '
+    'nonempty learned, application, conflicts, and mistakes_to_avoid strings so ACC can complete the '
+    'checkout note on your behalf before accepting the check-in.\n'
+    'When workflow, conversation, or knowledge is present, your FINAL response must be one JSON '
+    'object with no markdown, reasoning, or commentary around it. Follow the applicable result_contract. '
+    'Copy task_id, run_id, revision, and snapshot_id exactly. Include summary. Report checks honestly; '
+    'an unrun check is not a pass. For an unmanaged task without knowledge, complete it and report '
+    'the result in plain language.\n\n'
 )
 
 CONVERSATION_OVERRIDE = (

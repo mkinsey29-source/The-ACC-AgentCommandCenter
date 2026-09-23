@@ -53,7 +53,7 @@ def run(args):
         return code
     if not final or final.get('exit_code') != 0:
         raise ValueError('Hermes exited without a successful terminal result event.')
-    if packet.get('workflow') or packet.get('conversation'):
+    if packet.get('workflow') or packet.get('conversation') or packet.get('knowledge'):
         result = worker_prompt.extract_json_object(final['text'])
         if not isinstance(result, dict):
             raise ValueError('Hermes final response must be a JSON object.')

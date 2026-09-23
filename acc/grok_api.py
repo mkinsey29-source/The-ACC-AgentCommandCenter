@@ -94,7 +94,7 @@ def run(args):
     if not api_key:
         raise ValueError('Grok API key file was empty: ' + args.api_key_file)
     content = _generate(api_key, args.model, prompt, args.max_tokens, args.timeout_seconds, args.endpoint)
-    if not (packet.get('workflow') or packet.get('conversation')):
+    if not (packet.get('workflow') or packet.get('conversation') or packet.get('knowledge')):
         return 0
     result = worker_prompt.extract_json_object(content)
     if not isinstance(result, dict):

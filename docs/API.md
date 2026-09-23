@@ -32,6 +32,20 @@ The SSE stream is ordered and replayable within the local database. Local Git re
 
 The MCP bridge translates tools into these local operations. It supports initialize, initialized notifications, ping, tools/list, and tools/call over newline-delimited JSON-RPC stdio. It negotiates the explicitly implemented protocol versions and exposes no extra resources/prompts. Host-specific installation and complete external SDK interoperability remain validation tasks.
 
+## Obsidian knowledge MCP
+
+- `GET /api/knowledge`: report the configured project-vault and embedding state.
+- `POST /api/knowledge/search`: search the project vault with `{query,limit?,include_inactive?,include_checkouts?}`.
+- `POST /api/knowledge/checkout`: retrieve task context and create a pre-work synthesis note.
+- `POST /api/knowledge/checkin`: create the linked completion or handoff note.
+- `POST /api/knowledge/note`: create a typed knowledge note.
+- `POST /api/knowledge/transition`: change note status while retaining its history.
+- `POST /api/knowledge/rebuttal`: create a correction and mark/link the original note.
+
+The corresponding MCP tools use the `acc_knowledge_*` prefix. See
+[`OBSIDIAN-KNOWLEDGE-MCP.md`](OBSIDIAN-KNOWLEDGE-MCP.md) and
+[`AGENT-KNOWLEDGE-PROTOCOL.md`](AGENT-KNOWLEDGE-PROTOCOL.md).
+
 ## Integration jobs and shared memory (v0.6)
 
 - `GET /api/integrations`: provider catalog, durable jobs, and artifact records.

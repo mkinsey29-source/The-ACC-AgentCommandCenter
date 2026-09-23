@@ -474,6 +474,8 @@ class Coordinator:
         self.controls = Controls(self)
         from .integrations import IntegrationHub
         self.integrations = IntegrationHub(self, settings.get('integrations'))
+        from .knowledge import KnowledgeVaults
+        self.knowledge = KnowledgeVaults(self, settings.get('knowledge'))
         from .routing import AgentRouter
         self.router = AgentRouter(self, settings.get('routing'))
         from .github import GitHub
@@ -496,12 +498,14 @@ class Coordinator:
                     'conversation': self.conversation.state(), 'github': self.github.snapshot(),
                     'orchestrators': self.orchestrators.snapshot(),
                     'integrations': self.integrations.snapshot(),
+                    'knowledge': self.knowledge.state(),
                     'routing': self.router.snapshot(),
                     'agents': self.public_agents(), 'git': self.git, 'cursor': seq,
                     'events': self.store.events(max(0, seq - 100)),
                     'recovery_required': self.recovery_required,
                     'capabilities': {'github': True, 'switch_after_step': True, 'automatic_offline': bool(self.conversation.settings.get('local_agent')), 'safe_takeover': False, 'managed_workflows': True, 'hermes_connector': True,
                                      'integration_jobs': True, 'shared_memory': True, 'fenced_job_leases': True,
+                                     'obsidian_knowledge': self.knowledge.enabled,
                                      'autonomous_routing': self.router.enabled,
                                      'orchestrator_sessions': True}}
 
@@ -638,11 +642,33 @@ class Coordinator:
                 task['active_child_id'] = child['id']
             folder = self.state / 'runs' / run_id
             folder.mkdir(parents=True)
+            knowledge_checkout = None
+            if self.knowledge.enabled and not task.get('internal') and agent.get('kind') in ('model', 'job'):
+                knowledge_checkout = self.knowledge.checkout({
+                    'title': task['title'], 'instruction': task['instruction'],
+                    'task_id': task['id'], 'run_id': run_id, 'worker': agent_id,
+                    'stage': workflow['stage'] if workflow else 'task',
+                })
+                knowledge_checkout['result_contract'] = {
+                    'task_id': task['id'], 'run_id': run_id, 'revision': task['revision'],
+                    'snapshot_id': None,
+                    'required': ['summary', 'knowledge'],
+                    'knowledge_arrays': ['learnings', 'issues', 'solutions', 'loops',
+                                         'decisions', 'corrections', 'evidence'],
+                    'remote_checkout_synthesis': {
+                        'learned': 'string', 'application': 'string',
+                        'conflicts': 'string', 'mistakes_to_avoid': 'string'},
+                }
+                knowledge = task.setdefault('knowledge', {})
+                knowledge['last_checkout'] = knowledge_checkout
+                knowledge.setdefault('checkouts', []).append(knowledge_checkout)
             if agent.get('kind') == 'job':
-                return self._start_job_implementer(task, agent, run_id, folder)
+                return self._start_job_implementer(task, agent, run_id, folder, knowledge_checkout)
             prompt = folder / 'task.json'
             packet = self._packet(task)
             packet['result_file'] = str(folder / 'result.json')
+            if knowledge_checkout:
+                packet['knowledge'] = knowledge_checkout
             if task.get('internal') == 'conversation':
                 packet['conversation'] = self.conversation.packet(task, run_id)
             if workflow:
@@ -699,7 +725,7 @@ class Coordinator:
             self.worker_thread.start()
             return task
 
-    def _start_job_implementer(self, task, agent, run_id, folder):
+    def _start_job_implementer(self, task, agent, run_id, folder, knowledge_checkout=None):
         """Dispatch the implement stage to a capability job instead of a supervised subprocess.
 
         A job has no PID for ACC to own: it is claimed and executed by a decoupled, possibly
@@ -711,7 +737,8 @@ class Coordinator:
             'capability': agent['capability'], 'provider': agent.get('provider'),
             'task_id': task['id'], 'input': {
                 'title': task['title'], 'instruction': task['instruction'],
-                'round': workflow['round'], 'history': workflow['history'][-6:]}})
+                'round': workflow['round'], 'history': workflow['history'][-6:],
+                'knowledge': knowledge_checkout}})
         workflow['job_id'], workflow['phase'] = job['id'], 'running'
         task.update(status='running', run_id=run_id, pid=None, active_agent=agent['id'], exit_code=None,
                     activity='Dispatched to ' + agent['name'] + '; awaiting job completion.',
@@ -818,9 +845,31 @@ class Coordinator:
                     self.deadline.cancel()
                 task = self.store.get(task_id)
                 stopped = task['status'] == 'stopping'
-                task.update(status='failed' if task['timed_out'] else ('paused' if stopped else ('awaiting_review' if code == 0 else 'failed')),
+                knowledge_error = None
+                worker_id = task.get('active_agent')
+                if (self.knowledge.enabled and not task.get('workflow') and not task.get('internal')
+                        and self.agents.get(worker_id, {}).get('kind') == 'model'
+                        and code == 0 and not stopped and not task['timed_out']):
+                    try:
+                        result_path = folder / 'result.json'
+                        if result_path.is_symlink() or not result_path.is_file() or result_path.stat().st_size > 100000:
+                            raise ValueError('Knowledge-enabled worker must return result.json of at most 100 KB.')
+                        result = json.loads(result_path.read_text(encoding='utf-8'))
+                        expected = {'task_id': task['id'], 'run_id': run_id,
+                                    'revision': task['revision'], 'snapshot_id': None}
+                        if not isinstance(result, dict) or any(result.get(k) != v for k, v in expected.items()):
+                            raise ValueError('Knowledge result does not match the current task, run, and revision.')
+                        if not isinstance(result.get('summary'), str) or not result['summary'].strip():
+                            raise ValueError('Knowledge result needs a summary.')
+                        self.knowledge.capture_result(task, result, 'task', worker_id)
+                    except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
+                        knowledge_error = str(exc)
+                task.update(status='failed' if task['timed_out'] or knowledge_error else ('paused' if stopped else ('awaiting_review' if code == 0 else 'failed')),
                             exit_code=code, active_agent=None,
-                            activity='Run timed out; inspect retained changes.' if task['timed_out'] else ('Stopped; inspect retained files before continuing.' if stopped else f'Runner exited with code {code}.'),
+                            activity=('Run timed out; inspect retained changes.' if task['timed_out'] else
+                                      ('Knowledge check-in failed: ' + knowledge_error if knowledge_error else
+                                       ('Stopped; inspect retained files before continuing.' if stopped else
+                                        f'Runner exited with code {code}.'))),
                             next_step='Inspect changes and evidence')
                 task['runs'][-1].update(ended=now(), exit_code=code)
                 if task.get('workflow') or task.get('internal'):

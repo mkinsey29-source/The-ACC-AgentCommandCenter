@@ -121,6 +121,37 @@ TOOLS.extend([
     ('acc_memory_review', 'Accept or reject a proposed memory version. Acceptance supersedes the prior active version.',
      {'memory_id': {'type': 'string'}, 'status': {'type': 'string', 'enum': ['active', 'rejected']},
       'reviewer': {'type': 'string'}}, ['memory_id', 'status']),
+    ('acc_knowledge_state', 'Read the configured project-scoped Obsidian knowledge-vault status.', {}, []),
+    ('acc_knowledge_search', 'Search the current project vault. Inactive conclusions are excluded unless explicitly requested.',
+     {'query': {'type': 'string'}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50},
+      'include_inactive': {'type': 'boolean'}, 'include_checkouts': {'type': 'boolean'}}, ['query']),
+    ('acc_knowledge_checkout', 'Start a task knowledge checkout: search the project vault and create the required pre-work synthesis note.',
+     {'title': {'type': 'string'}, 'instruction': {'type': 'string'}, 'worker': {'type': 'string'},
+      'task_id': {'type': 'string'}, 'run_id': {'type': 'string'}, 'stage': {'type': 'string'},
+      'limit': {'type': 'integer'}}, ['title', 'instruction', 'worker']),
+    ('acc_knowledge_checkin', 'Create a task check-in containing outcomes, learnings, issues, solutions, loops, decisions, corrections, and evidence.',
+     {'title': {'type': 'string'}, 'summary': {'type': 'string'}, 'worker': {'type': 'string'},
+      'task_id': {'type': 'string'}, 'run_id': {'type': 'string'}, 'stage': {'type': 'string'},
+      'checkout_path': {'type': 'string'}, 'status': {'type': 'string'},
+      **{key: {'type': 'array', 'items': {'type': 'string'}} for key in
+         ('learnings', 'issues', 'solutions', 'loops', 'decisions', 'corrections', 'evidence')}},
+     ['title', 'summary', 'worker']),
+    ('acc_knowledge_note', 'Create a linked Obsidian knowledge note in the configured project vault.',
+     {'title': {'type': 'string'}, 'body': {'type': 'string'}, 'worker': {'type': 'string'},
+      'type': {'type': 'string'}, 'status': {'type': 'string'}, 'folder': {'type': 'string'},
+      'task_id': {'type': 'string'}, 'run_id': {'type': 'string'}, 'stage': {'type': 'string'},
+      'source_notes': {'type': 'array', 'items': {'type': 'string'}},
+      'tags': {'type': 'array', 'items': {'type': 'string'}}}, ['title', 'body']),
+    ('acc_knowledge_transition', 'Update a note status while preserving history and adding an idempotent warning banner when inactive.',
+     {'path': {'type': 'string'}, 'status': {'type': 'string'}, 'corrected_by': {'type': 'string'},
+      'evidence': {'type': 'array', 'items': {'type': 'string'}}}, ['path', 'status']),
+    ('acc_knowledge_rebuttal', 'Create a correction note, link it to the original, and mark the original disproven or obsolete without deleting it.',
+     {'original_path': {'type': 'string'}, 'title': {'type': 'string'},
+      'explanation': {'type': 'string'}, 'worker': {'type': 'string'},
+      'task_id': {'type': 'string'}, 'run_id': {'type': 'string'},
+      'original_status': {'type': 'string', 'enum': ['disproven', 'obsolete', 'superseded']},
+      'evidence': {'type': 'array', 'items': {'type': 'string'}}},
+     ['original_path', 'title', 'explanation']),
 ])
 
 
@@ -194,6 +225,10 @@ def dispatch(message, url, token):
             if not isinstance(memory_id, str) or not memory_id.isalnum():
                 raise ValueError('Invalid memory ID')
             path, data = f'/api/memory/{memory_id}/review', args
+        elif name == 'acc_knowledge_state':
+            path, data = '/api/knowledge', None
+        elif name.startswith('acc_knowledge_'):
+            path, data = '/api/knowledge/' + name.removeprefix('acc_knowledge_'), args
         elif name == 'acc_create_task':
             path, data = '/api/tasks', args
         else:

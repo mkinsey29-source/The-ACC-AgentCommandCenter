@@ -6,6 +6,13 @@ A local project window for instructions, agent assignments, live worker output, 
 
 **v0.8 adds switchable orchestrator sessions.** The conversation header can select ChatGPT Remote, a coordinator-capable Claude/DeepSeek/other direct adapter, or Automatic. Switching fences an external owner immediately or waits for an active supervised decision boundary, then transfers durable history and task state. Automatic selection combines TypeSafe Jev Choice probabilities with measured reliability, cost, quality, and continuity; deterministic routing remains available without Jev.
 
+**The Obsidian Knowledge MCP adds project-scoped AI memory.** Model workers search the configured
+project vault and create a synthesis note before work, then create a linked check-in containing real
+learnings, problems, solutions, loops, decisions, corrections, and evidence. Local Ollama embeddings
+are optional; lexical search remains available. Historical mistakes are retained with rebuttal links
+and inactive statuses instead of being deleted. See [the knowledge setup](docs/OBSIDIAN-KNOWLEDGE-MCP.md)
+and [mandatory agent protocol](docs/AGENT-KNOWLEDGE-PROTOCOL.md).
+
 The durable provider queue and reviewed shared project memory remain available. DeepSeek Harness, Muse Spark Contributor, Gemini/Nano Banana, Agent 3D Studio (img2threejs), Aura, TypeSafe Jev, RunPod, Blender, and Unity are represented by capability-based provider profiles. Muse Contributor jobs are limited to public data in an isolated repository. Credentials and provider-specific executors remain external to ACC.
 
 For a saved launch from Linux, run `./start-acc.sh init --project /path/to/project`, then `./start-acc.sh`. On Windows use `start-acc.ps1` from PowerShell. `doctor` reports missing connections. Setup opens the dashboard and generates an absolute-path MCP configuration fragment.
@@ -51,6 +58,8 @@ Type naturally in ACC or use the desktop orchestrator through MCP. Configure age
 - Expose task controls through a local stdio MCP bridge for a connected orchestrator.
 - Route AI, asset, and rendering work through durable integration jobs with idempotency keys, budgets, offline blocking, and fenced worker leases.
 - Keep versioned shared project memory; agents propose entries and a reviewer activates or rejects them.
+- Use a project-scoped Obsidian vault through high-level MCP checkout, check-in, search, note,
+  lifecycle-transition, and rebuttal tools.
 - Label unavailable providers, failed runs, interrupted processes, and pending review honestly.
 
 For manual tasks, an exit code of zero means **Needs review**, not approved. Managed workflows advance only with a valid structured result and use the stronger snapshot-bound acceptance checks described below. Reported acceptance records its run ID, requirement revision, and a supplied code snapshot reference. ACC does not independently prove that an external reviewer inspected that reference.
@@ -97,6 +106,10 @@ Conversation tools include `acc_conversation_read`, `acc_conversation_send`, `ac
 Additional tools: `acc_switch_agent`, `acc_schedule_task`, `acc_github_refresh`, `acc_github_configure`, `acc_publish_preview`, and `acc_publish_task`.
 
 Integration tools: `acc_submit_integration_job`, `acc_claim_integration_job`, `acc_renew_integration_job`, `acc_finish_integration_job`, `acc_cancel_integration_job`, `acc_retry_integration_job`, `acc_memory_search`, `acc_memory_propose`, and `acc_memory_review`.
+
+Knowledge tools: `acc_knowledge_state`, `acc_knowledge_search`, `acc_knowledge_checkout`,
+`acc_knowledge_checkin`, `acc_knowledge_note`, `acc_knowledge_transition`, and
+`acc_knowledge_rebuttal`.
 
 Task tools: `acc_configure_workflow`, `acc_state`, `acc_create_task`, `acc_start_task`, `acc_stop_task`, `acc_assign_task`, `acc_update_instructions`, `acc_report`, and `acc_record_review`.
 
