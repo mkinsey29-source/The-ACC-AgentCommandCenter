@@ -1,4 +1,6 @@
 """Persistent orchestrator-session selection and fenced conversation handoff."""
+import json
+
 from .core import Conflict, now
 
 
@@ -59,9 +61,30 @@ class OrchestratorSessions:
     def _lease_session(lease):
         if not lease:
             return None
+        if lease.get('session_id'):
+            return lease['session_id']
         if lease['kind'] == 'external':
-            return lease.get('session_id', OrchestratorSessions.EXTERNAL)
+            return OrchestratorSessions.EXTERNAL
         return 'agent:' + lease['owner']
+
+    def message_session(self, requested=None):
+        lease = self.c.conversation._expire()
+        active = self._lease_session(lease)
+        session_id = requested or active or self.data['selected']
+        self._validate(session_id)
+        if lease and requested and requested != active:
+            raise Conflict('The message session does not match the active orchestrator lease.')
+        return session_id
+
+    def _checkpoint(self, db, previous, target):
+        rows = db.execute('''SELECT role,text,source,at FROM messages
+                           WHERE session_id IN (?, 'legacy') ORDER BY seq DESC LIMIT 12''',
+                          (previous,)).fetchall()
+        stored = [json.loads(row[0]) for row in db.execute('SELECT data FROM tasks ORDER BY rowid')]
+        tasks = [{key: task.get(key) for key in ('id', 'task_number', 'title', 'status', 'activity')}
+                 for task in stored if not task.get('internal')][-20:]
+        return {'from': previous, 'to': target, 'at': now(),
+                'recent_messages': [dict(row) for row in reversed(rows)], 'tasks': tasks}
 
     def select(self, payload):
         session_id = payload.get('session_id')
@@ -83,11 +106,11 @@ class OrchestratorSessions:
             if lease and lease['kind'] == 'local':
                 with self.c.store.connect() as db:
                     pending = [row[0] for row in db.execute(
-                        "SELECT id FROM messages WHERE status='pending' ORDER BY seq")]
-                    self.data.update(
-                        pending=session_id,
-                        handoff={'from': previous, 'to': session_id, 'at': now(),
-                                 'pending_message_ids': pending})
+                        "SELECT id FROM messages WHERE status='pending' AND session_id IN (?, 'legacy') ORDER BY seq",
+                        (previous,))]
+                    handoff = self._checkpoint(db, previous, session_id)
+                    handoff['pending_message_ids'] = pending
+                    self.data.update(pending=session_id, handoff=handoff)
                     self._save(db)
                     self.c.conversation.event(db, 'orchestrator_switch_queued', {
                         'message': f'Orchestrator switch to {session_id} will apply after the current decision.',
@@ -95,7 +118,13 @@ class OrchestratorSessions:
                 return self.snapshot()
             with self.c.store.connect() as db:
                 pending = [row[0] for row in db.execute(
-                    "SELECT id FROM messages WHERE status='pending' ORDER BY seq")]
+                    "SELECT id FROM messages WHERE status='pending' AND session_id IN (?, 'legacy') ORDER BY seq",
+                    (previous,))]
+                handoff = self._checkpoint(db, previous, session_id)
+                handoff['pending_message_ids'] = pending
+                if pending:
+                    db.executemany('UPDATE messages SET session_id=? WHERE id=?',
+                                   [(session_id, message_id) for message_id in pending])
                 if lease and lease['kind'] == 'external':
                     self.c.conversation.put(db, 'conversation_lease', None)
                 self.data = {
@@ -104,8 +133,7 @@ class OrchestratorSessions:
                     'generation': self.data.get('generation', 0) + 1,
                     'automatic_decision': self.data.get('automatic_decision'),
                     'recovery': self.data.get('recovery'),
-                    'handoff': {'from': previous, 'to': session_id, 'at': now(),
-                                'pending_message_ids': pending},
+                    'handoff': handoff,
                 }
                 self._save(db)
                 self.c.conversation.event(db, 'orchestrator_session_switched', {
@@ -117,9 +145,17 @@ class OrchestratorSessions:
         target = self.data.get('pending')
         if not target:
             return False
-        previous = self.data['selected']
+        previous = (self.data.get('handoff') or {}).get('from', self.data['selected'])
+        pending = [row[0] for row in db.execute(
+            "SELECT id FROM messages WHERE status='pending' AND session_id IN (?, 'legacy') ORDER BY seq",
+            (previous,))]
+        if pending:
+            db.executemany('UPDATE messages SET session_id=? WHERE id=?',
+                           [(target, message_id) for message_id in pending])
+        handoff = self._checkpoint(db, previous, target)
+        handoff['pending_message_ids'] = pending
         self.data.update(selected=target, pending=None,
-                         generation=self.data.get('generation', 0) + 1)
+                         generation=self.data.get('generation', 0) + 1, handoff=handoff)
         self._save(db)
         self.c.conversation.event(db, 'orchestrator_session_switched', {
             'message': f'Orchestrator session switched from {previous} to {target}.',

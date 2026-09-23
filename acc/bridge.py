@@ -37,9 +37,10 @@ TOOLS = [
 
 CONVERSATION_TOOLS = [
     ('acc_conversation_read', 'Read original conversation messages in sequence. Call after reconnecting; also read acc_state for task outcomes. Paginate using the last message seq.',
-     {'after': {'type': 'integer', 'minimum': 0}}, []),
+     {'after': {'type': 'integer', 'minimum': 0}, 'session_id': {'type': 'string'}}, []),
     ('acc_conversation_send', "Save the user's exact words with a stable id. Retry with the same id to avoid duplication. Claim before sending a remote request, then renew to capture it.",
-     {'id': {'type': 'string'}, 'text': {'type': 'string'}, 'source': {'type': 'string'}}, ['id', 'text']),
+     {'id': {'type': 'string'}, 'text': {'type': 'string'}, 'source': {'type': 'string'},
+      'session_id': {'type': 'string'}}, ['id', 'text']),
     ('acc_conversation_claim', 'Reserve the next conversation decision for this orchestrator for 120 seconds. Returns shared history, pending requests, tasks, and result contract. Never start another writer during the lease.',
      {'owner': {'type': 'string'}, 'session_id': {'type': 'string'}}, ['owner']),
     ('acc_conversation_renew', 'Extend your lease by 120 seconds and refresh the pending message batch. Renew while reasoning; expired owners cannot commit.',
@@ -151,10 +152,14 @@ def dispatch(message, url, token):
         if name == 'acc_state':
             path, data = '/api/state', None
         elif name == 'acc_conversation_read':
+            from urllib.parse import urlencode
             after = args.get('after', 0)
             if type(after) is not int or after < 0:
                 raise ValueError('Invalid conversation cursor')
-            path, data = '/api/conversation?after=' + str(after), None
+            query = {'after': after}
+            if args.get('session_id'):
+                query['session_id'] = args['session_id']
+            path, data = '/api/conversation?' + urlencode(query), None
         elif name.startswith('acc_conversation_'):
             path, data = '/api/conversation/' + name.removeprefix('acc_conversation_'), args
         elif name == 'acc_orchestrator_select':

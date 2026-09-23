@@ -178,6 +178,7 @@ $('task-form').onsubmit=async e=>{e.preventDefault();try{const data=Object.fromE
 
 // Durable browser outbox: network retries reuse ids, including recorded audio.
 let outboxDB, flushing = false, recorder = null, recordingTimer = null, routingDirty = false, sendingMessage = false;
+let displayedConversationSession = null;
 const messageHistory = new Map();
 function openOutbox() {
   if (!outboxDB) outboxDB = new Promise((resolve,reject)=>{
@@ -210,16 +211,16 @@ async function flushOutbox() {
       if(entry.project!==state.project) continue;
       if(entry.kind==='audio') {
         const audio=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=()=>reject(r.error);r.readAsDataURL(entry.blob);});
-        await api('voice/save',{id:entry.id,mime:entry.blob.type,audio});
-      } else await api('conversation/send',{id:entry.id,text:entry.text,source:'acc'});
+        await api('voice/save',{id:entry.id,mime:entry.blob.type,audio,session_id:entry.session_id});
+      } else await api('conversation/send',{id:entry.id,text:entry.text,source:'acc',session_id:entry.session_id});
       await outboxOperation('readwrite',s=>s.delete(entry.id));
     }
     await outboxCount();
   } catch(e) {await outboxCount();error('Saved on this browser. '+e.message);}
   finally {flushing=false;}
 }
-function draftKey(){return 'acc-draft:'+state.project;}
-function restoreDraft(){if(!$('message').value) $('message').value=localStorage.getItem(draftKey())||'';}
+function draftKey(){return 'acc-draft:'+state.project+':'+(state.orchestrators?.selected||'auto');}
+function restoreDraft(force=false){if(force||!$('message').value) $('message').value=localStorage.getItem(draftKey())||'';}
 $('message').oninput=()=>{if(state) localStorage.setItem(draftKey(),$('message').value);};
 $('message').onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){$('conversation-form').requestSubmit();e.preventDefault();}};
 $('conversation-form').onsubmit=async e=>{
@@ -227,7 +228,7 @@ $('conversation-form').onsubmit=async e=>{
   const text=$('message').value;if(!text.trim()||sendingMessage)return;
   sendingMessage=true;$('send-message').disabled=true;
   try {
-    await outboxOperation('readwrite',s=>s.put({id:crypto.randomUUID(),kind:'text',text,project:state.project,at:Date.now()}));
+    await outboxOperation('readwrite',s=>s.put({id:crypto.randomUUID(),kind:'text',text,project:state.project,session_id:state.orchestrators?.selected||'auto',at:Date.now()}));
     if($('message').value===text){$('message').value='';localStorage.removeItem(draftKey());}
     error('');await flushOutbox();await refresh();
   } catch(e){error(e.message);}
@@ -236,7 +237,7 @@ $('conversation-form').onsubmit=async e=>{
 $('load-history').onclick=async()=>{
   if(!state)return;
   $('load-history').disabled=true;
-  try{let after=0;while(true){const page=await api('conversation?after='+after);for(const m of page.messages)messageHistory.set(m.id,m);if(page.messages.length<100)break;after=page.messages.at(-1).seq;}renderConversation();}catch(e){error(e.message);}finally{$('load-history').disabled=false;}
+  try{let after=0;const session=state.orchestrators?.selected||'auto';while(true){const page=await api('conversation?after='+after+'&session_id='+encodeURIComponent(session));for(const m of page.messages)messageHistory.set(m.id,m);if(page.messages.length<100)break;after=page.messages.at(-1).seq;}renderConversation();}catch(e){error(e.message);}finally{$('load-history').disabled=false;}
 };
 $('retry-conversation').onclick=async()=>{try{await api('conversation/retry',{});await refresh();}catch(e){error(e.message);}};
 function modelOptions(selected, localOnly=false, emptyLabel='None'){
@@ -245,6 +246,7 @@ function modelOptions(selected, localOnly=false, emptyLabel='None'){
 function renderConversation(){
   const c=state.conversation;if(!c)return;
   const sessions=state.orchestrators||{selected:'auto',pending:null,sessions:[]};
+  if(displayedConversationSession!==sessions.selected){messageHistory.clear();displayedConversationSession=sessions.selected;restoreDraft(true);}
   const sessionSelect=$('orchestrator-session');
   if(document.activeElement!==sessionSelect){
     sessionSelect.innerHTML=sessions.sessions.map(s=>`<option value="${escapeHTML(s.id)}" ${s.id===sessions.selected?'selected':''} ${!s.available?'disabled':''}>${escapeHTML(s.name)}${s.available?'':' · not configured'}</option>`).join('');
@@ -292,7 +294,7 @@ $('record-voice').onclick=async()=>{
     current.ondataavailable=e=>{parts.push(e.data);size+=e.data.size;if(size>9*1024*1024&&current.state==='recording')current.stop();};
     current.onstop=async()=>{
       clearTimeout(recordingTimer);media.getTracks().forEach(t=>t.stop());recorder=null;$('record-voice').textContent='Record voice';
-      try{await outboxOperation('readwrite',s=>s.put({id:crypto.randomUUID(),kind:'audio',blob:new Blob(parts,{type:mime}),project:state.project,at:Date.now()}));await flushOutbox();await refresh();}catch(e){error(e.message);}
+      try{await outboxOperation('readwrite',s=>s.put({id:crypto.randomUUID(),kind:'audio',blob:new Blob(parts,{type:mime}),project:state.project,session_id:state.orchestrators?.selected||'auto',at:Date.now()}));await flushOutbox();await refresh();}catch(e){error(e.message);}
     };
     current.start(1000);recordingTimer=setTimeout(()=>{if(current.state==='recording')current.stop();},120000);
   }catch(e){media?.getTracks().forEach(t=>t.stop());error(e.message);}

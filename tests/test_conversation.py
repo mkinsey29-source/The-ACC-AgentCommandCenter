@@ -137,6 +137,28 @@ class ConversationTests(unittest.TestCase):
         with self.assertRaises(Conflict):
             self.c.conversation.complete(self.result(claim))
 
+    def test_session_switch_changes_transcript_and_handoff_carries_checkpoint(self):
+        self.configure(enabled=False)
+        self.c.orchestrators.select({'session_id': 'chatgpt-remote'})
+        claim = self.c.conversation.claim({'owner': 'ChatGPT Remote',
+                                           'session_id': 'chatgpt-remote'})
+        self.c.conversation.append({'id': 'remote-message', 'text': 'Remote-only words',
+                                    'source': 'chatgpt', 'session_id': 'chatgpt-remote'})
+        claim = self.c.conversation.renew({'token': claim['token']})
+        self.c.conversation.complete({
+            'token': claim['token'], 'reply': 'Remote reply', 'intent': 'discussion', 'actions': []})
+
+        switched = self.c.orchestrators.select({'session_id': 'agent:local-reviewer'})
+        self.c.conversation.append({'id': 'direct-message', 'text': 'Direct-only words',
+                                    'source': 'acc', 'session_id': 'agent:local-reviewer'})
+
+        remote = self.c.conversation.messages(session_id='chatgpt-remote')
+        direct = self.c.conversation.messages(session_id='agent:local-reviewer')
+        self.assertEqual([message['text'] for message in remote],
+                         ['Remote-only words', 'Remote reply'])
+        self.assertEqual([message['text'] for message in direct], ['Direct-only words'])
+        self.assertEqual(switched['handoff']['recent_messages'][-1]['text'], 'Remote reply')
+
     def test_reselecting_active_session_is_idempotent(self):
         self.configure(enabled=False)
         self.c.orchestrators.select({'session_id': 'chatgpt-remote'})
@@ -234,11 +256,17 @@ class ConversationTests(unittest.TestCase):
         eventually(lambda: self.c.running_task is not None)
 
         requested = self.c.orchestrators.select({'session_id': 'agent:local-reviewer'})
+        self.c.conversation.append({'id': 'during-switch', 'text': 'Carry this into the next chat',
+                                    'source': 'fixture', 'session_id': 'auto'})
 
         self.assertEqual(requested['pending'], 'agent:local-reviewer')
         eventually(lambda: self.c.conversation.state()['pending'] == 0, timeout=8)
         eventually(lambda: self.c.orchestrators.snapshot()['selected'] == 'agent:local-reviewer')
-        self.assertIsNone(self.c.orchestrators.snapshot()['pending'])
+        snapshot = self.c.orchestrators.snapshot()
+        self.assertIsNone(snapshot['pending'])
+        self.assertIn('during-switch', snapshot['handoff']['pending_message_ids'])
+        direct = self.c.conversation.messages(session_id='agent:local-reviewer')
+        self.assertIn('Carry this into the next chat', [message['text'] for message in direct])
 
     def test_queued_session_switch_survives_failed_outgoing_planner(self):
         self.configure()
@@ -326,10 +354,11 @@ class ConversationTests(unittest.TestCase):
             claim=call('acc_conversation_claim',{'owner':'ChatGPT remote fixture',
                                                  'session_id':'chatgpt-remote'})
             self.assertEqual(claim['context']['orchestrator']['selected'],'chatgpt-remote')
-            call('acc_conversation_send',{'id':'message-1','text':'idea: keep this exact wording'})
+            call('acc_conversation_send',{'id':'message-1','text':'idea: keep this exact wording',
+                                          'session_id':'chatgpt-remote'})
             call('acc_conversation_renew',{'token':claim['token']})
             call('acc_conversation_complete',self.result(claim,intent='discussion',actions=[],reply='Saved your idea.'))
-            messages=call('acc_conversation_read',{})['messages']
+            messages=call('acc_conversation_read',{'session_id':'chatgpt-remote'})['messages']
             self.assertEqual(len(messages),2)
             self.assertEqual(messages[0]['status'],'handled')
         finally:

@@ -15,10 +15,14 @@ class Conversation:
             CREATE TABLE IF NOT EXISTS messages (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL,
                 role TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL,
-                status TEXT NOT NULL, at REAL NOT NULL, data TEXT NOT NULL);
+                status TEXT NOT NULL, at REAL NOT NULL, data TEXT NOT NULL,
+                session_id TEXT NOT NULL DEFAULT 'legacy');
             CREATE TABLE IF NOT EXISTS conversation_receipts (
                 token TEXT PRIMARY KEY, request TEXT NOT NULL, response TEXT NOT NULL);
             ''')
+            columns = {row[1] for row in db.execute('PRAGMA table_info(messages)')}
+            if 'session_id' not in columns:
+                db.execute("ALTER TABLE messages ADD COLUMN session_id TEXT NOT NULL DEFAULT 'legacy'")
         self.settings = self.meta('conversation_settings', {})
         if not self.settings and defaults:
             self.configure(defaults)
@@ -59,20 +63,35 @@ class Conversation:
             self.settings = settings
             return self.state()
 
-    def messages(self, after=0, limit=100):
+    def messages(self, after=0, limit=100, session_id=None):
         if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= 200:
             raise ValueError('Use a nonnegative cursor and limit 1–200.')
         with self.c.store.connect() as db:
-            rows = db.execute('SELECT * FROM messages WHERE seq>? ORDER BY seq LIMIT ?', (after, limit)).fetchall()
+            if session_id:
+                rows = db.execute('''SELECT * FROM messages WHERE seq>? AND session_id IN (?, 'legacy')
+                                   ORDER BY seq LIMIT ?''', (after, session_id, limit)).fetchall()
+            else:
+                rows = db.execute('SELECT * FROM messages WHERE seq>? ORDER BY seq LIMIT ?',
+                                  (after, limit)).fetchall()
         return [dict(r, data=json.loads(r['data'])) for r in rows]
 
     def state(self):
+        view_session = (self.c.orchestrators.data['selected']
+                        if hasattr(self.c, 'orchestrators') else None)
         with self.c.store.connect() as db:
-            rows = db.execute('SELECT * FROM messages ORDER BY seq DESC LIMIT 60').fetchall()
-            pending = db.execute("SELECT COUNT(*) FROM messages WHERE status='pending'").fetchone()[0]
+            if view_session:
+                rows = db.execute('''SELECT * FROM messages WHERE session_id IN (?, 'legacy')
+                                   ORDER BY seq DESC LIMIT 60''', (view_session,)).fetchall()
+            else:
+                rows = db.execute('SELECT * FROM messages ORDER BY seq DESC LIMIT 60').fetchall()
+            pending_total = db.execute("SELECT COUNT(*) FROM messages WHERE status='pending'").fetchone()[0]
+            pending = (db.execute("SELECT COUNT(*) FROM messages WHERE status='pending' AND session_id IN (?, 'legacy')",
+                                  (view_session,)).fetchone()[0]
+                       if view_session else pending_total)
         lease = self.meta('conversation_lease')
         return {'messages': [dict(r, data=json.loads(r['data'])) for r in reversed(rows)],
-                'pending': pending, 'owner': {k: v for k, v in (lease or {}).items() if k != 'token'},
+                'pending': pending, 'pending_total': pending_total,
+                'owner': {k: v for k, v in (lease or {}).items() if k != 'token'},
                 'settings': self.settings, 'held': self.meta('conversation_held', ''),
                 'background_runs': [{k: t.get(k) for k in ('id', 'title', 'status', 'internal', 'activity', 'agent', 'active_agent', 'pid', 'run_id')} for t in self.c.store.tasks() if t.get('internal') and t['status'] in ('running', 'launching', 'stopping', 'interrupted')],
                 'voice_available': bool(self.transcription),
@@ -86,14 +105,17 @@ class Conversation:
             raise ValueError('Message must contain 1–50,000 characters.')
         if not isinstance(mid, str) or not 1 <= len(mid) <= 100 or not isinstance(source, str) or len(source) > 100:
             raise ValueError('Supply a stable message id and short source name.')
+        session_id = self.c.orchestrators.message_session(payload.get('session_id'))
         with self.c.lock, self.c.store.connect() as db:
             row = db.execute('SELECT * FROM messages WHERE id=?', (mid,)).fetchone()
             if row:
-                if row['text'] != text or row['source'] != source or row['role'] != 'user':
+                if (row['text'] != text or row['source'] != source or row['role'] != 'user' or
+                        row['session_id'] != session_id):
                     raise Conflict('This message id already belongs to different content.')
                 return dict(row, data=json.loads(row['data']))
-            db.execute('INSERT INTO messages(id,role,text,source,status,at,data) VALUES (?,?,?,?,?,?,?)',
-                       (mid, 'user', text, source, 'pending', now(), '{}'))
+            db.execute('''INSERT INTO messages(id,role,text,source,status,at,data,session_id)
+                        VALUES (?,?,?,?,?,?,?,?)''',
+                       (mid, 'user', text, source, 'pending', now(), '{}', session_id))
             self.event(db, 'message_saved', {'message': 'Your message is saved.', 'message_id': mid})
             row = db.execute('SELECT * FROM messages WHERE id=?', (mid,)).fetchone()
             return dict(row, data={})
@@ -118,6 +140,8 @@ class Conversation:
                 raise Conflict('A conversation turn already belongs to ' + lease['owner'] + '. Renew it or wait for its handoff.')
             if self.c.running_task or self.c.recovery_required or self.c.github.busy:
                 raise Conflict('Wait for the current runner to finish or recover before claiming orchestration.')
+            if self.c.orchestrators.data['selected'] == self.c.orchestrators.AUTO:
+                self.c.orchestrators.select({'session_id': session_id})
             lease = {'token': identifier(), 'kind': 'external', 'owner': owner, 'expires': now() + 120,
                      'message_ids': [], 'offline': False, 'session_id': session_id}
             lease['message_ids'] = [m['id'] for m in self.context(lease)['pending']]
@@ -156,10 +180,13 @@ class Conversation:
             return {'released': True}
 
     def context(self, lease):
+        session_id = lease.get('session_id') or self.c.orchestrators._lease_session(lease)
         with self.c.store.connect() as db:
-            rows = db.execute("SELECT * FROM messages WHERE status='pending' ORDER BY seq LIMIT 10").fetchall()
+            rows = db.execute('''SELECT * FROM messages WHERE status='pending'
+                               AND session_id IN (?, 'legacy') ORDER BY seq LIMIT 10''',
+                              (session_id,)).fetchall()
         pending = [dict(r, data=json.loads(r['data'])) for r in rows]
-        history = self.state()['messages']
+        history = self.messages(session_id=session_id)[-60:]
         orchestrator = self.c.orchestrators.snapshot()
         orchestrator = {key: orchestrator.get(key) for key in
                         ('selected', 'active', 'pending', 'generation', 'handoff')}
@@ -316,8 +343,11 @@ class Conversation:
                 for mid in ids:
                     db.execute("UPDATE messages SET status='handled', data=? WHERE id=? AND status='pending'",
                                (json.dumps({'turn': token, 'task_ids': response['task_ids']}), mid))
-                db.execute('INSERT INTO messages(id,role,text,source,status,at,data) VALUES (?,?,?,?,?,?,?)',
-                           (identifier(), 'assistant', reply, lease['owner'], 'handled', now(), json.dumps(response)))
+                response['session_id'] = lease.get('session_id') or self.c.orchestrators._lease_session(lease)
+                db.execute('''INSERT INTO messages(id,role,text,source,status,at,data,session_id)
+                            VALUES (?,?,?,?,?,?,?,?)''',
+                           (identifier(), 'assistant', reply, lease['owner'], 'handled', now(),
+                            json.dumps(response), response['session_id']))
                 if internal_task:
                     internal_task.update(status='accepted', activity=reply[:240], next_step='Conversation handled')
                     db.execute('INSERT OR REPLACE INTO tasks VALUES (?,?)', (internal_task['id'], json.dumps(internal_task)))
@@ -366,7 +396,11 @@ class Conversation:
         local = self.settings.get('local_agent')
         with self.c.store.connect() as db:
             pending_messages = [dict(row) for row in db.execute(
-                "SELECT id,text FROM messages WHERE status='pending' ORDER BY seq LIMIT 10")]
+                '''SELECT id,text FROM messages WHERE status='pending'
+                   AND session_id IN (?, 'legacy') ORDER BY seq LIMIT 10''',
+                (self.c.orchestrators.data['selected'],))]
+        if not pending_messages:
+            return False
         agent = self.c.orchestrators.chosen_agent(
             self.settings, project_offline or self.settings.get('mode') == 'offline', pending_messages)
         if agent and (agent not in self.c.agents or not self.c.agents[agent]['available']):
@@ -376,7 +410,8 @@ class Conversation:
         task = self.c.build_task({'title': 'Respond to conversation', 'instruction': 'Read conversation packet and propose the requested next steps.', 'agent': agent, 'timeout_seconds': 180})
         lease = {'token': identifier(), 'kind': 'local', 'owner': agent, 'expires': None,
                  'offline': project_offline or self.settings.get('mode') == 'offline' or (bool(preferred) and agent != preferred),
-                 'task_id': task['id'], 'message_ids': []}
+                 'task_id': task['id'], 'message_ids': [],
+                 'session_id': self.c.orchestrators.data['selected']}
         lease['message_ids'] = [m['id'] for m in self.context(lease)['pending']]
         task.update(internal='conversation', conversation_token=lease['token'],
                     conversation_inventory=inventory(self.c.project))
@@ -405,9 +440,11 @@ class Conversation:
 
     def fail(self, task, reason, retry=False):
         lease = self.meta('conversation_lease')
+        session_id = self.c.orchestrators._lease_session(lease)
         with self.c.store.connect() as db:
             pending_messages = [dict(row) for row in db.execute(
-                "SELECT id,text FROM messages WHERE status='pending' ORDER BY seq LIMIT 10")]
+                "SELECT id,text FROM messages WHERE status='pending' AND session_id IN (?, 'legacy') ORDER BY seq LIMIT 10",
+                (session_id,))] if session_id else []
         offline = self.c.controls.mode() == 'offline' or self.settings.get('mode') == 'offline'
         replacement = (self.c.orchestrators.fallback_agent(
             self.settings, lease['owner'], offline, pending_messages)

@@ -61,8 +61,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, self.server.coordinator.snapshot())
             if url.path == '/api/conversation':
                 try:
-                    after = int(parse_qs(url.query).get('after', ['0'])[0])
-                    return self.reply(200, {'messages': self.server.coordinator.conversation.messages(after)})
+                    query = parse_qs(url.query)
+                    after = int(query.get('after', ['0'])[0])
+                    session_id = query.get('session_id', [None])[0]
+                    return self.reply(200, {'messages': self.server.coordinator.conversation.messages(
+                        after, session_id=session_id)})
                 except ValueError as exc:
                     return self.reply(400, {'error': str(exc)})
             if url.path == '/api/archive':

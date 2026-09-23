@@ -21,6 +21,7 @@ class Voice:
         if not self.config:
             raise ValueError('Configure a local transcription command on this host first.')
         mid, mime = payload.get('id'), payload.get('mime', '').split(';')[0]
+        session_id = self.c.orchestrators.message_session(payload.get('session_id'))
         if not isinstance(mid, str) or not re.fullmatch(r'[a-zA-Z0-9-]{1,80}', mid):
             raise ValueError('Invalid recording id.')
         extensions = {'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/wav': 'wav'}
@@ -40,8 +41,8 @@ class Voice:
             except KeyError:
                 existing = None
             if existing:
-                if existing.get('audio_hash') != digest:
-                    raise Conflict('Recording id already belongs to different audio.')
+                if existing.get('audio_hash') != digest or existing.get('session_id') != session_id:
+                    raise Conflict('Recording id already belongs to different audio or session.')
                 return {'saved': True, 'id': mid, 'task_id': task_id}
             folder = self.c.state / 'voice' / mid
             folder.mkdir(parents=True, exist_ok=True)
@@ -52,7 +53,7 @@ class Voice:
             task = self.c.build_task({'title': 'Transcribe recording', 'instruction': 'Transcribe locally without sending audio to a cloud service.',
                                      'argv': argv, 'timeout_seconds': 300})
             task.update(id=task_id, internal='transcription', recording_id=mid, audio_hash=digest,
-                        transcript_file=str(output), audio_file=str(audio))
+                        transcript_file=str(output), audio_file=str(audio), session_id=session_id)
             self.c.store.save(task, 'recording_saved', {'message': 'Recording saved locally; waiting for transcription.'})
             return {'saved': True, 'id': mid, 'task_id': task_id}
 
@@ -64,7 +65,8 @@ class Voice:
             if output.is_symlink() or not output.is_file() or output.stat().st_size > 200000:
                 raise ValueError('Transcriber must write a UTF-8 transcript file of at most 200 KB.')
             text = output.read_text(encoding='utf-8')
-            self.c.conversation.append({'id': 'recording-' + task['recording_id'], 'text': text, 'source': 'local voice'})
+            self.c.conversation.append({'id': 'recording-' + task['recording_id'], 'text': text,
+                                        'source': 'local voice', 'session_id': task['session_id']})
             task.update(status='accepted', activity='Transcribed and saved in conversation.')
         self.c.store.save(task, 'transcription_finished', {'message': task['activity']})
 
