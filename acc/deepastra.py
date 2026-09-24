@@ -122,7 +122,7 @@ def run(args):
             signal.signal(signal.SIGTERM, previous)
     if code:
         return code
-    if not (packet.get('workflow') or packet.get('conversation')):
+    if not (packet.get('workflow') or packet.get('conversation') or packet.get('knowledge')):
         return 0
     text = _last_agent_message(log_dir)
     result = worker_prompt.extract_json_object(text)

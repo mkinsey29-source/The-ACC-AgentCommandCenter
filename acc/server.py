@@ -76,6 +76,8 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == '/api/memory':
                 query = {key: values[0] for key, values in parse_qs(url.query).items()}
                 return self.reply(200, self.server.coordinator.integrations.search_memory(query))
+            if url.path == '/api/knowledge':
+                return self.reply(200, self.server.coordinator.knowledge.state())
             if url.path == '/api/events':
                 try:
                     cursor = int(parse_qs(url.query).get('after', ['0'])[0])
@@ -170,6 +172,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(201, c.integrations.propose_memory(payload))
             if len(parts) == 4 and parts[:2] == ['api', 'memory'] and parts[3] == 'review':
                 return self.reply(200, c.integrations.review_memory(parts[2], payload))
+            if len(parts) == 3 and parts[:2] == ['api', 'knowledge']:
+                routes = {
+                    'search': c.knowledge.search, 'checkout': c.knowledge.checkout,
+                    'checkin': c.knowledge.checkin, 'note': c.knowledge.create_note,
+                    'review': c.knowledge.review, 'transition': c.knowledge.transition,
+                    'rebuttal': c.knowledge.rebuttal,
+                }
+                if parts[2] not in routes:
+                    return self.reply(404, {'error': 'Unknown knowledge operation.'})
+                return self.reply(200, routes[parts[2]](payload))
             if parts == ['api', 'tasks']:
                 return self.reply(201, c.create(payload))
             if len(parts) != 4 or parts[:2] != ['api', 'tasks']:

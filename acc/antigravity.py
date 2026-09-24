@@ -114,7 +114,7 @@ def run(args):
     if not isinstance(text, str) or not text.strip():
         raise ValueError('Antigravity CLI reported success but returned no response text -- a '
                           'known class of upstream bug (agy issues #840, #794), not a real result.')
-    if not (packet.get('workflow') or packet.get('conversation')):
+    if not (packet.get('workflow') or packet.get('conversation') or packet.get('knowledge')):
         return 0
     result = worker_prompt.extract_json_object(text)
     if not isinstance(result, dict):

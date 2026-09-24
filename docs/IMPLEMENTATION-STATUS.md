@@ -1,4 +1,30 @@
-# Implementation status — September 20, 2026
+# Implementation status — September 23, 2026
+
+## Current product work: Obsidian Knowledge MCP
+
+ACC now exposes one project-scoped Obsidian vault through high-level MCP tools rather than giving
+workers unrestricted low-level file operations. The knowledge module provides search, task checkout,
+task check-in, typed note creation, lifecycle transitions, and linked rebuttals. It uses atomic
+Markdown writes, safe vault-relative paths, YAML properties, Obsidian links, and idempotent warning
+banners for disproven, superseded, and obsolete notes.
+
+Configured model workers automatically receive a checkout before execution and must complete its
+synthesis before ACC accepts their check-in. Managed workflow stages return structured knowledge in
+their result contract. Unmanaged model adapters now do the same when knowledge is configured.
+Job-backed workers receive the checkout in their job input; remote workers that cannot edit the local
+note can return a structured checkout synthesis for ACC to write on their behalf. Plain local-command
+tasks are intentionally excluded because they are tools, not reasoning workers.
+
+Optional Ollama embeddings use the loopback-only `/api/embed` endpoint and a cache in ACC's state
+directory. Search falls back visibly to deterministic lexical ranking when Ollama is unavailable.
+Checkout notes are excluded from normal retrieval by default to reduce recursive summary pollution;
+check-ins and original evidence remain searchable. Inactive conclusions are excluded from normal
+recommendations but included during checkout as historical warnings.
+
+The existing reviewed SQLite project memory remains available for compatibility; it has not been
+silently migrated into a vault. The first implementation maps one Coordinator/project to one vault.
+Cross-vault routing, live Obsidian plugin validation, live Ollama embedding quality, and migration of
+existing memory remain follow-up work.
 
 ## Current product work: integration queue and shared memory (v0.6)
 

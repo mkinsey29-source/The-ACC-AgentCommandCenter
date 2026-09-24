@@ -94,7 +94,7 @@ def run(args):
     text = ''.join(text_parts)
     if not text.strip():
         raise ValueError('MiMo Code reported success but produced no text content.')
-    if not (packet.get('workflow') or packet.get('conversation')):
+    if not (packet.get('workflow') or packet.get('conversation') or packet.get('knowledge')):
         return 0
     result = worker_prompt.extract_json_object(text)
     if not isinstance(result, dict):

@@ -87,7 +87,7 @@ def run(args):
         if not api_key:
             raise ValueError('API key file was empty: ' + args.api_key_file)
     content = _chat(args.base_url, api_key, args.model, prompt, args.timeout_seconds)
-    if not (packet.get('workflow') or packet.get('conversation')):
+    if not (packet.get('workflow') or packet.get('conversation') or packet.get('knowledge')):
         return 0
     result = worker_prompt.extract_json_object(content)
     if not isinstance(result, dict):

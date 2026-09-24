@@ -141,6 +141,36 @@ class JobBackedWorkflowTests(unittest.TestCase):
         cancelled = next(j for j in self.c.integrations.snapshot()['jobs'] if j['id'] == job['id'])
         self.assertEqual(cancelled['status'], 'cancelled')
 
+    def test_queued_job_stop_enters_scoped_knowledge_review(self):
+        self.c.close()
+        vault = self.root / 'vault'
+        vault.mkdir()
+        subprocess.run(['git', '-C', str(self.project), 'checkout', '-q', '-b',
+                        'feature/job-knowledge-test'], check=True)
+        settings = json.loads(self.config.read_text())
+        settings['knowledge'] = {
+            'enabled': True, 'vault': {'id': 'job-fixture', 'path': str(vault)},
+            'embeddings': {'provider': 'none'}}
+        self.config.write_text(json.dumps(settings))
+        self.c = Coordinator(self.project, self.state, self.config)
+        task = self.c.create({'title': 'Build a tank', 'instruction': 'Reconstruct the tank asset.',
+                              'knowledge_scopes': ['Blender']})
+        self.c.workflows.configure(task['id'], {
+            'implementer': 'asset-builder', 'reviewer': 'reviewer', 'coordinator': 'coordinator'})
+        job = self.outstanding_job(task['id'])
+        self.c.stop(task['id'])
+        current = self.c.store.get(task['id'])
+        review = current['knowledge']['last_result_failure_review']
+        review_text = (vault / review['path']).read_text()
+        self.assertIn('review_kind: "unfinished-work"', review_text)
+        self.assertIn('stopped before claim', review_text)
+        checkout = self.c.knowledge.checkout({
+            'title': 'Retry tank build', 'instruction': 'Review the stopped job first.',
+            'worker': 'next-worker', 'scopes': ['Blender']})
+        self.assertEqual([review['path']], [item['path'] for item in checkout['reviews']])
+        cancelled = next(j for j in self.c.integrations.snapshot()['jobs'] if j['id'] == job['id'])
+        self.assertEqual(cancelled['status'], 'cancelled')
+
     def test_timeout_cancels_a_still_queued_job(self):
         task_id = self.start_task()
         self.outstanding_job(task_id)
