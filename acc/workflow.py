@@ -157,13 +157,28 @@ class Workflows:
 
     def finish(self, task, folder, code, stopped):
         c, w = self.c, task['workflow']
-        if stopped:
+        if stopped and not task['timed_out']:
+            c.knowledge.record_result_failure(
+                task, task['runs'][-1]['agent'], w['stage'],
+                'Workflow step was stopped before a valid check-in.',
+                ['Observed workflow stop request.'], kind='unfinished-work',
+                situation='The workflow step was stopped before completion.',
+                handling='No trustworthy worker handling was returned before the stop.',
+                outcome='ACC retained the checkout and workspace for inspection.',
+                uncertainty='The step outcome and retained changes require review.')
             self.hold(task, 'Workflow stopped; retained files need inspection.')
             return
         if code or task['timed_out']:
             role = {'implement': 'implementer', 'review': 'reviewer', 'coordinate': 'coordinator'}[w['stage']]
             reason = ('Runner timed out.' if task['timed_out'] else
                       'Runner exited with code ' + str(code) + '.')
+            c.knowledge.record_result_failure(
+                task, task['runs'][-1]['agent'], w['stage'], reason,
+                ['Observed workflow subprocess exit code: ' + str(code)],
+                situation=reason,
+                handling='No trustworthy worker handling was returned before the run ended.',
+                outcome='ACC retained the checkout and workspace for retry or reassignment.',
+                uncertainty='The workflow step outcome and retained changes require review.')
             c.router.record_outcome(task, role, False, error=reason)
             # Preserve the explicit coordinator fallback before asking the general router.
             fallback = w['fallbacks'].get(role)
@@ -192,6 +207,18 @@ class Workflows:
             snapshots.verify(w['snapshot'], self.c.project)
         if stage in ('implement', 'review') and not isinstance(result.get('checks'), list):
             raise ValueError('Worker result must list actual checks (an empty list means none).')
+        if stage == 'review' and (result.get('verdict') not in ('approve', 'changes_requested')
+                                  or not isinstance(result.get('findings'), list)):
+            raise ValueError('Review must include a verdict and findings list.')
+        if stage == 'coordinate':
+            action = result.get('action')
+            valid = (action == 'request_review' and w['review_result'] is None
+                     or action == 'request_changes' and w['review_result'] is not None
+                     or action == 'accept' and w['review_result']
+                     and w['review_result']['verdict'] == 'approve'
+                     or action == 'hold')
+            if not valid:
+                raise ValueError('Coordinator proposed an invalid transition or acceptance without approval.')
         self.c.knowledge.capture_result(task, result, stage, task['runs'][-1]['agent'])
         role = {'implement': 'implementer', 'review': 'reviewer', 'coordinate': 'coordinator'}[stage]
         c.router.record_outcome(task, role, True,
@@ -205,8 +232,6 @@ class Workflows:
             w['review_result'] = None
             w['stage'] = 'coordinate'
         elif stage == 'review':
-            if result.get('verdict') not in ('approve', 'changes_requested') or not isinstance(result.get('findings'), list):
-                raise ValueError('Review must include a verdict and findings list.')
             w['review_result'] = result
             w['stage'] = 'coordinate'
         else:
@@ -250,8 +275,6 @@ class Workflows:
             elif action == 'hold':
                 self.hold(task, result['summary'])
                 return
-            else:
-                raise ValueError('Coordinator proposed an invalid transition or acceptance without approval.')
         w.update(phase='queued', fallback_used=False)
         task.update(status='queued', next_step='Run ' + w['stage'], activity=result['summary'])
         self.c.store.save(task, 'handoff_ready', {'message': task['next_step'], 'summary': result['summary']})
@@ -263,10 +286,27 @@ class Workflows:
         w = task['workflow']
         if stopped:
             detail = job.get('last_error') or (job.get('result') or {}).get('summary')
-            message = 'Workflow stopped; retained job result needs inspection.'
+            timed_out = bool(task.get('timed_out'))
+            message = ('Workflow timed out; retained job result needs inspection.' if timed_out
+                       else 'Workflow stopped; retained job result needs inspection.')
+            self.c.knowledge.record_result_failure(
+                task, task.get('active_agent'), 'implement', message,
+                ['Observed integration job state: ' + str(job.get('status'))],
+                kind='failed-loop' if timed_out else 'unfinished-work', situation=message,
+                handling='The remote worker handling is incomplete or unavailable because the job was stopped.',
+                outcome='ACC retained the checkout and any reported job artifacts for inspection.',
+                uncertainty='The job outcome and any incomplete external changes require review.')
             self.hold(task, message + (' ' + detail if detail else ''))
             return
         if job['status'] != 'succeeded':
+            reason = job.get('last_error') or 'Job-backed implementer failed.'
+            self.c.knowledge.record_result_failure(
+                task, task.get('active_agent'), 'implement', reason,
+                ['Observed integration job state: ' + str(job.get('status'))],
+                situation='The job-backed implementer failed before a valid check-in.',
+                handling='The worker did not return a trustworthy completed handling record.',
+                outcome='ACC retained the checkout and routed the step for hold or reassignment.',
+                uncertainty='External side effects and incomplete artifacts require review.')
             self.c.router.record_outcome(task, 'implementer', False,
                                          cost=job.get('cost'), error=job.get('last_error'))
             if self.c.router.enabled:

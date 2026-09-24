@@ -108,7 +108,7 @@ Additional tools: `acc_switch_agent`, `acc_schedule_task`, `acc_github_refresh`,
 Integration tools: `acc_submit_integration_job`, `acc_claim_integration_job`, `acc_renew_integration_job`, `acc_finish_integration_job`, `acc_cancel_integration_job`, `acc_retry_integration_job`, `acc_memory_search`, `acc_memory_propose`, and `acc_memory_review`.
 
 Knowledge tools: `acc_knowledge_state`, `acc_knowledge_search`, `acc_knowledge_checkout`,
-`acc_knowledge_checkin`, `acc_knowledge_note`, `acc_knowledge_transition`, and
+`acc_knowledge_checkin`, `acc_knowledge_note`, `acc_knowledge_review`, `acc_knowledge_transition`, and
 `acc_knowledge_rebuttal`.
 
 Task tools: `acc_configure_workflow`, `acc_state`, `acc_create_task`, `acc_start_task`, `acc_stop_task`, `acc_assign_task`, `acc_update_instructions`, `acc_report`, and `acc_record_review`.

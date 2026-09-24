@@ -449,6 +449,7 @@ class Coordinator:
                                     'description': 'Configured command adapter; provider readiness not verified.' if available else 'Executable missing.'}
         # An old live process could still be writing. Require explicit inspection on restart.
         self.recovery_required = False
+        interrupted_knowledge_tasks = []
         for task in self.store.tasks():
             if task['status'] in ('launching', 'running', 'stopping', 'processing_result', 'publishing'):
                 job_backed = bool((task.get('workflow') or {}).get('job_id')) and \
@@ -459,6 +460,7 @@ class Coordinator:
                                      'releasing workspace.' if job_backed else
                                      'Coordinator restarted. Inspect previous PID before releasing workspace.')
                 self.store.save(task, 'interrupted', {'message': task['activity']})
+                interrupted_knowledge_tasks.append(task['id'])
             if task['status'] == 'interrupted':
                 self.recovery_required = True
         self.observer = threading.Thread(target=self._observe, daemon=True)
@@ -476,6 +478,21 @@ class Coordinator:
         self.integrations = IntegrationHub(self, settings.get('integrations'))
         from .knowledge import KnowledgeVaults
         self.knowledge = KnowledgeVaults(self, settings.get('knowledge'))
+        for task_id in interrupted_knowledge_tasks:
+            task = self.store.get(task_id)
+            try:
+                review = self.knowledge.record_result_failure(
+                    task, task.get('active_agent'),
+                    (task.get('workflow') or {}).get('stage', 'task'), task['activity'],
+                    ['Persisted task state was active when the coordinator restarted.'],
+                    kind='unfinished-work', situation=task['activity'],
+                    handling='Worker handling is unknown because ACC restarted before a valid check-in.',
+                    outcome='ACC blocked recovery and retained the checkout and workspace for inspection.',
+                    uncertainty='The prior worker process, external side effects, and task outcome require review.')
+                if review:
+                    self.store.save(task, 'interruption_review_created', {'review': review['path']})
+            except (ValueError, OSError, KeyError):
+                pass
         from .routing import AgentRouter
         self.router = AgentRouter(self, settings.get('routing'))
         from .github import GitHub
@@ -522,13 +539,23 @@ class Coordinator:
         timeout = payload.get('timeout_seconds', 900)
         if type(timeout) is not int or not 1 <= timeout <= 86400:
             raise ValueError('Timeout must be an integer between 1 and 86400 seconds.')
+        knowledge_scopes = payload.get('knowledge_scopes', [])
+        if (not isinstance(knowledge_scopes, list) or len(knowledge_scopes) > 20
+                or not all(isinstance(item, str) and item.strip() for item in knowledge_scopes)):
+            raise ValueError('knowledge_scopes must be an array of at most 20 vault folders.')
+        for item in knowledge_scopes:
+            path = Path(item.strip())
+            if (path.is_absolute() or '..' in path.parts or '.obsidian' in path.parts
+                    or path.as_posix().strip('/') in ('', '.')):
+                raise ValueError('knowledge_scopes must contain safe vault-relative folders.')
         task = {'id': identifier(), 'title': title, 'instruction': instruction, 'revision': 1,
                 'requirements_history': [], 'delivered_revision': None, 'agent': agent, 'active_agent': None,
                 'argv': argv, 'status': 'queued', 'activity': 'Ready to start.', 'next_step': 'Run assigned worker',
                 'created': now(), 'run_id': None, 'pid': None, 'exit_code': None, 'evidence': [], 'runs': [],
                 'review': None, 'timeout_seconds': timeout, 'timed_out': False}
         for key, default in (('task_area', 'general'), ('required_capabilities', []),
-                             ('risk', 'medium'), ('priority', 50), ('depends_on', [])):
+                             ('risk', 'medium'), ('priority', 50), ('depends_on', []),
+                             ('knowledge_scopes', [])):
             task[key] = payload.get(key, default)
         return task
 
@@ -620,6 +647,10 @@ class Coordinator:
             agent = self.agents[agent_id]
             if not agent['available']:
                 raise ValueError('Configure this worker on the host first.')
+            if self.knowledge.enabled and not task.get('internal') and agent.get('kind') in ('model', 'job'):
+                current_git = git_snapshot(self.project)
+                if current_git.get('available') and current_git.get('branch') in ('main', 'master'):
+                    raise Conflict('Knowledge workers must run on a feature branch, never main or master.')
             if self.controls.mode() == 'offline' and agent.get('kind') == 'model' and agent.get('local') is not True:
                 raise Conflict('Project is offline; new cloud model runs are blocked.')
             if workflow and workflow['stage'] == 'implement' and (task.get('baseline') or {}).get('revision') != task['revision']:
@@ -648,13 +679,30 @@ class Coordinator:
                     'title': task['title'], 'instruction': task['instruction'],
                     'task_id': task['id'], 'run_id': run_id, 'worker': agent_id,
                     'stage': workflow['stage'] if workflow else 'task',
+                    'scopes': task.get('knowledge_scopes', []),
                 })
                 knowledge_checkout['result_contract'] = {
                     'task_id': task['id'], 'run_id': run_id, 'revision': task['revision'],
                     'snapshot_id': None,
                     'required': ['summary', 'knowledge'],
                     'knowledge_arrays': ['learnings', 'issues', 'solutions', 'loops',
-                                         'decisions', 'corrections', 'evidence'],
+                                         'decisions', 'corrections', 'unvalidated', 'evidence'],
+                    'structured_knowledge': ['completed_knowledge', 'review_items'],
+                    'checkout_synthesis_fields': [
+                        'learned', 'application', 'conflicts', 'mistakes_to_avoid'],
+                    'review_acknowledgements': {
+                        'required_when_review_queue_nonempty': True,
+                        'fields': ['path', 'disposition', 'note'],
+                        'dispositions': ['agree', 'conflict'],
+                    },
+                    'completed_knowledge_fields': [
+                        'title', 'body', 'scope', 'type', 'status', 'evidence'],
+                    'review_item_fields': [
+                        'title', 'kind', 'situation', 'handling', 'outcome',
+                        'uncertainty', 'evidence'],
+                    'current_run_only': [
+                        'issues', 'solutions', 'loops', 'corrections', 'unvalidated',
+                        'review_items'],
                     'remote_checkout_synthesis': {
                         'learned': 'string', 'application': 'string',
                         'conflicts': 'string', 'mistakes_to_avoid': 'string'},
@@ -663,7 +711,22 @@ class Coordinator:
                 knowledge['last_checkout'] = knowledge_checkout
                 knowledge.setdefault('checkouts', []).append(knowledge_checkout)
             if agent.get('kind') == 'job':
-                return self._start_job_implementer(task, agent, run_id, folder, knowledge_checkout)
+                try:
+                    return self._start_job_implementer(task, agent, run_id, folder, knowledge_checkout)
+                except Exception as exc:
+                    try:
+                        self.knowledge.record_result_failure(
+                            task, agent['id'], workflow['stage'] if workflow else 'task', str(exc),
+                            ['ACC integration-job submission error: ' + str(exc)],
+                            situation='ACC could not submit the job-backed worker assignment.',
+                            handling='No worker handling occurred because dispatch did not complete.',
+                            outcome='The checkout and task remain available for retry.',
+                            uncertainty='Whether the external provider observed any partial submission requires review.')
+                        self.store.save(task, 'job_submission_review_created',
+                                        {'message': 'Job submission failure entered knowledge review.'})
+                    except (ValueError, OSError, KeyError):
+                        pass
+                    raise
             prompt = folder / 'task.json'
             packet = self._packet(task)
             packet['result_file'] = str(folder / 'result.json')
@@ -694,6 +757,16 @@ class Coordinator:
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                         env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}, **opts)
             except OSError as exc:
+                try:
+                    self.knowledge.record_result_failure(
+                        task, agent['id'], workflow['stage'] if workflow else 'task', str(exc),
+                        ['ACC process-spawn error: ' + str(exc)],
+                        situation='ACC could not launch the assigned worker process.',
+                        handling='No worker handling occurred because the process did not start.',
+                        outcome='The checkout and task remain available for reassignment.',
+                        uncertainty='No worker result exists; any launcher-side effects require review.')
+                except (ValueError, OSError, KeyError):
+                    pass
                 task.update(status='failed', active_agent=None, activity='Worker failed to launch.')
                 self.store.save(task, 'launch_failed', {'message': str(exc)})
                 if task.get('active_child_id'):
@@ -795,6 +868,12 @@ class Coordinator:
             try:
                 self.workflows.finish_job(task, job, stopped)
             except Exception as exc:
+                try:
+                    self.knowledge.record_result_failure(
+                        task, task.get('active_agent'), 'implement', str(exc),
+                        ['ACC job-result validation error: ' + str(exc)])
+                except (ValueError, OSError, KeyError):
+                    pass
                 self.workflows.hold(task, str(exc))
             task = self.store.get(task_id)
             child_status = 'paused' if stopped else ('completed' if task['status'] == 'queued' else 'failed')
@@ -864,6 +943,34 @@ class Coordinator:
                         self.knowledge.capture_result(task, result, 'task', worker_id)
                     except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
                         knowledge_error = str(exc)
+                        try:
+                            failure_evidence = ['ACC result validation error: ' + knowledge_error]
+                            if (folder / 'result.json').is_file():
+                                failure_evidence.append('Worker result retained at: ' + str(folder / 'result.json'))
+                            self.knowledge.record_result_failure(
+                                task, worker_id, 'task', knowledge_error, failure_evidence)
+                        except (ValueError, OSError, KeyError):
+                            # The original result error remains authoritative. A vault write problem
+                            # must not make an invalid worker result look successful.
+                            pass
+                if (self.knowledge.enabled and not task.get('workflow') and not task.get('internal')
+                        and self.agents.get(worker_id, {}).get('kind') == 'model'
+                        and not knowledge_error and (stopped or code or task['timed_out'])):
+                    reason = ('Worker run timed out.' if task['timed_out'] else
+                              ('Worker run was stopped before check-in.' if stopped else
+                               'Worker process exited with code ' + str(code) + '.'))
+                    try:
+                        self.knowledge.record_result_failure(
+                            task, worker_id, 'task', reason,
+                            ['Observed subprocess exit code: ' + str(code)],
+                            kind=('failed-loop' if task['timed_out'] else
+                                  ('unfinished-work' if stopped else 'failed-loop')),
+                            situation=reason,
+                            handling='No trustworthy worker handling was returned before the run ended.',
+                            outcome='ACC retained the checkout and any workspace changes for inspection.',
+                            uncertainty='The task outcome and any incomplete changes require review.')
+                    except (ValueError, OSError, KeyError):
+                        pass
                 task.update(status='failed' if task['timed_out'] or knowledge_error else ('paused' if stopped else ('awaiting_review' if code == 0 else 'failed')),
                             exit_code=code, active_agent=None,
                             activity=('Run timed out; inspect retained changes.' if task['timed_out'] else
@@ -881,6 +988,14 @@ class Coordinator:
                     try:
                         self.workflows.finish(task, folder, code, stopped)
                     except Exception as exc:
+                        try:
+                            failure_evidence = ['ACC workflow-result validation error: ' + str(exc)]
+                            if (folder / 'result.json').is_file():
+                                failure_evidence.append('Worker result retained at: ' + str(folder / 'result.json'))
+                            self.knowledge.record_result_failure(
+                                task, worker_id, task['workflow']['stage'], str(exc), failure_evidence)
+                        except (ValueError, OSError, KeyError):
+                            pass
                         self.workflows.fail_step(task, str(exc))
                 if task.get('internal'):
                     try:
@@ -909,6 +1024,18 @@ class Coordinator:
         except Exception as exc:
             with self.lock:
                 task = self.store.get(task_id)
+                try:
+                    self.knowledge.record_result_failure(
+                        task, task.get('active_agent'),
+                        (task.get('workflow') or {}).get('stage', 'task'), str(exc),
+                        ['ACC runner-supervision error: ' + str(exc)],
+                        kind='unfinished-work',
+                        situation='ACC runner supervision failed before a reliable terminal handoff.',
+                        handling='Worker handling and process state are unknown after supervision failed.',
+                        outcome='ACC marked the task interrupted and blocked automatic recovery.',
+                        uncertainty='The worker process, workspace changes, and task outcome require inspection.')
+                except (ValueError, OSError, KeyError):
+                    pass
                 task.update(status='interrupted', activity='Runner supervision failed; inspect process before resuming.')
                 self.recovery_required = True
                 self.store.save(task, 'supervisor_error', {'message': str(exc)})
@@ -962,6 +1089,19 @@ class Coordinator:
                     task = self.store.get(task_id)
                     if self.deadline:
                         self.deadline.cancel()
+                    timed_out = bool(task.get('timed_out'))
+                    self.knowledge.record_result_failure(
+                        task, task.get('active_agent'),
+                        (task.get('workflow') or {}).get('stage', 'implement'),
+                        ('Job-backed workflow timed out before the queued job was claimed.' if timed_out
+                         else 'Job-backed workflow was stopped before the queued job was claimed.'),
+                        ['Observed integration job state: cancelled'],
+                        kind='failed-loop' if timed_out else 'unfinished-work',
+                        situation=('The queued job-backed workflow timed out before claim.' if timed_out
+                                   else 'The queued job-backed workflow was stopped before claim.'),
+                        handling='No remote worker handling occurred because the job was unclaimed.',
+                        outcome='ACC cancelled the queued job and retained the checkout.',
+                        uncertainty='The task was not performed and requires reassignment or cancellation review.')
                     self.workflows.hold(task, 'Workflow stopped before the job was claimed.')
                     task = self.store.get(task_id)
                     self._conclude_job_child(task, 'paused')

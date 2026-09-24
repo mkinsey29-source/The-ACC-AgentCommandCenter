@@ -176,7 +176,8 @@ class Handler(BaseHTTPRequestHandler):
                 routes = {
                     'search': c.knowledge.search, 'checkout': c.knowledge.checkout,
                     'checkin': c.knowledge.checkin, 'note': c.knowledge.create_note,
-                    'transition': c.knowledge.transition, 'rebuttal': c.knowledge.rebuttal,
+                    'review': c.knowledge.review, 'transition': c.knowledge.transition,
+                    'rebuttal': c.knowledge.rebuttal,
                 }
                 if parts[2] not in routes:
                     return self.reply(404, {'error': 'Unknown knowledge operation.'})

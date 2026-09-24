@@ -34,7 +34,11 @@ Observed file order:
 
 The artifact retained failed-attempt history, rejected the disproven deletion advice, required one-variable retries, separated preview and final-artifact verification, and defined checkout/check-in evidence.
 
-The worker's authentic structured result was passed to `KnowledgeVaults.capture_result()`. The connector accepted it and generated a task check-in containing summary, learnings, issues, solutions, loops, decisions, corrections, evidence, and a backlink to the checkout.
+The worker's authentic structured result was passed to `KnowledgeVaults.capture_result()`. At the time
+of this simulation, the connector generated one combined check-in. The later recursive-review change
+supersedes that layout: factual results remain in check-in, while issues, solutions, loops, proposed
+corrections, and unvalidated claims are routed to `Reviews/`. Regression evidence for the new layout
+is recorded by the knowledge tests and subsequent review simulation.
 
 ## Independent review
 
