@@ -4,6 +4,8 @@ Before finishing any task, read the protocol in your Google Drive at:
 
 AGENT_INSTRUCTIONS.md
 
+At the start of a project task, search Google Drive `50_Projects/` for that project's folder before creating one. If it exists, review its `current-state.md` and relevant notes and files before starting work. Use that history to understand the task context, project direction, previous decisions, and intended scope. If the request is too broad, unclear, or conflicts with that context, ask for the specific clarification needed before proceeding with the affected work.
+
 Then follow it: write a detailed entry for every issue you ran into during the task - resolved or not, no filtering by importance. Batch them into one file per task and upload it to:
 
 60_Review/
