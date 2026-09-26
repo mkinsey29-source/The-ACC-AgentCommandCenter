@@ -7,6 +7,7 @@ import sys
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
+import uuid
 
 
 TOOLS = [
@@ -189,7 +190,29 @@ TOOLS.extend([
 ])
 
 
-def dispatch(message, url, token):
+BRIDGE_ID = uuid.uuid4().hex
+
+
+def observe(url, token, phase, bridge_id, client=None, tool=None, remote_session=False):
+    """Best-effort host telemetry. Never includes arguments, prompts, or credentials."""
+    payload = {'phase': phase, 'bridge_id': bridge_id}
+    if client:
+        payload['client'] = {key: value for key, value in client.items()
+                             if key in ('name', 'version') and isinstance(value, str)}
+    if tool:
+        payload['tool'] = tool
+        payload['remote_session'] = remote_session is True
+    request = urllib.request.Request(url + '/api/bridge/observe', data=json.dumps(payload).encode(),
+                                     headers={'Authorization': 'Bearer ' + token,
+                                              'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            response.read()
+    except (OSError, urllib.error.URLError):
+        pass
+
+
+def dispatch(message, url, token, bridge_id=BRIDGE_ID):
     method, request_id = message.get('method'), message.get('id')
     if request_id is None:
         return None
@@ -198,11 +221,14 @@ def dispatch(message, url, token):
     if method == 'initialize':
         supported = ('2024-11-05', '2025-03-26', '2025-06-18')
         requested = message.get('params', {}).get('protocolVersion')
+        observe(url, token, 'initialize', bridge_id,
+                client=message.get('params', {}).get('clientInfo'))
         return result({'protocolVersion': requested if requested in supported else supported[-1],
                        'capabilities': {'tools': {}}, 'serverInfo': {'name': 'acc', 'version': '0.8.0'}})
     if method == 'ping':
         return result({})
     if method == 'tools/list':
+        observe(url, token, 'tools_list', bridge_id)
         return result({'tools': [{'name': name, 'description': desc,
                                  'inputSchema': {'type': 'object', 'properties': props, 'required': required,
                                                  'additionalProperties': False}}
@@ -279,6 +305,9 @@ def dispatch(message, url, token):
                                          headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
         with urllib.request.urlopen(request, timeout=30) as response:
             body = response.read().decode()
+        observe(url, token, 'tool_call', bridge_id, tool=name,
+                remote_session=(name == 'acc_orchestrator_select'
+                                and args.get('session_id') == 'chatgpt-remote'))
         return result({'content': [{'type': 'text', 'text': body}], 'isError': False})
     except urllib.error.HTTPError as exc:
         return result({'content': [{'type': 'text', 'text': exc.read().decode()}], 'isError': True})

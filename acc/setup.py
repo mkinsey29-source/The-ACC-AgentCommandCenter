@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 import urllib.error
@@ -173,6 +174,17 @@ def doctor(settings):
         'Optional faster-whisper must import in the transcription interpreter.')
     add('voice_model', bool(model_dir) and all((Path(model_dir) / name).is_file() for name in MODEL_FILES),
         'Local model files checked only; speech recognition remains a host test.')
+    verified = False
+    try:
+        database = Path(settings['state_dir']) / 'acc.sqlite3'
+        if database.is_file():
+            with sqlite3.connect(database) as db:
+                row = db.execute("SELECT value FROM meta WHERE key='bridge_status'").fetchone()
+            verified = bool(row and json.loads(row[0]).get('conversation_verified_at'))
+    except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
+        pass
+    add('chatgpt_remote', verified,
+        'Requires the native MCP client to discover ACC tools and complete one ChatGPT Remote conversation turn.')
     return checks
 
 

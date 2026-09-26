@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -122,6 +123,18 @@ class SetupTests(unittest.TestCase):
                 patch.object(setup, 'endpoint_available', return_value=False):
             checks = {c['name']: c for c in setup.doctor(settings)}
         self.assertFalse(checks['voice_model']['ok'])
+
+    def test_doctor_reports_persisted_live_bridge_verification(self):
+        settings = self.initialize()
+        database = Path(settings['state_dir']) / 'acc.sqlite3'
+        with sqlite3.connect(database) as db:
+            db.execute('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+            db.execute('INSERT INTO meta VALUES (?,?)', ('bridge_status', json.dumps({
+                'conversation_verified_at': 123.0})))
+        with patch.object(setup, 'probe', return_value=True), \
+                patch.object(setup, 'endpoint_available', return_value=False):
+            checks = {c['name']: c for c in setup.doctor(settings)}
+        self.assertTrue(checks['chatgpt_remote']['ok'])
 
     def test_probe_timeout_and_no_output_leak(self):
         with patch.object(setup.subprocess, 'run', side_effect=subprocess.TimeoutExpired('gh', 8)):
