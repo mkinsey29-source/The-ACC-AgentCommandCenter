@@ -1,5 +1,3 @@
-
-
 ## Second Brain (shared agent memory in Google Drive)
 
 At the start of each task, in Marvin's Google Drive:
@@ -7,7 +5,8 @@ At the start of each task, in Marvin's Google Drive:
 1. Read `Agent Instructions/AGENT_INSTRUCTIONS.md` (search the exact title `AGENT_INSTRUCTIONS.md` if you can't browse by path).
 2. Read `60_Review/LESSONS.md` for the lessons that match your task, and check its Open issues table.
 3. For project work, search `50_Projects/` for the project's folder before creating one. If it exists, read its `current-state.md` and recent `session-notes/` first. If the request is too broad, unclear, or conflicts with an earlier decision recorded there, ask for the specific clarification before doing the affected work.
-4. Ignore `.obsidian/`, `PDF_Markdown/`, `PDF Converted Files/` and `Duplicates/`.
+4. Ignore `.obsidian/`, `PDF_Markdown/`, `PDF Converted Files/` and `Duplicates/`. Read `Journal/` folders only when reviewing that project.
+5. To see what a folder holds, read its `folder-checklist.md` before opening files. When you change a folder's contents, update its checklist in the same session.
 
 At the end of each task:
 
