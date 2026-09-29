@@ -95,9 +95,10 @@ Where OpenAI supports ChatGPT identity and eligible plan-backed app usage, ACC s
 
 ACC's defensible product value is **not** another foundation model or generic coding agent.
 
-ACC owns the software-project/workforce layer:
+ACC owns the **project/work/workforce layer**. Software development is one major workload, not the boundary of the product:
 
-- project identity and current state;
+- project/workspace identity and current state;
+- workstreams that may be software, business, research, communication, planning, data, creative, administrative, or mixed;
 - task graphs, dependencies, priorities, and acceptance requirements;
 - agent capability registry;
 - worker availability and resource leases;
@@ -105,7 +106,8 @@ ACC owns the software-project/workforce layer:
 - branch/worktree/workspace ownership rules;
 - delegated instruction records;
 - execution history and structured progress;
-- test/build/review evidence;
+- test/build/review evidence where applicable;
+- document, communication, research, meeting, analysis, and business-work artifacts/evidence where applicable;
 - independent-review policy;
 - merge/publication gates;
 - local/cloud execution selection;
@@ -116,7 +118,7 @@ ACC owns the software-project/workforce layer:
 - cross-session continuity;
 - web/plugin/desktop synchronization.
 
-Models and harnesses are workers beneath this layer.
+Agents, models, harnesses, connected apps, document/workspace systems, and local tools are workers/capabilities beneath this layer.
 
 ## 6. OpenAI platform mapping
 
@@ -217,6 +219,44 @@ Where available and eligible:
 
 These are integration conveniences, not the canonical ACC identity or billing database.
 
+
+### 6.8 ChatGPT Space and ChatGPT Work
+
+ChatGPT Space is a strong optional native artifact/workspace layer for ACC's OpenAI-only path.
+
+Use it conceptually for work products such as:
+
+- project briefs and plans;
+- meeting agendas, notes, decisions, and follow-ups;
+- research summaries;
+- business plans and operating documents;
+- handoffs and status pages;
+- shared team pages and nested supporting pages;
+- uploaded/reference files and collaborative working material.
+
+Space can reduce the need to create a Google Doc merely to obtain an editable collaborative document inside ChatGPT. However, ACC must **not** assume a public developer/plugin API for Space until OpenAI documents one. Until then, treat Space as a native user/agent surface that ACC can deep-link to or use through supported ChatGPT capabilities, not as ACC's canonical database.
+
+ChatGPT Work is also part of the OpenAI-complete baseline for non-coding work. Where available, ACC should be able to delegate work that uses connected apps/files and produces documents, spreadsheets, presentations, reports, Sites, research, or other finished artifacts rather than forcing every task through Codex.
+
+Add two provider abstractions alongside execution workers:
+
+```
+WorkspaceProvider
+  - ChatGPT Space (when programmatic integration is officially exposed)
+  - ACC internal workspace/artifact store
+  - Google Drive
+  - Box / Dropbox / SharePoint / future stores
+
+AppConnector
+  - Gmail / Outlook
+  - Google Calendar
+  - Drive / Docs / Sheets / Slides
+  - business systems
+  - future plugins/MCP services
+```
+
+ACC task/project state remains authoritative. Space, Drive, and other stores hold user-facing artifacts and collaborative content.
+
 ## 7. Harness strategy
 
 ACC no longer chooses one universal harness.
@@ -245,7 +285,40 @@ Use it as an optional experimentation/optimization system:
 
 HarnessX may help ACC learn *how* a worker should run. The ACC Decision Engine chooses *which* eligible worker/path should run. The production harness actually runs it.
 
-## 8. Multi-agent support
+## 8. General work and multi-agent support
+
+ACC is a **general work/project command center**, not a coding-only agent manager.
+
+A task should be defined by required capabilities, inputs, permissions, artifacts, acceptance checks, and risk — not by whether it is "coding."
+
+### Example work domains
+
+- **Software/engineering:** code, tests, CI, debugging, release work.
+- **Business operations:** plans, SOPs, vendor comparisons, process design, KPI reviews.
+- **Communication:** read/triage email, draft/reply, prepare updates, summarize threads.
+- **Meetings/calendar:** prepare agendas, gather context, schedule/reschedule, produce notes/follow-ups.
+- **Research/analysis:** web research, document review, market/competitive research, data analysis.
+- **Documents/data:** create/edit documents, spreadsheets, presentations, reports, trackers.
+- **Creative/product:** website design, copy, branding assets, prototypes, image/video workflows.
+- **3D/game development:** Blender, Unity, Unreal, asset pipelines, builds and testing.
+- **Administrative/project management:** task planning, dependencies, approvals, recurring work, handoffs.
+
+### Capability-based routing
+
+ACC should route by capabilities such as `code.edit`, `email.read`, `email.send`, `calendar.schedule`, `docs.author`, `spreadsheet.analyze`, `research.web`, `browser.use`, `design.web`, `blender.edit`, `unity.build`, or `unreal.package`.
+
+The same task graph/review/continuity system can therefore coordinate a mixed project. For example, a website launch might simultaneously include:
+
+- a research agent comparing competitors;
+- a business agent drafting positioning;
+- a design agent preparing page structure and visuals;
+- a coding agent building the site;
+- an email/calendar agent coordinating stakeholder review;
+- a document agent maintaining the launch plan.
+
+The orchestrator/Decision Engine selects an eligible worker or app path based on required capabilities, evidence, cost, policy, and availability.
+
+### Optional external agents
 
 OpenAI-only operation is complete, but ACC should support optional installed/connected workers including:
 
@@ -409,16 +482,19 @@ The new OpenAI platform direction does **not** remove these ACC principles:
 
 ### Phase 1 — architecture contracts
 - Define shared ACC Platform API/state model for Plugin, Web, and Desktop.
-- Define `WorkerProvider`, `DecisionProvider`, `ExecutionNode`, and `CapabilityConnector` interfaces.
+- Generalize the core domain from coding tasks to capability-based work/tasks/projects.
+- Define `WorkerProvider`, `DecisionProvider`, `ExecutionNode`, `CapabilityConnector`, `WorkspaceProvider`, and `AppConnector` interfaces.
 - Keep current Python core where useful; avoid rewriting proven persistence/review logic merely for technology preference.
 
 ### Phase 2 — OpenAI-complete baseline
 - ACC Plugin.
 - Auth/account connection.
 - ACC Web as authenticated universal full UI.
-- Codex Cloud worker integration.
+- Codex Cloud worker integration for coding/engineering work.
+- ChatGPT Work path for research, connected-app work, and artifact production.
+- Space-aware artifact/workspace UX where supported, without assuming an undocumented API.
 - Codex native harness/App Server event integration.
-- OpenAI-first task execution and review path.
+- OpenAI-first task execution and review path across coding and non-coding work.
 - DecisionProvider with deterministic fallback; add OpenAI Decisions when available/approved.
 
 ### Phase 3 — local power node
@@ -449,15 +525,17 @@ A user with only the supported OpenAI/ChatGPT ecosystem can:
 
 1. discover/connect ACC;
 2. open ACC Web without a desktop install;
-3. create/import a project;
+3. create/import a project or workstream;
 4. send natural-language work through ChatGPT/ACC;
-5. have Codex work in the cloud;
-6. see live/structured progress;
-7. run ACC review/gates;
-8. continue from phone/tablet;
-9. optionally install Desktop later for local-only capabilities.
+5. use Codex Cloud for coding when coding is required;
+6. use ChatGPT Work/connected apps for non-coding tasks such as research, documents, email, calendar, planning, and analysis;
+7. create and organize user-facing artifacts through supported OpenAI workspace/document surfaces such as Space/Work, while ACC retains authoritative project/task state;
+8. see live/structured progress across mixed worker types;
+9. run ACC review/approval/gates appropriate to the work;
+10. continue from phone/tablet;
+11. optionally install Desktop later for local-only capabilities.
 
-No third-party model is required.
+No third-party model is required and no coding task is required for ACC to be useful.
 
 ### Scenario B — extended customer
 The same user can additionally connect Claude/DeepSeek/Gemini/Grok/local workers and Blender/Unity/Unreal. ACC can route suitable work to them without changing the project/task model, and can fall back to the OpenAI baseline if those integrations are unavailable.
