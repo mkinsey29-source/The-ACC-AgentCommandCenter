@@ -7,11 +7,11 @@ from ..contracts import provider_id
 from .models import VerifiedIdentity
 
 
-@runtime_checkable
 class IdentityVerificationError(ValueError):
     """Provider assertion could not be verified. Provider adapters should not include secrets."""
 
 
+@runtime_checkable
 class IdentityVerifier(Protocol):
     """Verifies one external identity assertion before ACC creates a session.
 

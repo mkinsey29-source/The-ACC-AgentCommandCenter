@@ -5,7 +5,7 @@ import hashlib
 import secrets
 import time
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 
 from ..contracts import capability_list, capability_name
 from ..state_authority import policy_for
@@ -14,21 +14,31 @@ from .models import AuthContext, SessionRecord, VerifiedIdentity
 from .repository import AuthRepository
 
 
-class AuthError(ValueError):
-    """Base class for safe-to-surface hosted auth failures."""
+class AuthError(Exception):
+    """Base class for safe-to-surface hosted auth failures.
+
+    Deliberately not a ``ValueError``: M09 must map auth failures explicitly (401/403) and must not
+    let a generic input-validation handler (400) swallow them, or vice versa.
+    """
 
 
 class AuthenticationError(AuthError):
-    """The caller has no usable ACC session/verified identity."""
+    """No usable principal: missing/invalid/revoked/expired session, unverified identity, or an
+    inactive user. M09 maps this to HTTP 401."""
 
 
 class AuthorizationError(AuthError):
-    """The caller is authenticated but lacks current account access."""
+    """A valid principal lacks access to the requested account, permission, entitlement, or
+    quota. M09 maps this to HTTP 403."""
+
+
+_SESSION_INACTIVE = 'ACC session is not active.'
+_ACCOUNT_UNAVAILABLE = 'ACC account is not available to this user.'
 
 
 def _token_digest(token: str) -> str:
     if not isinstance(token, str) or not token.startswith('accs_') or len(token) > 512:
-        raise AuthenticationError('Invalid ACC session token.')
+        raise AuthenticationError(_SESSION_INACTIVE)
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
 
 
@@ -72,57 +82,58 @@ class AuthService:
     def exchange_identity(
         self,
         provider: str,
-        assertion: dict,
+        assertion: Mapping,
         account_id: str,
         *,
         ttl_seconds: int | None = None,
     ) -> str:
-        verifier = self.identity_verifiers.get(provider)
+        """The only public login path: verify a provider assertion, then issue a session."""
+        verifier = self.identity_verifiers.get(provider) if isinstance(provider, str) else None
         if verifier is None:
             raise AuthenticationError('Identity provider is not configured.')
+        if not isinstance(assertion, Mapping):
+            raise AuthenticationError('Identity assertion could not be verified.')
         try:
             identity = verifier.verify(assertion)
-        except IdentityVerificationError as exc:
+        except Exception as exc:  # Fail closed; never surface provider detail (may hold secrets).
             raise AuthenticationError('Identity assertion could not be verified.') from exc
-        if not isinstance(identity, VerifiedIdentity) or identity.provider != provider:
+        # Exact type: a subclass could carry provider credentials or extra claims into ACC.
+        if type(identity) is not VerifiedIdentity or identity.provider != provider:
             raise AuthenticationError('Identity verifier returned an invalid provider assertion.')
-        return self.create_session(identity, account_id, ttl_seconds=ttl_seconds)
+        return self._issue_session(identity, account_id, ttl_seconds=ttl_seconds)
 
-    def create_session(
+    def _issue_session(
         self,
         identity: VerifiedIdentity,
         account_id: str,
         *,
         ttl_seconds: int | None = None,
     ) -> str:
+        """Issue a session for an identity a configured verifier has already verified.
+
+        Private on purpose: there is no public API that turns a caller-constructed
+        ``VerifiedIdentity`` into a session. Hosted code must log in through ``exchange_identity``.
+        """
+        ttl = self.default_ttl_seconds if ttl_seconds is None else ttl_seconds
+        if type(ttl) is not int or not 60 <= ttl <= self.max_ttl_seconds:
+            raise ValueError('Requested session lifetime is outside the allowed range.')
         user_id = self.repository.resolve_identity(identity)
         if user_id is None:
             raise AuthenticationError('Identity is not linked to an ACC user.')
-        user = self.repository.user(user_id)
-        if user is None or user.status != 'active':
-            raise AuthorizationError('ACC user is not active.')
-        account = self.repository.account(account_id)
-        if account is None:
-            raise AuthorizationError('ACC account is unavailable.')
-        if account.status != 'active':
-            raise AuthorizationError('ACC account is not active.')
-        membership = self.repository.membership(account_id, user_id)
-        if membership is None:
-            raise AuthorizationError('User is not a member of this ACC account.')
-        entitlements = self.repository.entitlements(account_id)
-        if entitlements is None:
-            raise AuthorizationError('ACC account has no entitlement snapshot.')
-
-        ttl = self.default_ttl_seconds if ttl_seconds is None else ttl_seconds
-        if type(ttl) is not int or not 60 <= ttl <= self.max_ttl_seconds:
-            raise AuthenticationError('Requested session lifetime is outside the allowed range.')
+        self._active_user(user_id)
+        # Every account-side refusal uses one message so a verified identity cannot probe which
+        # account IDs exist, are suspended, or have members.
+        try:
+            account, membership, _ = self._account_access(account_id, user_id)
+        except AuthorizationError:
+            raise AuthorizationError(_ACCOUNT_UNAVAILABLE) from None
 
         now = int(self.clock())
         token = 'accs_' + secrets.token_urlsafe(32)
         record = SessionRecord(
             session_id=uuid.uuid4().hex,
             account_id=account.account_id,
-            user_id=user_id,
+            user_id=membership.user_id,
             issued_at=now,
             expires_at=now + ttl,
             identity_provider=identity.provider,
@@ -130,28 +141,42 @@ class AuthService:
         self.repository.save_session(_token_digest(token), record)
         return token
 
-    def authenticate(self, token: str, *, account_id: str | None = None) -> AuthContext:
-        record = self.repository.session(_token_digest(token))
-        if record is None or record.revoked:
-            raise AuthenticationError('ACC session is not active.')
-        if int(self.clock()) >= record.expires_at:
-            raise AuthenticationError('ACC session has expired.')
+    def _active_user(self, user_id: str):
+        user = self.repository.user(user_id)
+        if user is None or user.user_id != user_id or user.status != 'active':
+            # An inactive user is no longer a usable principal: 401, not 403.
+            raise AuthenticationError('ACC user is not active.')
+        return user
 
+    def _account_access(self, account_id: str, user_id: str):
+        """Load current account-side state, rejecting records keyed to another tenant/user."""
+        account = self.repository.account(account_id)
+        if account is None or account.account_id != account_id or account.status != 'active':
+            raise AuthorizationError('ACC account is not active.')
+        membership = self.repository.membership(account_id, user_id)
+        if (membership is None or membership.account_id != account_id
+                or membership.user_id != user_id):
+            raise AuthorizationError('ACC account membership is no longer active.')
+        entitlements = self.repository.entitlements(account_id)
+        if entitlements is None or entitlements.account_id != account_id:
+            raise AuthorizationError('ACC account has no entitlement snapshot.')
+        return account, membership, entitlements
+
+    def authenticate(self, token: str, *, account_id: str | None = None) -> AuthContext:
+        """Resolve a session to its current principal and account state.
+
+        With ``account_id=None`` this is identity-level only ("who am I"). Every account-scoped
+        operation must pass the route's tenant ID, or use ``authorize``/``require_limit``, which
+        require it.
+        """
+        record = self.repository.session(_token_digest(token))
+        # Unknown, revoked and expired sessions are deliberately indistinguishable.
+        if record is None or record.revoked or int(self.clock()) >= record.expires_at:
+            raise AuthenticationError(_SESSION_INACTIVE)
         if account_id is not None and record.account_id != account_id:
             raise AuthorizationError('ACC session is not valid for this account.')
-
-        user = self.repository.user(record.user_id)
-        if user is None or user.status != 'active':
-            raise AuthorizationError('ACC user is not active.')
-        account = self.repository.account(record.account_id)
-        if account is None or account.status != 'active':
-            raise AuthorizationError('ACC account is not active.')
-        membership = self.repository.membership(record.account_id, record.user_id)
-        if membership is None:
-            raise AuthorizationError('ACC account membership is no longer active.')
-        entitlements = self.repository.entitlements(record.account_id)
-        if entitlements is None:
-            raise AuthorizationError('ACC account has no entitlement snapshot.')
+        self._active_user(record.user_id)
+        account, membership, entitlements = self._account_access(record.account_id, record.user_id)
         return AuthContext(
             session=record,
             account=account,
@@ -163,15 +188,17 @@ class AuthService:
         self,
         token: str,
         *,
+        account_id: str,
         permissions: Iterable[str] = (),
         entitlements: Iterable[str] = (),
-        account_id: str | None = None,
     ) -> AuthContext:
-        context = self.authenticate(token, account_id=account_id)
+        """Account-scoped check. ``account_id`` is required so a token for one tenant can never be
+        used for another tenant's route (confused deputy)."""
         required_permissions = capability_list(
             tuple(permissions), label='required permissions', limit=200)
         required_entitlements = capability_list(
             tuple(entitlements), label='required entitlements', limit=200)
+        context = self.authenticate(token, account_id=account_id)
 
         granted = frozenset(context.membership.permissions)
         missing_permissions = [name for name in required_permissions if name not in granted]
@@ -184,11 +211,16 @@ class AuthService:
             raise AuthorizationError('Entitlement required: ' + ', '.join(missing_entitlements) + '.')
         return context
 
-    def require_limit(self, token: str, name: str, requested: int) -> AuthContext:
+    def require_limit(self, token: str, name: str, requested: int, *, account_id: str) -> AuthContext:
+        """Check a prospective *total* against the account's current quota ceiling.
+
+        This is a check, not a reservation: callers that consume quota must re-check and record
+        usage atomically in their own transaction (M09/M20), or concurrent requests can overshoot.
+        """
         if type(requested) is not int or requested < 0:
             raise ValueError('requested must be a nonnegative integer.')
-        context = self.authenticate(token)
         limit_name = capability_name(name, 'entitlement limit')
+        context = self.authenticate(token, account_id=account_id)
         allowed = context.entitlements.limit(limit_name)
         if allowed is None:
             raise AuthorizationError('Entitlement limit is not configured: ' + limit_name + '.')

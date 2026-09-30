@@ -1,6 +1,6 @@
 # M08 — Accounts, Authentication, Permissions, and Entitlements
 
-**Status:** Core v1 primitives implemented on `temporary/m08-auth-entitlements-v1`; production identity and durable storage adapters remain.
+**Status:** Core v1 primitives, independently security-reviewed and corrected in PR #29 (2026-09-30). Production identity and durable storage adapters remain.
 
 ## Purpose
 
@@ -49,9 +49,18 @@ The plaintext token is returned to the caller once. The repository stores only i
 This is safe for high-entropy random bearer tokens and avoids a database containing directly usable
 session credentials.
 
-A session is bound to exactly one ACC account. M09 should pass the route/account tenant ID into
-`authenticate(..., account_id=...)` or `authorize(..., account_id=...)`; a token issued for one
-account is rejected for another.
+A session is bound to exactly one ACC account. `authorize(..., account_id=...)` and
+`require_limit(..., account_id=...)` **require** the route's tenant ID, so a token issued for one
+account is rejected for another. `authenticate(token)` without `account_id` is identity-level only
+("who am I") and must never be the basis of an account-scoped decision.
+
+The service also rejects any user, account, membership or entitlement record whose own IDs do not
+match the key it was requested with. A buggy durable repository therefore fails closed instead of
+leaking another tenant's grants.
+
+Unknown, revoked and expired sessions all return the same `AuthenticationError`. At login, a
+nonexistent, inactive, unentitled or non-member account all return the same `AuthorizationError`,
+so a verified identity cannot enumerate account IDs.
 
 The service checks current user, account, membership, and entitlement state on every request.
 Permissions and entitlements are **not** frozen into the bearer token. Therefore suspension,
@@ -65,22 +74,29 @@ the configured maximum, with an absolute implementation ceiling of seven days.
 
 M08 exposes separate safe error classes for M09:
 
-- `AuthenticationError`: invalid, missing, revoked, or expired ACC session; unverified/unconfigured
-  identity provider;
-- `AuthorizationError`: the caller has a valid identity/session but lacks current account,
-  permission, or entitlement access.
+- `AuthenticationError` (HTTP 401): invalid, missing, revoked or expired ACC session; an
+  unverified or unconfigured identity provider; an identity not linked to a user; a suspended or
+  closed **user**;
+- `AuthorizationError` (HTTP 403): a valid principal lacks access to the account (wrong tenant,
+  suspended or closed account, removed membership, no entitlement snapshot), a permission, an
+  entitlement, or a quota.
 
-M09 can map these to HTTP 401 and HTTP 403 respectively without parsing error text.
+M09 maps these without parsing error text. `AuthError` is deliberately **not** a `ValueError`. An
+invalid request parameter, such as an out-of-range session lifetime or a malformed permission name,
+raises plain `ValueError` (HTTP 400).
 
 ## Identity-provider boundary
 
-Public login should go through `AuthService.exchange_identity()`, which delegates assertion
-verification to a configured `IdentityVerifier`. The verifier returns a `VerifiedIdentity`.
-Provider-specific access/refresh credentials do not enter the ACC session model.
+`AuthService.exchange_identity()` is the **only** public login path. It delegates assertion
+verification to a configured `IdentityVerifier`, and any verifier exception fails closed as a generic
+`AuthenticationError` without surfacing provider detail. The verifier must return exactly a
+`VerifiedIdentity`, not a subclass that could carry extra claims or provider credentials, for the
+same provider. Provider-specific access/refresh credentials never enter the ACC session model.
 
-`create_session(VerifiedIdentity, ...)` remains the trusted internal seam for tests and future
-server-side flows that already performed verification. M09 must not construct a
-`VerifiedIdentity` directly from untrusted HTTP input.
+There is no public method that turns a caller-constructed `VerifiedIdentity` into a session
+(`_issue_session` is private). M09 must not construct a `VerifiedIdentity` from untrusted HTTP
+input. Identities resolve by `(provider, subject)` only; email is display metadata and is never used
+for account linking.
 
 No specific external identity provider is selected in this module. Provider-specific adapters can be
 added without changing the account/session contract.
@@ -101,6 +117,11 @@ Entitlements are account-level platform state:
 - `features`: dotted feature identifiers such as `acc.web` or `workers.openai`;
 - `limits`: dotted quota identifiers mapped to nonnegative integer ceilings.
 
+`require_limit(token, name, requested, account_id=...)` compares a prospective **total** with the
+ceiling. A missing limit is refused (fail closed). It is a check, not a reservation: code that
+consumes quota must re-check and record usage atomically in its own transaction, or concurrent
+requests can overshoot.
+
 M08 intentionally does not hard-code commercial plan names, prices, or purchase flows. Billing or
 subscription systems can produce an `EntitlementSnapshot` without changing the auth engine.
 
@@ -118,13 +139,20 @@ Focused M08 verification currently covers:
 - identity-verifier success/rejection;
 - M02 account/credential authority invariants.
 
-Focused result: **13 tests pass**, plus Python compilation.
+Independent review (2026-09-30) found that the committed package did not import:
+`@runtime_checkable` had been applied to the exception class. The earlier 13/13 result came from a
+hand-built copy. After the fixes, `tests/test_auth_entitlements.py` has **26 tests, all passing** on
+the real checkout, including 13 security regressions.
 
 ## Remaining work before M08 is production-complete
 
 1. Add a durable hosted `AuthRepository` adapter with transactional account/membership/session state.
+   Prefer one snapshot read per request (session + user + account + membership + entitlements in one
+   transaction) over five separate reads, and implement `save_session` as insert-only.
 2. Add at least one production identity-provider verifier and account-linking/provisioning flow.
-3. Define session cleanup/rotation and security-event/audit persistence for the hosted service.
+3. Define session cleanup/rotation, **revoke-all-sessions for a user or account** (incident response;
+   today only per-token revocation exists, though status checks still block suspended principals), and
+   security-event/audit persistence for the hosted service.
 4. Wire the authoritative subscription/billing source into `EntitlementSnapshot` updates.
 5. Add hosted integration tests through M09 (401/403 mapping, account isolation, reconnect/revocation).
 6. Confirm the already-frozen credential-holder policy with Marvin before M08/M16 introduces any

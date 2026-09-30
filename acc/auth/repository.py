@@ -25,8 +25,10 @@ class AuthRepository(Protocol):
     def membership(self, account_id: str, user_id: str) -> Membership | None: ...
     def entitlements(self, account_id: str) -> EntitlementSnapshot | None: ...
     def session(self, token_digest: str) -> SessionRecord | None: ...
-    def save_session(self, token_digest: str, session: SessionRecord) -> None: ...
-    def revoke_session(self, token_digest: str) -> bool: ...
+    def save_session(self, token_digest: str, session: SessionRecord) -> None:
+        """Insert-only: must refuse to overwrite an existing digest."""
+    def revoke_session(self, token_digest: str) -> bool:
+        """Atomically mark one session revoked; return whether it was active before."""
 
 
 class InMemoryAuthRepository:
@@ -89,6 +91,8 @@ class InMemoryAuthRepository:
         return self._sessions.get(token_digest)
 
     def save_session(self, token_digest: str, session: SessionRecord) -> None:
+        if token_digest in self._sessions:
+            raise ValueError('Session digest already exists.')
         self._sessions[token_digest] = session
 
     def revoke_session(self, token_digest: str) -> bool:
