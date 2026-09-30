@@ -32,7 +32,8 @@ class CommandMutationTests(unittest.TestCase):
         repo.put_membership(Membership(
             'acct-1', 'user-1', permissions=(
                 'project.write','task.write','task.cancel','worker.control')))
-        repo.put_entitlements(EntitlementSnapshot('acct-1', features=('acc.web',)))
+        repo.put_entitlements(EntitlementSnapshot(
+            'acct-1', features=('acc.web',), limits={'tasks.active':2}))
         self.auth = AuthService(repo, identity_verifiers=(Verifier(),))
         self.token = self.auth.exchange_identity('openai', {'subject':'subject-1'}, 'acct-1')
         self.authorization = 'Bearer ' + self.token
