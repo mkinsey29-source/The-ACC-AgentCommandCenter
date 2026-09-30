@@ -181,3 +181,33 @@ Deployment requirements not handled inside this module:
 After independent review and executable verification of this transport slice, the next M09 work is
 command/mutation endpoints with idempotent operation IDs and optimistic revisions, plus the durable
 hosted repository/runtime needed to deploy the real Platform service.
+
+
+## Remote command/mutation slice (in progress)
+
+The next M09 slice is implemented on `temporary/m09-command-mutations-v1`.
+
+It adds a deliberately small remote mutation vocabulary:
+
+- `task.create` -> `task.write`;
+- `task.cancel` -> `task.cancel`;
+- `project.mode` -> `project.write`;
+- `worker.pause` / `worker.resume` -> `worker.control`.
+
+Every command carries an account-scoped `operation_id`, explicit `expected_revision`, command
+payload, and authenticated actor. The durable repository contract requires one atomic transaction
+covering the idempotency claim, optimistic revision comparison, quota reservation, mutation, audit
+record, emitted Platform event, and persisted command result.
+
+A retry with the same operation ID and identical fingerprint returns the original result with
+`replayed=true`; reusing that ID for different input is a 409 idempotency conflict. A stale revision
+is a 409 revision conflict and returns the current revision without applying the mutation. Quota
+failure is also atomic: no mutation, audit, event, idempotency result, or partial reservation may
+commit.
+
+`InMemoryCommandRepository` is a deterministic reference implementation for contract/adversarial
+tests, not the production durable store. The hosted HTTP route is
+`POST /v1/accounts/{account_id}/projects/{project_id}/commands` and accepts a bounded JSON body.
+
+The production durable runtime still must implement the same transaction semantics in its database,
+plus rate limits and deployment concerns identified by the PR #31 review.
