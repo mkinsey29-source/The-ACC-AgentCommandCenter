@@ -17,6 +17,8 @@ import threading
 import time
 import uuid
 
+from .domain import normalize_task_fields
+
 
 def now():
     return time.time()
@@ -553,15 +555,18 @@ class Coordinator:
                 'argv': argv, 'status': 'queued', 'activity': 'Ready to start.', 'next_step': 'Run assigned worker',
                 'created': now(), 'run_id': None, 'pid': None, 'exit_code': None, 'evidence': [], 'runs': [],
                 'review': None, 'timeout_seconds': timeout, 'timed_out': False}
-        for key, default in (('task_area', 'general'), ('required_capabilities', []),
-                             ('risk', 'medium'), ('priority', 50), ('depends_on', []),
-                             ('knowledge_scopes', [])):
-            task[key] = payload.get(key, default)
+        task.update(normalize_task_fields(payload))
+        task['knowledge_scopes'] = [item.strip() for item in knowledge_scopes]
         return task
 
     def create(self, payload):
         with self.lock:
             task = self.build_task(payload)
+            if task['depends_on']:
+                known = {t['id'] for t in self.store.tasks()
+                         if not t.get('internal') and t.get('task_kind') != 'workflow_step'}
+                if any(item not in known for item in task['depends_on']):
+                    raise ValueError('depends_on must contain existing project task IDs.')
             self.store.save(task, 'task_created', {'message': task['title'], 'revision': 1})
             return task
 
@@ -806,12 +811,20 @@ class Coordinator:
         workspace lock (running_task) still applies for the whole wait, same as a subprocess run.
         """
         workflow = task['workflow']
+        contract = {key: task.get(key, default) for key, default in (
+            ('task_area', 'general'), ('workstream_id', None), ('required_capabilities', []),
+            ('inputs', {}), ('permissions', []), ('expected_artifacts', []),
+            ('acceptance_requirements', []), ('resource_requirements', []))}
         job = self.integrations.submit({
             'capability': agent['capability'], 'provider': agent.get('provider'),
-            'task_id': task['id'], 'input': {
+            'task_id': task['id'],
+            # Pre-spine tasks lack these fields; the old implicit defaults still apply to them.
+            'data_classification': task.get('data_classification', 'internal'),
+            'workspace_scope': task.get('workspace_scope', 'project'),
+            'input': {
                 'title': task['title'], 'instruction': task['instruction'],
                 'round': workflow['round'], 'history': workflow['history'][-6:],
-                'knowledge': knowledge_checkout}})
+                'knowledge': knowledge_checkout, 'contract': contract}})
         workflow['job_id'], workflow['phase'] = job['id'], 'running'
         task.update(status='running', run_id=run_id, pid=None, active_agent=agent['id'], exit_code=None,
                     activity='Dispatched to ' + agent['name'] + '; awaiting job completion.',
