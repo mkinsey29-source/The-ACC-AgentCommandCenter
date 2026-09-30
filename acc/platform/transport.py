@@ -54,6 +54,7 @@ class EventTicket:
     account_id: str
     project_id: str
     cursor: int
+    authorization: str
     expires_at: float
 
 
@@ -77,9 +78,12 @@ class EventTicketStore:
     def _digest(ticket: str) -> str:
         return hashlib.sha256(ticket.encode('utf-8')).hexdigest()
 
-    async def issue(self, account_id: str, project_id: str, cursor: int) -> str:
+    async def issue(
+        self, account_id: str, project_id: str, cursor: int, authorization: str,
+    ) -> str:
         raw = 'accw_' + secrets.token_urlsafe(32)
-        record = EventTicket(account_id, project_id, cursor, self.clock() + self.ttl_seconds)
+        record = EventTicket(
+            account_id, project_id, cursor, authorization, self.clock() + self.ttl_seconds)
         async with self._lock:
             self._expire()
             digest = self._digest(raw)
@@ -188,7 +192,7 @@ class HostedTransport:
             self.api.events_after, authorization, account_id, project_id, after, limit=1)
         if response.status != 200:
             return response
-        ticket = await self.tickets.issue(account_id, project_id, after)
+        ticket = await self.tickets.issue(account_id, project_id, after, authorization)
         return ApiResponse(201, {
             'ticket': ticket,
             'expires_in': self.tickets.ttl_seconds,
@@ -254,18 +258,58 @@ class HostedTransport:
         cursor = ticket.cursor
 
         while True:
+            # Re-authorize every poll using the session that created the one-time ticket. The
+            # bearer is held only in process memory for this short-lived connection and is never
+            # sent in the WebSocket URL or event payload.
             response = self.api.handle(
                 self.api.events_after,
-                'Bearer ' + self._session_token_unavailable(),
+                ticket.authorization,
                 ticket.account_id,
                 ticket.project_id,
                 cursor,
             )
-            # Tickets intentionally do not contain/recover the bearer session. Reauthorization is
-            # performed through a transport-supplied callback in the next method.
-            await send({'type': 'websocket.close', 'code': 1011, 'reason': 'Transport misconfigured.'})
-            return
+            if response.status == 401:
+                await send({'type': 'websocket.close', 'code': 4401, 'reason': 'Session ended.'})
+                return
+            if response.status == 403:
+                await send({'type': 'websocket.close', 'code': 4403, 'reason': 'Access ended.'})
+                return
+            if response.status != 200:
+                await send({'type': 'websocket.close', 'code': 1011, 'reason': 'Event stream failed.'})
+                return
 
-    @staticmethod
-    def _session_token_unavailable():
-        return ''
+            body = dict(response.body)
+            if body.get('reset_required'):
+                await send({'type': 'websocket.send', 'text': json.dumps({
+                    'type': 'reset_required',
+                    'cursor': body['cursor'],
+                    'oldest_available': body.get('oldest_available'),
+                }, separators=(',', ':'))})
+                await send({'type': 'websocket.close', 'code': 4009, 'reason': 'State refresh required.'})
+                return
+
+            events = body.get('events', [])
+            if events:
+                cursor = body['cursor']
+                await send({'type': 'websocket.send', 'text': json.dumps({
+                    'type': 'events',
+                    'events': events,
+                    'cursor': cursor,
+                    'has_more': body.get('has_more', False),
+                }, separators=(',', ':'))})
+                if body.get('has_more'):
+                    continue
+
+            try:
+                message = await asyncio.wait_for(receive(), timeout=self.poll_seconds)
+            except asyncio.TimeoutError:
+                continue
+            if message.get('type') == 'websocket.disconnect':
+                return
+            if message.get('type') == 'websocket.receive':
+                # Client data is not a command channel. A tiny ping is the only accepted input.
+                if message.get('text') == 'ping':
+                    await send({'type': 'websocket.send', 'text': '{"type":"pong"}'})
+                else:
+                    await send({'type': 'websocket.close', 'code': 4400, 'reason': 'Read-only stream.'})
+                    return
