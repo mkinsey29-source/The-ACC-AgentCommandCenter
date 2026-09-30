@@ -103,8 +103,10 @@ def validate_event_batch(
         if event.seq <= previous:
             raise ValueError('Event source returned a replay/out-of-order event.')
         previous = event.seq
-    if not batch.events and batch.cursor != after:
+    if not batch.events and not batch.reset_required and batch.cursor != after:
         raise ValueError('Empty event batch must preserve the requested cursor.')
+    if batch.reset_required and batch.cursor < batch.oldest_available - 1:
+        raise ValueError('Reset cursor cannot precede the retained event window.')
     if batch.has_more and not batch.events:
         raise ValueError('Event source cannot report more events without advancing the cursor.')
     return batch
