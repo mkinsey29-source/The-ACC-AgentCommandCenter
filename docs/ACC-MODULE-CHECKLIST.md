@@ -14,7 +14,7 @@ top-level review, integration, and its acceptance checks pass on the integrated 
 | M05 | Connector/provider framework | COMPLETE (v1) | M01, M03 | `acc/connectors.py`; facets/boundaries and atomic configured/healthy/enabled state. The in-memory registry is not yet persisted or wired into routing (M04/M16). Individual connectors are later modules. |
 | M06 | Knowledge Engine / Second Brain | PARTIAL | M02, M05 | Strong Obsidian lifecycle exists; storage backend must be generalized to `KnowledgeProvider`. |
 | M07 | Review/evidence/acceptance engine | PARTIAL | M03 | Strong coding path exists; general artifact acceptance remains. |
-| M08 | Accounts/auth/permissions/entitlements | NOT STARTED | M01, M02 | Required for hosted product. |
+| M08 | Accounts/auth/permissions/entitlements | PARTIAL (core v1) | M01, M02 | `acc/auth/` now has user/account/membership/entitlement contracts, provider-verifier boundary, opaque account-bound sessions, exact permission checks, quota checks, revocation, and 26 focused tests (independently security-reviewed; 10 defects fixed). Durable hosted storage, production identity verifier/provisioning, billing-backed entitlement updates, and M09 integration remain. See `docs/M08-AUTH-ENTITLEMENTS.md`. |
 | M09 | Hosted Platform API/events | PARTIAL | M01, M02, M08 | Current API is loopback/local only. |
 | M10 | Global Command Center UI shell | DESIGN PARTIAL | M09 | Preserve command-center shell, Master Control, Orchestrator Chat, Play-by-Play, Attention. |
 | M11 | Workspace framework | NOT STARTED | M10 | Defines center/rail modules and connector recommendations. |
