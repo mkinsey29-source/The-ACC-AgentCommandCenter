@@ -10,8 +10,10 @@ from .models import (
     EntitlementSnapshot,
     Membership,
     SessionRecord,
+    UserState,
     VerifiedIdentity,
 )
+from .identity import IdentityVerifier
 from .repository import AuthRepository, InMemoryAuthRepository
 from .service import AuthError, AuthService
 
@@ -23,8 +25,10 @@ __all__ = [
     'AuthRepository',
     'AuthService',
     'EntitlementSnapshot',
+    'IdentityVerifier',
     'InMemoryAuthRepository',
     'Membership',
     'SessionRecord',
+    'UserState',
     'VerifiedIdentity',
 ]
