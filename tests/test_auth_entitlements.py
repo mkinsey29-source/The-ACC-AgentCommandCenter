@@ -2,9 +2,12 @@ import unittest
 
 from acc.auth import (
     AccountState,
+    AuthenticationError,
+    AuthorizationError,
     AuthError,
     AuthService,
     EntitlementSnapshot,
+    IdentityVerificationError,
     InMemoryAuthRepository,
     Membership,
     UserState,
@@ -71,9 +74,9 @@ class AuthEntitlementTests(unittest.TestCase):
             entitlements=('acc.web', 'workers.openai'),
         )
         self.assertEqual(context.session.user_id, 'user-1')
-        with self.assertRaisesRegex(AuthError, 'Permission denied'):
+        with self.assertRaisesRegex(AuthorizationError, 'Permission denied'):
             self.auth.authorize(token, permissions=('connector.manage',))
-        with self.assertRaisesRegex(AuthError, 'Entitlement required'):
+        with self.assertRaisesRegex(AuthorizationError, 'Entitlement required'):
             self.auth.authorize(token, entitlements=('desktop.node',))
 
     def test_entitlement_change_takes_effect_without_reissuing_token(self):
@@ -107,14 +110,14 @@ class AuthEntitlementTests(unittest.TestCase):
         self.clock.value += 59
         self.auth.authenticate(token)
         self.clock.value += 1
-        with self.assertRaisesRegex(AuthError, 'expired'):
+        with self.assertRaisesRegex(AuthenticationError, 'expired'):
             self.auth.authenticate(token)
 
         self.clock.value += 1
         token = self.token()
         self.assertTrue(self.auth.revoke(token))
         self.assertFalse(self.auth.revoke(token))
-        with self.assertRaisesRegex(AuthError, 'not active'):
+        with self.assertRaisesRegex(AuthenticationError, 'not active'):
             self.auth.authenticate(token)
 
     def test_cross_account_membership_is_required(self):
@@ -134,6 +137,13 @@ class AuthEntitlementTests(unittest.TestCase):
         with self.assertRaisesRegex(AuthError, 'user is not active'):
             self.auth.authenticate(token)
 
+    def test_account_scope_is_bound_into_the_session(self):
+        token = self.token()
+        with self.assertRaisesRegex(AuthorizationError, 'not valid for this account'):
+            self.auth.authenticate(token, account_id='acct-2')
+        with self.assertRaisesRegex(AuthorizationError, 'not valid for this account'):
+            self.auth.authorize(token, account_id='acct-2')
+
     def test_identity_verifier_is_the_login_trust_boundary(self):
         class Verifier:
             id = 'openai'
@@ -147,8 +157,19 @@ class AuthEntitlementTests(unittest.TestCase):
         token = auth.exchange_identity('openai', {'subject': 'subject-123'}, 'acct-1')
         self.assertEqual(auth.authenticate(token).session.user_id, 'user-1')
         self.assertEqual(verifier.last_assertion, {'subject': 'subject-123'})
-        with self.assertRaisesRegex(AuthError, 'not configured'):
+        with self.assertRaisesRegex(AuthenticationError, 'not configured'):
             auth.exchange_identity('google', {'subject': 'x'}, 'acct-1')
+
+        class RejectingVerifier:
+            id = 'google'
+
+            def verify(self, assertion):
+                raise IdentityVerificationError('provider rejected assertion')
+
+        rejecting = AuthService(
+            self.repo, clock=self.clock, identity_verifiers=(RejectingVerifier(),))
+        with self.assertRaisesRegex(AuthenticationError, 'could not be verified'):
+            rejecting.exchange_identity('google', {'token': 'redacted'}, 'acct-1')
 
     def test_entitlement_limits_are_nonnegative_and_dotted(self):
         with self.assertRaises(ValueError):
