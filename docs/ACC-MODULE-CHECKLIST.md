@@ -35,7 +35,7 @@ top-level review, integration, and its acceptance checks pass on the integrated 
 
 | ID | Experiment | Status | Depends on | Acceptance |
 |---|---|---|---|---|
-| S01 | ChatGPT Sites as ACC Web host | READY FOR RUNTIME TEST | M10 design; live-backend pass waits M08/M09 | Owner-only Site builds the existing experiment, preserves the dense shell across desktop/tablet/mobile, switches all 9 workspaces, remains usable through the 2,000-event browser stress fixture, and later reaches ACC staging over HTTPS/WSS. See `docs/CHATGPT-SITES-ACC-FEASIBILITY.md`. |
+| S01 | ChatGPT Sites as ACC Web host | FRONTEND PASS / LIVE CONNECTIVITY IN PROGRESS | M10 design; production auth still waits M08/M09 | Owner-only Site deployed successfully; mobile interaction worked; 2,000-event stress test passed at 0.9 ms average center render / 346 ms total. Isolated synthetic HTTPS/WSS staging backend is built and locally verified 6/6. Remaining gate: deploy that fixture publicly and connect the Site. See `docs/CHATGPT-SITES-ACC-FEASIBILITY.md`. |
 
 S01 is an **experiment**, not a new spine dependency. It must not change the frozen M01/M02/M03/M05
 contracts. A failed Sites test leaves the normal ACC Web architecture intact and only changes the
