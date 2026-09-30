@@ -61,6 +61,19 @@ Keep the first deployment owner-only/private.
 
 - **PASS for frontend hosting:** items 1–8 succeed. Sites is suitable as an ACC Web hosting candidate.
 - **PASS for live ACC:** items 9–11 plus the future M08/M09 authentication tests succeed.
+
+## Live-connectivity staging backend
+
+`staging/` now contains an isolated public-backend fixture for the next test. It uses synthetic ACC
+state only, bearer auth for HTTPS, a one-time short-lived WebSocket ticket, an explicit Sites Origin
+allowlist, and no local ACC token.
+
+Local staging verification: **6/6 tests pass** plus Python compilation.
+
+The deployed Site client now obtains a ticket from `POST /api/ws-ticket` before opening the
+WebSocket. This avoids placing the longer-lived staging bearer token in the WebSocket URL.
+
+A public host is still required to turn the local staging fixture into HTTPS/WSS endpoints.
 - **PARTIAL:** Site hosting works but live backend/auth is blocked by unfinished ACC modules.
 - **FAIL:** Sites cannot deploy the compatible project, cannot sustain the shell interaction load, or blocks the required HTTPS/WebSocket transport.
 
