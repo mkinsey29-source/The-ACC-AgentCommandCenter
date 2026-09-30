@@ -16,6 +16,12 @@ class EmptyEvents:
     pass
 
 
+class Verifier:
+    id = 'openai'
+    def verify(self, assertion):
+        return VerifiedIdentity('openai', assertion['subject'])
+
+
 class CommandMutationTests(unittest.TestCase):
     def setUp(self):
         repo = InMemoryAuthRepository()
@@ -27,8 +33,8 @@ class CommandMutationTests(unittest.TestCase):
             'acct-1', 'user-1', permissions=(
                 'project.write','task.write','task.cancel','worker.control')))
         repo.put_entitlements(EntitlementSnapshot('acct-1', features=('acc.web',)))
-        self.auth = AuthService(repo)
-        self.token = self.auth._issue_session(identity, 'acct-1')
+        self.auth = AuthService(repo, identity_verifiers=(Verifier(),))
+        self.token = self.auth.exchange_identity('openai', {'subject':'subject-1'}, 'acct-1')
         self.authorization = 'Bearer ' + self.token
         self.commands = InMemoryCommandRepository()
         self.commands.put_project('acct-1','project-1')
