@@ -90,4 +90,6 @@ def validate_event_batch(
         previous = event.seq
     if not batch.events and batch.cursor != after:
         raise ValueError('Empty event batch must preserve the requested cursor.')
+    if batch.has_more and not batch.events:
+        raise ValueError('Event source cannot report more events without advancing the cursor.')
     return batch
