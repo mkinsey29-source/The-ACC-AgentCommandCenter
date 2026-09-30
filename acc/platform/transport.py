@@ -211,14 +211,17 @@ class HostedTransport:
 
         try:
             query = _query(scope)
-            response = self._route_http(method, parts, authorization, query)
+            body = None
+            if method == 'POST':
+                body = await self._read_json_body(receive)
+            response = self._route_http(method, parts, authorization, query, body)
             if asyncio.iscoroutine(response):
                 response = await response
         except (UnicodeError, ValueError):
             response = ApiResponse(400, {'error': {'code': 'invalid_request', 'message': 'Invalid request.'}})
         await self._send_json(send, response.status, response.body, origin=origin)
 
-    def _route_http(self, method, parts, authorization, query):
+    def _route_http(self, method, parts, authorization, query, body=None):
         if len(parts) >= 3 and parts[:2] == ['v1', 'accounts']:
             account_id = parts[2]
             if method == 'GET' and parts[3:] == ['projects']:
@@ -243,8 +246,8 @@ class HostedTransport:
                     after = self._query_int(query, 'after', 0)
                     return self._issue_ticket(authorization, account_id, project_id, after)
                 if method == 'POST' and tail == ['commands']:
-                    return self._execute_command(
-                        authorization, account_id, project_id, self._request_body)
+                    return self.api.handle(
+                        self.api.command, authorization, account_id, project_id, body)
 
         return ApiResponse(404, {'error': {'code': 'not_found', 'message': 'Not found.'}})
 
@@ -269,6 +272,30 @@ class HostedTransport:
             'expires_in': self.tickets.ttl_seconds,
             'websocket_path': '/v1/events',
         })
+
+    @staticmethod
+    async def _read_json_body(receive):
+        chunks = []
+        total = 0
+        while True:
+            message = await receive()
+            if message.get('type') == 'http.disconnect':
+                raise ValueError('request disconnected')
+            if message.get('type') != 'http.request':
+                raise ValueError('invalid HTTP request event')
+            chunk = message.get('body', b'')
+            if not isinstance(chunk, bytes):
+                raise ValueError('invalid HTTP request body')
+            total += len(chunk)
+            if total > 100_000:
+                raise ValueError('request body too large')
+            chunks.append(chunk)
+            if not message.get('more_body', False):
+                break
+        try:
+            return json.loads(b''.join(chunks).decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError('invalid JSON body') from exc
 
     @staticmethod
     def _query_int(query, name, default):
