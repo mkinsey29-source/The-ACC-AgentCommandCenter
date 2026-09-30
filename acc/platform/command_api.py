@@ -54,7 +54,13 @@ class CommandApi:
                 actor_user_id=context.session.user_id,
             )
             quotas = self._quotas(body.get("quotas", ()))
+            for quota in quotas:
+                current = self.commands.quota_used(account_id, quota.name)
+                self.auth.require_limit(
+                    token, quota.name, current + quota.amount, account_id=account_id)
             result = self.commands.execute(command, quotas=quotas)
+        except AuthorizationError as exc:
+            raise ApiError(403, 'access_denied', 'Access denied.') from exc
         except IdempotencyConflict as exc:
             raise ApiError(409, 'idempotency_conflict', 'Operation ID was already used.') from exc
         except CommandConflict as exc:
