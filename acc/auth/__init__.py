@@ -13,18 +13,21 @@ from .models import (
     UserState,
     VerifiedIdentity,
 )
-from .identity import IdentityVerifier
+from .identity import IdentityVerificationError, IdentityVerifier
 from .repository import AuthRepository, InMemoryAuthRepository
-from .service import AuthError, AuthService
+from .service import AuthenticationError, AuthorizationError, AuthError, AuthService
 
 __all__ = [
     'ACCOUNT_ROLES',
     'AccountState',
     'AuthContext',
+    'AuthenticationError',
+    'AuthorizationError',
     'AuthError',
     'AuthRepository',
     'AuthService',
     'EntitlementSnapshot',
+    'IdentityVerificationError',
     'IdentityVerifier',
     'InMemoryAuthRepository',
     'Membership',
