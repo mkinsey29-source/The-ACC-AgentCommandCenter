@@ -271,7 +271,7 @@ AppConnector
 
 ACC task/project state remains authoritative. Space, Drive, and other stores hold user-facing artifacts and collaborative content.
 
-`AppConnector` covers SaaS/account integrations (mail, calendar, documents, business systems). `CapabilityConnector` (section 15) covers tool and engine lanes such as Blender, Unity, Unreal and local MCP tools, which need resource leases and often an execution node. Phase 1 must define where the two overlap, for example a Drive connector used both as an artifact store and as an app.
+`AppConnector` covers authenticated SaaS/account integrations (mail, calendar, documents, business systems). `CapabilityConnector` covers executable tool/engine lanes such as Blender, Unity, Unreal and local MCP tools, which may need resource leases and an execution node. A product may implement multiple facets: for example Google Drive can be an `AppConnector`, `WorkspaceProvider`, and `KnowledgeProvider`; Blender is a `CapabilityConnector`. The shared boundary is codified in `acc/contracts.py` and `docs/ARCHITECTURE-SPINE.md`.
 
 ## 7. Harness strategy
 
@@ -442,7 +442,7 @@ Desktop/Tauri adds:
 
 Desktop and Web must share a service/API/state model; they are not separate products.
 
-**State authority (open design decision).** The 2026-09-22 decision made a local SQLite database authoritative so ACC works offline. With Web as the universal default, the hosted ACC Platform becomes the system of record for cloud-connected accounts, while a Desktop node keeps a durable local store so local and offline work continues and reconciles later. Phase 1 must define that sync and conflict model before either surface depends on it.
+**State authority (settled in architecture spine v1).** For cloud-connected accounts, the hosted ACC Platform is the system of record for shared account/project/work state, while Desktop/local nodes keep durable replicas for offline continuation. Credentials and actual local resource/process state remain node-authoritative and never become platform truth. Offline mutations use idempotent operation IDs plus optimistic entity revisions; conflicts surface for reconciliation rather than silently using last-writer-wins. Permanently local-only deployments keep the local store authoritative. See `acc/state_authority.py` and `docs/ARCHITECTURE-SPINE.md`.
 
 ## 11. Orchestration and control rules
 
@@ -524,10 +524,10 @@ The new OpenAI platform direction does **not** remove these ACC principles:
 ### Phase 1 — architecture contracts
 - Define shared ACC Platform API/state model for Plugin, Web, and Desktop.
 - Generalize the core domain from coding tasks to capability-based work/tasks/projects.
-- Define `WorkerProvider`, `DecisionProvider`, `ExecutionNode`, `CapabilityConnector`, `WorkspaceProvider`, and `AppConnector` interfaces.
+- Define `WorkerProvider`, `DecisionProvider`, `ExecutionNode`, `CapabilityConnector`, `WorkspaceProvider`, `AppConnector`, and `KnowledgeProvider` interfaces.
 - Keep current Python core where useful; avoid rewriting proven persistence/review logic merely for technology preference.
-- Decide the hosted-platform vs local-store authority and sync model (section 10).
-- Define the `AppConnector` / `CapabilityConnector` boundary (section 6.8).
+- Implement hosted/local synchronization against the settled authority contract in section 10 and `acc/state_authority.py`.
+- Implement connectors against the settled multi-facet boundary in section 6.8 and `acc/contracts.py`.
 
 ### Phase 2 — OpenAI-complete baseline
 - ACC Plugin.
