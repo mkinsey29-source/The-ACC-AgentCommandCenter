@@ -90,7 +90,7 @@ class AuthEntitlementTests(unittest.TestCase):
 
     def test_membership_removal_or_account_suspend_invalidates_existing_token(self):
         token = self.token()
-        self.repo._memberships.pop(('acct-1', 'user-1'))
+        self.assertTrue(self.repo.remove_membership('acct-1', 'user-1'))
         with self.assertRaisesRegex(AuthError, 'membership is no longer active'):
             self.auth.authenticate(token)
 
