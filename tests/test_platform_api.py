@@ -73,10 +73,13 @@ class Events:
     def __init__(self):
         self.bad_account = False
         self.bad_cursor = False
+        self.empty_has_more = False
 
     def read_events(self, account_id, project_id, *, after, limit=200):
         if self.bad_cursor:
             return EventBatch((), after + 1)
+        if self.empty_has_more:
+            return EventBatch((), after, True)
         owner = 'acct-2' if self.bad_account else account_id
         events = (
             PlatformEvent(after + 1, owner, project_id, 'task.changed', 100.0, {'status': 'working'}),
@@ -196,6 +199,13 @@ class PlatformApiTests(unittest.TestCase):
 
     def test_empty_event_batch_cannot_advance_cursor(self):
         self.events.bad_cursor = True
+        response = PlatformApi.handle(
+            self.api.events_after,
+            self.authz(self.token1), 'acct-1', 'project-1', 5)
+        self.assertEqual(response.status, 500)
+
+    def test_empty_batch_cannot_claim_has_more(self):
+        self.events.empty_has_more = True
         response = PlatformApi.handle(
             self.api.events_after,
             self.authz(self.token1), 'acct-1', 'project-1', 5)
