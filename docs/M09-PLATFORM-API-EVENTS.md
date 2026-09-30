@@ -1,6 +1,6 @@
 # M09 — Hosted Platform API and Events
 
-**Status:** Core v1 read/event contracts. Independently reviewed on PR #30 (2026-09-30); the reviewer's corrections await independent confirmation.
+**Status:** Core v1 read/event contracts integrated in PR #30; hosted transport slice in progress on `temporary/m09-hosted-transport-v1`.
 
 ## Purpose
 
@@ -81,20 +81,16 @@ Transport is replaceable (polling, SSE, WebSocket), but replay semantics are sta
 use an account-wide or global sequence, so gaps in a project stream are normal and are not a
 missed-event signal.
 
-### Required before the WebSocket/reconnect runtime (next slice)
+### Reset/retention signal
 
-The v1 contract has no way to say "your cursor is no longer replayable". The next slice must add it
-as an **additive** `EventBatch` field before any retention/pruning is enabled. Suggested:
-`reset_required: bool` plus `oldest_available: int | None`, defaulting to `False`/`None` so the v1
-semantics don't change. It covers two cases:
+The hosted-transport slice adds the required additive reset signal before retention/pruning:
+`EventBatch.reset_required` and `oldest_available`.
 
-- **pruned history:** the requested cursor is older than the retained window, so events after it
-  were deleted. Today the source would silently return the next retained events and hide the gap;
-- **cursor ahead of the stream:** the requested cursor is beyond the latest seq, for example after a
-  restore. Today an empty batch just repeats the cursor, and the client waits forever.
-
-When `reset_required` is true, the client must refetch `project_state` and resume from the returned
-cursor. Until then, event sources must not prune.
+A reset batch contains no events, cannot claim `has_more`, identifies the oldest retained sequence,
+and supplies the cursor to resume from **after the client refetches project state**. This covers both
+pruned-history gaps and a cursor that is no longer valid after restore/recovery. The HTTP ticket
+endpoint returns `409 event_reset_required` rather than opening a stream from a stale cursor; an
+already-open WebSocket can also emit `reset_required` and close with code 4009.
 
 Other reconnect notes:
 - repeated reconnects with the same cursor are idempotent;
@@ -106,15 +102,34 @@ Other reconnect notes:
 This gives the later WebSocket adapter a durable replay contract instead of a separate live-only
 event model.
 
-## Deliberately not in this slice
+## Hosted transport slice
 
-- no public network server/framework;
-- no CORS/origin policy yet;
-- no WebSocket handshake/ticket implementation yet;
+`acc/platform/transport.py` is a dependency-free ASGI application boundary. Any production ASGI
+server can host it without coupling the M09 application contract to that server.
+
+It provides:
+
+- explicit HTTPS Origin allowlisting; no wildcard origins;
+- CORS responses scoped to the accepted origin;
+- HTTP routes under `/v1/accounts/{account_id}/...`;
+- short-lived, random, one-time WebSocket tickets issued only after `event.read` authorization;
+- bearer session tokens never placed in the WebSocket URL;
+- reauthorization on every WebSocket poll so revocation or permission loss closes the stream;
+- replay from the ticket's durable cursor;
+- reset/retention handling;
+- read-only WebSocket input (only `ping` is accepted).
+
+The one-time ticket store retains the already-presented ACC session Authorization value only in
+process memory for the short-lived stream. It is never serialized, logged, returned to the client,
+or placed in the WebSocket URL.
+
+## Still deliberately deferred
+
 - no write/command endpoints;
 - no durable hosted database adapter;
 - no attempt to expose the local `Coordinator` directly;
 - no changes to M08 or the frozen spine.
 
-The next slice should add the hosted HTTP adapter and WebSocket/reconnect transport around these
-contracts, then command/mutation endpoints with idempotent operation IDs and optimistic revisions.
+After independent review and executable verification of this transport slice, the next M09 work is
+command/mutation endpoints with idempotent operation IDs and optimistic revisions, plus the durable
+hosted repository/runtime needed to deploy the real Platform service.
