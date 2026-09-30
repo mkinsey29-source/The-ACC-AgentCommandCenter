@@ -192,6 +192,15 @@ class HostedTransport:
             self.api.events_after, authorization, account_id, project_id, after, limit=1)
         if response.status != 200:
             return response
+        if response.body.get('reset_required'):
+            return ApiResponse(409, {
+                'error': {
+                    'code': 'event_reset_required',
+                    'message': 'Refresh project state before reconnecting.',
+                },
+                'cursor': response.body.get('cursor'),
+                'oldest_available': response.body.get('oldest_available'),
+            })
         ticket = await self.tickets.issue(account_id, project_id, after, authorization)
         return ApiResponse(201, {
             'ticket': ticket,
