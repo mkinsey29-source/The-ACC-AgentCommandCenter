@@ -17,6 +17,8 @@ import threading
 import time
 import uuid
 
+from .domain import normalize_task_fields
+
 
 def now():
     return time.time()
@@ -553,10 +555,8 @@ class Coordinator:
                 'argv': argv, 'status': 'queued', 'activity': 'Ready to start.', 'next_step': 'Run assigned worker',
                 'created': now(), 'run_id': None, 'pid': None, 'exit_code': None, 'evidence': [], 'runs': [],
                 'review': None, 'timeout_seconds': timeout, 'timed_out': False}
-        for key, default in (('task_area', 'general'), ('required_capabilities', []),
-                             ('risk', 'medium'), ('priority', 50), ('depends_on', []),
-                             ('knowledge_scopes', [])):
-            task[key] = payload.get(key, default)
+        task.update(normalize_task_fields(payload))
+        task['knowledge_scopes'] = [item.strip() for item in knowledge_scopes]
         return task
 
     def create(self, payload):
