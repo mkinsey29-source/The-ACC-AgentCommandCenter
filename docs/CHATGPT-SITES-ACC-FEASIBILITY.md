@@ -75,6 +75,37 @@ stress fixture: 2,000 events
 build: dist/index.html + dist/styles.css + dist/app.js
 ```
 
+### Frontend runtime result — PASS
+
+The owner-only ChatGPT Site deployed successfully and the actual shell was exercised on Marvin's
+phone. The browser stress fixture reported:
+
+```text
+PASS · 2,000 events · avg center render 0.9 ms · total 346 ms
+```
+
+Mobile workspace switching and Orchestrator Chat also worked. This clears the frontend-hosting
+performance gate by a large margin. The remaining feasibility question is live public HTTPS/WSS
+connectivity and production-grade authentication.
+
+### Live-connectivity staging fixture
+
+`experiments/chatgpt-sites-acc/staging/` now provides a synthetic ACC backend specifically for that
+next test:
+
+- `GET /api/state`: bearer-authenticated ACC-shaped state;
+- `POST /api/ws-ticket`: short-lived one-time WebSocket ticket;
+- `GET /events?ticket=...`: live WebSocket events;
+- explicit Sites Origin allowlist;
+- synthetic data only;
+- no local ACC control token;
+- host-neutral Dockerfile.
+
+Local verification: **6/6 staging tests pass** and the server compiles.
+
+The remaining operational step is to deploy this fixture to a public TLS-terminating host and put its
+HTTPS base URL plus a new staging-only token into the Site's Connection panel.
+
 ### What only the Sites runtime can prove
 
 - Sites recognizes/builds the existing project;
