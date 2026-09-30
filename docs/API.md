@@ -6,7 +6,7 @@ All API calls require `Authorization: Bearer <local token>`. Mutations require J
 | --- | --- |
 | GET `/api/state` | Snapshot with tasks, agents, local Git, recent events, capability flags, and event cursor. |
 | GET `/api/events?after=N` | SSE replay followed by live events. Each event has monotonically increasing `seq`, timestamp, kind, optional task ID, and data. Heartbeat comments are connection health only. |
-| POST `/api/tasks` | Create `{title, instruction, agent?, argv?, timeout_seconds?}`. Default agent: `local-command`; creation does not start work. |
+| POST `/api/tasks` | Create provider-neutral work with `{title, instruction}` plus optional `agent`, `argv`, `timeout_seconds`, `task_area`, `workstream_id`, `required_capabilities`, `inputs`, `permissions`, `expected_artifacts`, `acceptance_requirements`, `resource_requirements`, `risk`, `priority`, `depends_on`, `data_classification`, `workspace_scope`, and `knowledge_scopes`. Existing callers may omit all new fields. Default agent: `local-command`; creation does not start work. |
 | POST `/api/tasks/{id}/start` | Start the configured runner. Reject a second writer and unresolved recovery. |
 | POST `/api/tasks/{id}/stop` | Stop the supervised process tree and retain files. It may still be stopping when the response arrives; use events for the terminal result. |
 | POST `/api/tasks/{id}/assign` | `{agent}`; available idle-worker assignment only. |
