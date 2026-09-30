@@ -31,6 +31,16 @@ top-level review, integration, and its acceptance checks pass on the integrated 
 | M22 | Commercial packaging/onboarding | NOT STARTED | M08, M13 | Account, entitlements, connector suggestions, Desktop download. |
 | M23 | System integration/release gates | NOT STARTED | Required release modules | OpenAI-only and extended-customer acceptance scenarios. |
 
+## Feasibility experiments
+
+| ID | Experiment | Status | Depends on | Acceptance |
+|---|---|---|---|---|
+| S01 | ChatGPT Sites as ACC Web host | READY FOR RUNTIME TEST | M10 design; live-backend pass waits M08/M09 | Owner-only Site builds the existing experiment, preserves the dense shell across desktop/tablet/mobile, switches all 9 workspaces, remains usable through the 2,000-event browser stress fixture, and later reaches ACC staging over HTTPS/WSS. See `docs/CHATGPT-SITES-ACC-FEASIBILITY.md`. |
+
+S01 is an **experiment**, not a new spine dependency. It must not change the frozen M01/M02/M03/M05
+contracts. A failed Sites test leaves the normal ACC Web architecture intact and only changes the
+preferred hosting choice.
+
 ## Parallelization gate
 
 After M01/M02/M03/M05 are independently reviewed and integrated, the following lanes can proceed
