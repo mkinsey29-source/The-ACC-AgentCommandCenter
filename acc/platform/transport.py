@@ -11,7 +11,6 @@ import json
 import secrets
 import time
 from dataclasses import dataclass
-from typing import Awaitable, Callable
 from urllib.parse import parse_qs
 
 from .api import ApiResponse, PlatformApi
@@ -35,8 +34,8 @@ class OriginPolicy:
     def __post_init__(self):
         normalized = set()
         for value in self.allowed_origins:
-            if not isinstance(value, str) or not value.startswith(('https://', 'http://')):
-                raise ValueError('Allowed origins must be explicit HTTP(S) origins.')
+            if not isinstance(value, str) or not value.startswith('https://'):
+                raise ValueError('Hosted origins must be explicit HTTPS origins.')
             origin = value.rstrip('/')
             if '*' in origin or '/' in origin.split('://', 1)[1]:
                 raise ValueError('Allowed origins cannot use wildcards or paths.')
