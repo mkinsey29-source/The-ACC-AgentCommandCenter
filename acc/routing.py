@@ -8,10 +8,11 @@ import re
 import urllib.error
 import urllib.request
 
+from .contracts import CAPABILITY_RE
 from .core import now
 
 
-AREA = re.compile(r'[a-z][a-z0-9-]{0,39}(?:\.[a-z][a-z0-9-]{0,39}){0,3}\Z')
+AREA = CAPABILITY_RE
 ROLES = ('implementer', 'reviewer', 'coordinator')
 
 
