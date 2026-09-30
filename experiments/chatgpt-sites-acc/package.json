@@ -1,0 +1,1 @@
+{"name":"acc-chatgpt-sites-feasibility","private":true,"version":"0.1.0","type":"module","scripts":{"build":"node build.mjs","check":"node --check app.js && node verify.mjs"}}
