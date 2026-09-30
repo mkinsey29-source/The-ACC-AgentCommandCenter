@@ -228,12 +228,23 @@ async function connectLive(apiBase, wsUrl, token) {
     socket = null;
   }
   const result = $('connection-result');
+  const base = apiBase.replace(/\/$/, '');
   result.textContent = 'Checking HTTPS state endpoint…';
   const headers = token ? {Authorization: 'Bearer ' + token} : {};
-  const response = await fetch(apiBase.replace(/\/$/, '') + '/api/state', {headers});
+
+  const response = await fetch(base + '/api/state', {headers});
   if (!response.ok) throw new Error('State endpoint returned HTTP ' + response.status);
   const incoming = await response.json();
   if (!incoming || !Array.isArray(incoming.tasks)) throw new Error('State response is missing tasks[]');
+
+  result.textContent = 'HTTPS state: OK\nRequesting one-time WebSocket ticket…';
+  const ticketResponse = await fetch(base + '/api/ws-ticket', {
+    method: 'POST',
+    headers: {...headers, 'Content-Type': 'application/json'}
+  });
+  if (!ticketResponse.ok) throw new Error('WebSocket ticket endpoint returned HTTP ' + ticketResponse.status);
+  const ticket = await ticketResponse.json();
+  if (!ticket.ticket) throw new Error('WebSocket ticket response is missing ticket');
 
   state.project = incoming.project || 'ACC';
   state.tasks = incoming.tasks.map((task, index) => ({
@@ -246,14 +257,26 @@ async function connectLive(apiBase, wsUrl, token) {
     priority: task.priority ?? 50
   }));
 
+  let socketUrl = wsUrl.trim();
+  if (!socketUrl) {
+    const derived = new URL(base);
+    derived.protocol = derived.protocol === 'https:' ? 'wss:' : 'ws:';
+    derived.pathname = ticket.path || '/events';
+    derived.search = '';
+    derived.hash = '';
+    socketUrl = derived.toString();
+  }
+  const authenticatedSocketUrl = new URL(socketUrl);
+  authenticatedSocketUrl.searchParams.set('ticket', ticket.ticket);
+
   clearInterval(demoTimer);
   liveMode = true;
   $('connection-badge').className = 'badge live';
   $('connection-badge').textContent = 'LIVE';
-  socket = new WebSocket(wsUrl);
+  socket = new WebSocket(authenticatedSocketUrl.toString());
   socket.onopen = () => {
-    result.textContent = 'HTTPS state: OK\nWebSocket: OPEN';
-    addEvent('transport', 'Live WebSocket connected.');
+    result.textContent = 'HTTPS state: OK\nWebSocket ticket: OK\nWebSocket: OPEN';
+    addEvent('transport', 'Live WebSocket connected with one-time ticket.');
     render();
   };
   socket.onmessage = (event) => {
