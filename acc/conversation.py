@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import re
 from .core import Conflict, identifier, now
+from .domain import normalize_task_fields
 from .snapshots import inventory
 
 
@@ -194,7 +195,10 @@ class Conversation:
                 'orchestrator': orchestrator,
                 'tasks': [{k: t.get(k) for k in ('id', 'task_number', 'task_kind', 'parent_task_id',
                           'parent_task_number', 'title', 'instruction', 'revision', 'status', 'activity',
-                          'next_step', 'review', 'source_ids', 'task_area', 'required_capabilities',
+                          'next_step', 'review', 'source_ids', 'task_area', 'workstream_id',
+                          'required_capabilities', 'permissions', 'expected_artifacts',
+                          'acceptance_requirements', 'resource_requirements', 'inputs',
+                          'data_classification', 'workspace_scope',
                           'risk', 'priority', 'depends_on', 'routing')}
                           for t in self.c.store.tasks() if not t.get('internal')],
                 'workflow_defaults': self.settings.get('workflow'),
@@ -207,8 +211,16 @@ class Conversation:
                                  'instruction': 'Concrete requirements; do not broaden user authorization.',
                                  'source_ids': 'Nonempty array of pending message ids that request this work.',
                                  'task_id': 'For revise only', 'revision': 'Current integer revision for revise only',
-                                 'task_area': 'Dotted lowercase area such as code.python or ui.desktop.',
+                                 'task_area': 'Dotted lowercase area such as code.python or communications.email.',
+                                 'workstream_id': 'Optional project workstream identifier.',
                                  'required_capabilities': 'Array of dotted lowercase capabilities.',
+                                 'permissions': 'Array of permission capabilities required by the work.',
+                                 'expected_artifacts': 'Array of dotted artifact kinds expected from the work.',
+                                 'acceptance_requirements': 'Array of plain-language requirements for acceptance.',
+                                 'resource_requirements': 'Array of dotted resources such as account.gmail or blender.scene.',
+                                 'inputs': 'JSON object containing task inputs/references.',
+                                 'data_classification': 'public, internal, or confidential.',
+                                 'workspace_scope': 'project or isolated_repository.',
                                  'risk': 'low, medium, or high.', 'priority': 'Integer 0–100.',
                                  'depends_on': 'Array of action_id values that must finish first.'}],
                     'rules': ['Return token, reply, intent, actions as JSON. Do not run code or mutate files yourself.',
@@ -263,14 +275,10 @@ class Conversation:
                 sources = action.get('source_ids')
                 if not isinstance(sources, list) or not sources or any(x not in ids for x in sources):
                     raise ValueError('Every action must cite pending user message ids in this turn.')
-                fields = {key: action.get(key, default) for key, default in (
-                    ('task_area', 'general'), ('required_capabilities', []), ('risk', 'medium'),
-                    ('priority', 50), ('depends_on', []))}
-                self.c.router._task_fields(fields)
-                if type(fields['priority']) is not int or not 0 <= fields['priority'] <= 100:
-                    raise ValueError('Action priority must be an integer from 0 to 100.')
-                if not isinstance(fields['depends_on'], list) or not all(isinstance(x, str) for x in fields['depends_on']):
-                    raise ValueError('Action depends_on must contain action_id strings.')
+                raw_dependencies = action.get('depends_on', [])
+                if isinstance(raw_dependencies, list) and len(raw_dependencies) != len(set(raw_dependencies)):
+                    raise ValueError('Action depends_on must not contain duplicates.')
+                fields = normalize_task_fields(action)
                 if action.get('type') == 'create':
                     initial_agent = default_spec['implementer'] if default_spec else next(
                         (key for key, value in self.c.agents.items()
@@ -288,9 +296,7 @@ class Conversation:
                     instruction = action.get('instruction')
                     if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 50000:
                         raise ValueError('Revised instruction must contain 1–50,000 characters.')
-                    for key in ('task_area', 'required_capabilities', 'risk', 'priority'):
-                        if key not in action:
-                            fields[key] = task.get(key, fields[key])
+                    fields = normalize_task_fields({**task, **action})
                     dependency_refs = fields['depends_on'] if 'depends_on' in action else None
                     task['requirements_history'].append({'revision': task['revision'], 'instruction': task['instruction']})
                     task.update(revision=task['revision'] + 1, instruction=instruction, review=None,
