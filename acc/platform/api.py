@@ -74,6 +74,14 @@ class PlatformApi:
             raise ApiError(400, 'invalid_request', 'Invalid request.') from exc
 
     @staticmethod
+    def _route_ids(**values: object) -> dict[str, str]:
+        """Validate caller-supplied route IDs before any repository call (400, not 500)."""
+        try:
+            return {name: _bounded_id(value, name) for name, value in values.items()}
+        except (ValueError, TypeError) as exc:
+            raise ApiError(400, 'invalid_request', 'Invalid request.') from exc
+
+    @staticmethod
     def _project_view(project: AccountProjectView, account_id: str) -> dict[str, Any]:
         if not isinstance(project, AccountProjectView) or project.account_id != account_id:
             raise ApiError(500, 'invalid_repository_state', 'Platform repository state is invalid.')
@@ -99,10 +107,12 @@ class PlatformApi:
     def project_state(
         self, authorization: object, account_id: object, project_id: object,
     ) -> ApiResponse:
+        # The response embeds full task records, so it needs task.read as well as project.read;
+        # otherwise project.read alone would bypass the task endpoint's permission.
         _, account_id, _ = self._authorize(
-            authorization, account_id, permissions=('project.read',))
+            authorization, account_id, permissions=('project.read', 'task.read'))
+        project_id = self._route_ids(project_id=project_id)['project_id']
         try:
-            project_id = _bounded_id(project_id, 'project_id')
             project = self.reads.project(account_id, project_id)
             if project is None:
                 raise ApiError(404, 'not_found', 'Project not found.')
@@ -141,9 +151,9 @@ class PlatformApi:
     ) -> ApiResponse:
         _, account_id, _ = self._authorize(
             authorization, account_id, permissions=('task.read',))
+        ids = self._route_ids(project_id=project_id, task_id=task_id)
+        project_id, task_id = ids['project_id'], ids['task_id']
         try:
-            project_id = _bounded_id(project_id, 'project_id')
-            task_id = _bounded_id(task_id, 'task_id')
             task = self.reads.task(account_id, project_id, task_id)
             if task is None:
                 raise ApiError(404, 'not_found', 'Task not found.')
@@ -179,7 +189,7 @@ class PlatformApi:
             batch = self.events.read_events(
                 account_id, project_id, after=cursor, limit=limit)
             batch = validate_event_batch(
-                batch, account_id=account_id, project_id=project_id, after=cursor)
+                batch, account_id=account_id, project_id=project_id, after=cursor, limit=limit)
         except (ValueError, TypeError) as exc:
             raise ApiError(500, 'invalid_event_source', 'Platform event source is invalid.') from exc
 
@@ -201,7 +211,15 @@ class PlatformApi:
 
     @staticmethod
     def handle(callable_, *args, **kwargs) -> ApiResponse:
+        """Run one operation and always return an ``ApiResponse``.
+
+        Any unexpected exception (a storage driver error, a bug) becomes an opaque 500 so that no
+        exception text, which may contain row data, reaches the client. The adapter should log the
+        chained exception server-side.
+        """
         try:
             return callable_(*args, **kwargs)
         except ApiError as exc:
             return exc.response()
+        except Exception:
+            return ApiError(500, 'internal_error', 'Internal error.').response()

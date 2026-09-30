@@ -1,6 +1,7 @@
 """Account-scoped event cursor contracts for M09."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
@@ -36,7 +37,8 @@ class PlatformEvent:
         if not isinstance(self.kind, str) or not self.kind.strip() or len(self.kind) > 120:
             raise ValueError('event kind must contain 1-120 characters.')
         object.__setattr__(self, 'kind', self.kind.strip())
-        if not isinstance(self.at, (int, float)) or isinstance(self.at, bool) or self.at < 0:
+        if (not isinstance(self.at, (int, float)) or isinstance(self.at, bool)
+                or not math.isfinite(self.at) or self.at < 0):
             raise ValueError('event timestamp must be nonnegative.')
         if not isinstance(self.data, Mapping):
             raise ValueError('event data must be an object.')
@@ -77,10 +79,13 @@ def validate_event_batch(
     account_id: str,
     project_id: str,
     after: int,
+    limit: int | None = None,
 ) -> EventBatch:
     after = event_cursor(after)
     if not isinstance(batch, EventBatch):
         raise ValueError('Event source returned an invalid batch.')
+    if limit is not None and len(batch.events) > limit:
+        raise ValueError('Event source returned more events than requested.')
     previous = after
     for event in batch.events:
         if event.account_id != account_id or event.project_id != project_id:

@@ -226,5 +226,84 @@ class PlatformApiTests(unittest.TestCase):
         self.assertEqual(response.status, 403)
 
 
+
+class PlatformApiReviewTests(unittest.TestCase):
+    """Defects found in the independent review of PR #30."""
+
+    setUp = PlatformApiTests.setUp
+    authz = PlatformApiTests.authz
+
+    def status(self, fn, *args, **kwargs):
+        return PlatformApi.handle(fn, *args, **kwargs).status
+
+    def test_project_state_does_not_expose_tasks_without_task_read(self):
+        self.auth_repo.put_membership(Membership('acct-1', 'user-1', permissions=('project.read',)))
+        self.assertEqual(self.status(
+            self.api.project_state, self.authz(self.token1), 'acct-1', 'project-1'), 403)
+        self.assertEqual(self.status(self.api.list_projects, self.authz(self.token1), 'acct-1'), 200)
+
+    def test_malformed_project_and_task_ids_are_400_not_500(self):
+        for bad in ('', ' ', 'x' * 201, None, 7, 'a\0b'):
+            with self.subTest(project_id=bad):
+                self.assertEqual(self.status(
+                    self.api.project_state, self.authz(self.token1), 'acct-1', bad), 400)
+                self.assertEqual(self.status(
+                    self.api.task, self.authz(self.token1), 'acct-1', bad, 'task-1'), 400)
+                self.assertEqual(self.status(
+                    self.api.task, self.authz(self.token1), 'acct-1', 'project-1', bad), 400)
+
+    def test_unexpected_repository_or_source_failure_is_opaque_500(self):
+        def boom(*args, **kwargs):
+            raise RuntimeError('db row acct-2 secret=hunter2')
+        self.reads.tasks = boom
+        response = PlatformApi.handle(
+            self.api.project_state, self.authz(self.token1), 'acct-1', 'project-1')
+        self.assertEqual(response.status, 500)
+        self.assertNotIn('hunter2', repr(response.body))
+        self.events.read_events = boom
+        response = PlatformApi.handle(
+            self.api.events_after, self.authz(self.token1), 'acct-1', 'project-1', 0)
+        self.assertEqual(response.status, 500)
+        self.assertNotIn('hunter2', repr(response.body))
+
+    def test_event_batch_larger_than_limit_fails_closed(self):
+        response = PlatformApi.handle(
+            self.api.events_after, self.authz(self.token1), 'acct-1', 'project-1', 0, limit=1)
+        self.assertEqual(response.status, 500)
+
+    def test_non_finite_event_timestamp_is_rejected(self):
+        for value in (float('nan'), float('inf')):
+            with self.subTest(at=value), self.assertRaises(ValueError):
+                PlatformEvent(1, 'acct-1', 'project-1', 'task.changed', value, {})
+
+    def test_token_for_account_a_never_reads_account_b(self):
+        for call in ((self.api.list_projects, 'acct-2'),
+                     (self.api.project_state, 'acct-2', 'project-2'),
+                     (self.api.task, 'acct-2', 'project-2', 'task-1'),
+                     (self.api.events_after, 'acct-2', 'project-2', 0)):
+            with self.subTest(call=call[0].__name__):
+                response = PlatformApi.handle(call[0], self.authz(self.token1), *call[1:])
+                self.assertEqual(response.status, 403)
+                self.assertNotIn('project-2', repr(response.body))
+
+    def test_errors_never_echo_bearer_values(self):
+        for header in ('Bearer accs_secret-value', 'Basic accs_secret-value', 'Bearer  accs_secret'):
+            response = PlatformApi.handle(self.api.list_projects, header, 'acct-1')
+            self.assertEqual(response.status, 401)
+            self.assertNotIn('secret', repr(response.body))
+
+    def test_cursor_values_are_not_coerced(self):
+        for cursor in (-1, True, 1.0, '5', [5]):
+            with self.subTest(cursor=cursor):
+                self.assertEqual(self.status(
+                    self.api.events_after, self.authz(self.token1), 'acct-1', 'project-1', cursor), 400)
+
+    def test_replayed_event_at_cursor_fails_closed(self):
+        self.events.read_events = lambda a, p, *, after, limit=200: EventBatch(
+            (PlatformEvent(after, a, p, 'task.changed', 1.0, {}),), after)
+        self.assertEqual(self.status(
+            self.api.events_after, self.authz(self.token1), 'acct-1', 'project-1', 5), 500)
+
+
 if __name__ == '__main__':
     unittest.main()
