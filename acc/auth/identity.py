@@ -8,6 +8,10 @@ from .models import VerifiedIdentity
 
 
 @runtime_checkable
+class IdentityVerificationError(ValueError):
+    """Provider assertion could not be verified. Provider adapters should not include secrets."""
+
+
 class IdentityVerifier(Protocol):
     """Verifies one external identity assertion before ACC creates a session.
 
