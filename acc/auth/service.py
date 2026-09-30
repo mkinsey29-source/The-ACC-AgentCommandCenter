@@ -49,10 +49,10 @@ class AuthService:
             raise RuntimeError('M08 requires holder-authoritative, never-replicated credentials.')
         if account_policy['authority'] != 'platform' or account_policy['sync'] != 'read_replica':
             raise RuntimeError('M08 requires platform-authoritative account state.')
-        if type(default_ttl_seconds) is not int or not 60 <= default_ttl_seconds <= max_ttl_seconds:
-            raise ValueError('default_ttl_seconds is outside the supported range.')
         if type(max_ttl_seconds) is not int or not 60 <= max_ttl_seconds <= 604800:
             raise ValueError('max_ttl_seconds must be between 60 seconds and 7 days.')
+        if type(default_ttl_seconds) is not int or not 60 <= default_ttl_seconds <= max_ttl_seconds:
+            raise ValueError('default_ttl_seconds is outside the supported range.')
         self.repository = repository
         self.clock = clock
         self.default_ttl_seconds = default_ttl_seconds
