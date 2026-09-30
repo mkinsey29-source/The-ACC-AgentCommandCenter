@@ -1,6 +1,6 @@
 # M09 — Hosted Platform API and Events
 
-**Status:** Core v1 read/event contracts. Independently reviewed on PR #30 (2026-09-30); the reviewer's corrections await independent confirmation.
+**Status:** Core v1 read/event contracts integrated in PR #30; hosted transport slice in progress on `temporary/m09-hosted-transport-v1`.
 
 ## Purpose
 
@@ -81,20 +81,29 @@ Transport is replaceable (polling, SSE, WebSocket), but replay semantics are sta
 use an account-wide or global sequence, so gaps in a project stream are normal and are not a
 missed-event signal.
 
-### Required before the WebSocket/reconnect runtime (next slice)
+### Reset/retention signal
 
-The v1 contract has no way to say "your cursor is no longer replayable". The next slice must add it
-as an **additive** `EventBatch` field before any retention/pruning is enabled. Suggested:
-`reset_required: bool` plus `oldest_available: int | None`, defaulting to `False`/`None` so the v1
-semantics don't change. It covers two cases:
+The hosted-transport slice adds the required additive reset signal before retention/pruning:
+`EventBatch.reset_required` and `oldest_available`.
 
-- **pruned history:** the requested cursor is older than the retained window, so events after it
-  were deleted. Today the source would silently return the next retained events and hide the gap;
-- **cursor ahead of the stream:** the requested cursor is beyond the latest seq, for example after a
-  restore. Today an empty batch just repeats the cursor, and the client waits forever.
+A reset batch contains no events, cannot claim `has_more`, identifies the oldest retained sequence,
+and supplies the cursor to resume from **after the client refetches project state**. This covers both
+pruned-history gaps and a cursor that is no longer valid after restore/recovery. The HTTP ticket
+endpoint returns `409 event_reset_required` rather than opening a stream from a stale cursor; an
+already-open WebSocket can also emit `reset_required` and close with code 4009.
 
-When `reset_required` is true, the client must refetch `project_state` and resume from the returned
-cursor. Until then, event sources must not prune.
+An event source must set the reset cursor to a real stream position no later than the stream head
+at the time it reports the reset. The client procedure is fixed:
+
+1. Record the reset `cursor` **before** doing anything else.
+2. Refetch project state (`GET .../projects/{project_id}`) and replace local state with it.
+3. Request a new ticket with `after=<recorded cursor>` and reconnect.
+
+Because the cursor was captured before the refetch, every event after it is replayed, so nothing
+is lost between the refetch and the resume. Events that the refetched state already reflects can
+be replayed as well, so clients must apply events idempotently (for example by comparing entity
+revisions). If the recorded cursor has itself been pruned by the time the client reconnects, the
+ticket request returns 409 again and the client repeats the procedure.
 
 Other reconnect notes:
 - repeated reconnects with the same cursor are idempotent;
@@ -106,15 +115,69 @@ Other reconnect notes:
 This gives the later WebSocket adapter a durable replay contract instead of a separate live-only
 event model.
 
-## Deliberately not in this slice
+## Hosted transport slice
 
-- no public network server/framework;
-- no CORS/origin policy yet;
-- no WebSocket handshake/ticket implementation yet;
+`acc/platform/transport.py` is a dependency-free ASGI application boundary. Any production ASGI
+server can host it without coupling the M09 application contract to that server.
+
+It provides:
+
+- explicit HTTPS Origin allowlisting; no wildcard origins;
+- CORS responses scoped to the accepted origin;
+- HTTP routes under `/v1/accounts/{account_id}/...`;
+- short-lived, random, one-time WebSocket tickets issued only after `event.read` authorization;
+- bearer session tokens never placed in the WebSocket URL;
+- reauthorization on every WebSocket poll so revocation or permission loss closes the stream;
+- replay from the ticket's durable cursor;
+- reset/retention handling;
+- read-only WebSocket input (only `ping` is accepted).
+
+The one-time ticket store retains the already-presented ACC session Authorization value only in
+process memory for the short-lived stream. It is never serialized, logged (it is excluded from the
+ticket record's `repr`), returned to the client, or placed in the WebSocket URL. The store is
+process-local by design: it must not be persisted or shared between processes. A multi-process
+deployment must keep the ticket request and the WebSocket on the same process (or replace the store
+with one keyed by a server-side session reference once M08 provides one). Retaining the value
+gives no more than the session itself does: the stream re-runs full M08 authorization on every
+poll, so revocation, expiry, account suspension, membership removal, loss of `event.read` or loss
+of `acc.web` closes it.
+
+Transport rules:
+
+- `Origin` is required on every HTTP request and WebSocket handshake and must equal one allowed
+  origin exactly (`https://host[:port]`, lowercase, no path, query, fragment, userinfo or
+  wildcard). A repeated `Origin` or `Authorization` header is treated as absent, so the request
+  fails closed. Preflight and error responses never carry CORS headers for a disallowed origin,
+  and `Access-Control-Allow-Credentials` is never sent (the API uses bearer headers, not cookies).
+- Query integers must be ASCII digits and appear at most once; `after=` (blank), repeats,
+  non-ASCII query strings and out-of-range values return 400.
+- The WebSocket handler receives `websocket.connect` before validating the Origin, path or ticket.
+  A rejected Origin or path closes the handshake with 4403 before the ticket is looked at, so it
+  does not burn a ticket. A missing, malformed, repeated, expired or reused ticket closes with 4401.
+- Close codes: 4401 session ended or ticket invalid; 4403 origin denied or access lost; 4009 reset
+  required; 4400 client sent anything other than the text `ping`; 1011 invalid event source or
+  non-JSON event data (HTTP returns an opaque 500 for the same case).
+- One `receive()` is kept outstanding between polls and is never cancelled by a poll timeout;
+  disconnects and cancellation cancel it. A `has_more` backlog is drained without waiting for the
+  poll interval, reauthorizing before every batch.
+- The ASGI `lifespan` scope is supported.
+
+Deployment requirements not handled inside this module:
+
+- `PlatformApi` calls are synchronous. With a blocking durable repository or event source the
+  adapter must run them off the event loop (for example with `asyncio.to_thread`) or use an async
+  repository; the in-memory test doubles do not block.
+- The ticket store has no size cap beyond the 10-300 second TTL. Rate-limit ticket issuance and
+  concurrent WebSocket connections per session/account at the hosting layer.
+- Terminate TLS in front of the ASGI server; this module does not listen on sockets.
+
+## Still deliberately deferred
+
 - no write/command endpoints;
 - no durable hosted database adapter;
 - no attempt to expose the local `Coordinator` directly;
 - no changes to M08 or the frozen spine.
 
-The next slice should add the hosted HTTP adapter and WebSocket/reconnect transport around these
-contracts, then command/mutation endpoints with idempotent operation IDs and optimistic revisions.
+After independent review and executable verification of this transport slice, the next M09 work is
+command/mutation endpoints with idempotent operation IDs and optimistic revisions, plus the durable
+hosted repository/runtime needed to deploy the real Platform service.

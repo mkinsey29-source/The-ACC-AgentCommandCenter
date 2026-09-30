@@ -49,6 +49,8 @@ class EventBatch:
     events: tuple[PlatformEvent, ...]
     cursor: int
     has_more: bool = False
+    reset_required: bool = False
+    oldest_available: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.cursor) is not int or self.cursor < 0:
@@ -60,6 +62,14 @@ class EventBatch:
             previous = event.seq
         if self.events and self.cursor != self.events[-1].seq:
             raise ValueError('event batch cursor must equal the last event seq.')
+        if self.oldest_available is not None and (
+                type(self.oldest_available) is not int or self.oldest_available <= 0):
+            raise ValueError('oldest_available must be a positive integer when supplied.')
+        if self.reset_required:
+            if self.events or self.has_more:
+                raise ValueError('reset-required batches cannot contain events or has_more.')
+            if self.oldest_available is None:
+                raise ValueError('reset-required batches must identify oldest_available.')
 
 
 class PlatformEventSource(Protocol):
@@ -93,8 +103,10 @@ def validate_event_batch(
         if event.seq <= previous:
             raise ValueError('Event source returned a replay/out-of-order event.')
         previous = event.seq
-    if not batch.events and batch.cursor != after:
+    if not batch.events and not batch.reset_required and batch.cursor != after:
         raise ValueError('Empty event batch must preserve the requested cursor.')
+    if batch.reset_required and batch.cursor < batch.oldest_available - 1:
+        raise ValueError('Reset cursor cannot precede the retained event window.')
     if batch.has_more and not batch.events:
         raise ValueError('Event source cannot report more events without advancing the cursor.')
     return batch
