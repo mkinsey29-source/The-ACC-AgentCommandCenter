@@ -1,6 +1,6 @@
 # ACC architecture spine v1
 
-**Status:** Implemented on `temporary/architecture-spine-v1`; requires independent top-level review before integration.  
+**Status:** Spine v1. Independently reviewed and corrected in PR #27 (2026-09-30); see `docs/ACC-MODULE-CHECKLIST.md` for module status.  
 **Scope:** M01 shared contracts, M02 state authority/sync policy, M03 provider-neutral task model, M05 connector/provider boundaries.
 
 ## Purpose
@@ -38,7 +38,7 @@ cross-module dependencies should target the contracts above.
 
 The ACC Platform is the system of record for shared account/project/work state:
 
-- account
+- account (nodes hold a read-only replica; account/entitlement changes are never queued offline)
 - project/workstream
 - task/run
 - decision/review
@@ -46,26 +46,37 @@ The ACC Platform is the system of record for shared account/project/work state:
 - knowledge metadata
 - usage
 - event history
+- writer/branch/resource leases (granted online only)
 
 Desktop/local nodes keep durable replicas so already-authorized local work can continue offline.
+An offline node may keep working under a lease it already holds until that lease expires, but it
+cannot acquire, renew or transfer a platform lease offline; a queued lease grant could otherwise
+produce two writers after reconnect.
 
-### Local-only authority
+### Node authority
 
 The execution node remains authoritative for:
 
-- credentials/secrets;
 - actual local resource/process state;
 - machine-local availability.
 
-Credentials never replicate through the ACC state-sync protocol. Local resource truth is reported as
-status, not overwritten by the platform.
+Local resource truth is reported as status, not overwritten by the platform, and the platform or
+Web UI never becomes the authority for it.
+
+### Credentials
+
+A credential stays with the component that uses it (`authority: holder`): the node's OS credential
+store for local tools and node-run connectors, and the platform's secret store for connectors the
+platform itself runs (for example a zero-install, OpenAI-only user's cloud mail grant, where no node
+exists). Credentials are never copied between platform and nodes by the sync protocol, and a
+credential held by one side is never readable by the other.
 
 ### Offline reconciliation
 
 Replicated mutations use:
 
 - globally unique/idempotent `operation_id`;
-- entity `base_revision`;
+- entity `base_revision` (a per-entity sync counter; not the task's requirements `revision`);
 - optimistic revision checks for mutable entities;
 - operation-id deduplication for append-only events.
 
@@ -109,9 +120,9 @@ Example non-coding task:
   "title": "Prepare vendor renewal response",
   "instruction": "Review the thread and draft a response. Do not send it.",
   "task_area": "communications.email",
-  "required_capabilities": ["email.read", "email.send"],
-  "permissions": ["email.read"],
-  "expected_artifacts": ["artifact.email"],
+  "required_capabilities": ["email.read", "email.draft"],
+  "permissions": ["email.read", "email.draft"],
+  "expected_artifacts": ["artifact.email-draft"],
   "resource_requirements": ["account.gmail"],
   "inputs": {"thread_id": "example"},
   "acceptance_requirements": [
@@ -161,7 +172,8 @@ A storage/retrieval backend for the ACC Knowledge Engine. The knowledge lifecycl
 does not make an unhealthy connector healthy, and an unconfigured connector cannot be enabled.
 
 The suggested connector catalog is discovery metadata, not a claim that every connector is already
-implemented. `implemented` is explicit.
+implemented. `implemented` is explicit. A connector is eligible for work only when it is implemented, enabled and
+healthy; enabling a catalog entry that has no adapter never makes it eligible.
 
 ## Downstream module rule
 
@@ -185,4 +197,4 @@ connector implementations should not casually edit task/state/provider contracts
 - connector facet/state semantics are deterministic and testable;
 - integration/routing modules consume the shared capability syntax;
 - focused architecture-spine tests pass;
-- full existing suite must be run by the implementation/review environment before merge.
+- the full existing suite passes on the reviewed revision (independent review, 2026-09-30).

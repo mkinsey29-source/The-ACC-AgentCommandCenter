@@ -442,7 +442,7 @@ Desktop/Tauri adds:
 
 Desktop and Web must share a service/API/state model; they are not separate products.
 
-**State authority (settled in architecture spine v1).** For cloud-connected accounts, the hosted ACC Platform is the system of record for shared account/project/work state, while Desktop/local nodes keep durable replicas for offline continuation. Credentials and actual local resource/process state remain node-authoritative and never become platform truth. Offline mutations use idempotent operation IDs plus optimistic entity revisions; conflicts surface for reconciliation rather than silently using last-writer-wins. Permanently local-only deployments keep the local store authoritative. See `acc/state_authority.py` and `docs/ARCHITECTURE-SPINE.md`.
+**State authority (settled in architecture spine v1).** For cloud-connected accounts, the hosted ACC Platform is the system of record for shared account/project/work state, while Desktop/local nodes keep durable replicas for offline continuation. Actual local resource/process state remains node-authoritative and never becomes platform truth. A credential stays with the component that uses it (the node's store for local tools; the platform's secret store for platform-run connectors, e.g. a zero-install user's cloud mail grant) and is never replicated between them. Leases are granted online only, and account state is never mutated offline. Offline mutations use idempotent operation IDs plus optimistic entity revisions; conflicts surface for reconciliation rather than silently using last-writer-wins. Permanently local-only deployments keep the local store authoritative. See `acc/state_authority.py` and `docs/ARCHITECTURE-SPINE.md`.
 
 ## 11. Orchestration and control rules
 

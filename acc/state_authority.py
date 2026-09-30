@@ -15,7 +15,8 @@ STATE_AUTHORITY_VERSION = 1
 # Shared cloud-connected state is platform-authoritative. Local-only secrets and machine resource
 # facts remain node-authoritative. The Desktop keeps durable replicas for offline continuity.
 STATE_POLICIES = {
-    'account': ('platform', 'replicated'),
+    # Nodes may cache account/entitlement state but never mutate it offline.
+    'account': ('platform', 'read_replica'),
     'project': ('platform', 'offline_queue'),
     'workstream': ('platform', 'offline_queue'),
     'task': ('platform', 'offline_queue'),
@@ -26,9 +27,16 @@ STATE_POLICIES = {
     'knowledge_metadata': ('platform', 'offline_queue'),
     'usage': ('platform', 'offline_queue'),
     'event': ('platform', 'append_only'),
+    # Writer/branch/resource leases are granted online only. An offline node may keep working under
+    # a lease it already holds until expiry, but cannot acquire, renew, or transfer one offline;
+    # queued lease grants could otherwise produce two writers after reconnect.
+    'lease': ('platform', 'online_only'),
     'execution_node': ('node', 'status_only'),
     'local_resource': ('node', 'status_only'),
-    'credential': ('node', 'never'),
+    # A credential stays with the component that uses it: the node's OS store for local tools, the
+    # platform's secret store for platform-run connectors (e.g. a zero-install user's cloud mail
+    # grant). It is never copied between platform and nodes by the sync protocol.
+    'credential': ('holder', 'never'),
 }
 
 CONFLICT_POLICY = {
@@ -36,6 +44,7 @@ CONFLICT_POLICY = {
     'event': 'deduplicate_operation_id',
     'credential': 'never_replicate',
     'local_resource': 'node_truth',
+    'lease': 'online_grant_only',
 }
 
 
@@ -61,7 +70,7 @@ def sync_envelope(kind: str, entity_id: str, base_revision: int,
                   mutation: Mapping[str, Any], operation_id: str | None = None) -> dict:
     """Build an idempotent optimistic-concurrency envelope for a future sync transport."""
     policy = policy_for(kind)
-    if policy['sync'] in ('never', 'status_only'):
+    if policy['sync'] in ('never', 'status_only', 'read_replica', 'online_only'):
         raise ValueError(kind + ' is not eligible for replicated mutation envelopes.')
     if not isinstance(entity_id, str) or not entity_id.strip() or len(entity_id) > 200:
         raise ValueError('entity_id must be a nonempty string up to 200 characters.')
@@ -72,7 +81,7 @@ def sync_envelope(kind: str, entity_id: str, base_revision: int,
     encoded = json.dumps(dict(mutation), separators=(',', ':'), ensure_ascii=False)
     if len(encoded.encode('utf-8')) > 100_000:
         raise ValueError('mutation is too large.')
-    op = operation_id or uuid.uuid4().hex
+    op = uuid.uuid4().hex if operation_id is None else operation_id
     if not isinstance(op, str) or not 1 <= len(op) <= 200 or '\0' in op:
         raise ValueError('operation_id must contain 1-200 characters.')
     return {

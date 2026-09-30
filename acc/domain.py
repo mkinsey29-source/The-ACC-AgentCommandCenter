@@ -17,19 +17,23 @@ def _json_object(value: Any, label: str, limit: int = 100_000) -> dict:
         return {}
     if not isinstance(value, Mapping):
         raise ValueError(label + ' must be a JSON object.')
-    encoded = json.dumps(dict(value), separators=(',', ':'), ensure_ascii=False)
+    try:
+        encoded = json.dumps(dict(value), separators=(',', ':'), ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise ValueError(label + ' must contain only JSON values.') from exc
     if len(encoded.encode('utf-8')) > limit:
         raise ValueError(label + ' is too large.')
     return json.loads(encoded)
 
 
-def _string_list(value: Any, label: str, limit: int = 100) -> list[str]:
+def _string_list(value: Any, label: str, limit: int = 100, item_limit: int = 2000) -> list[str]:
     if value is None:
         return []
     if not isinstance(value, list) or len(value) > limit:
         raise ValueError(f'{label} must be an array of at most {limit} strings.')
-    if not all(isinstance(item, str) and item.strip() and '\0' not in item for item in value):
-        raise ValueError(label + ' must contain nonempty strings.')
+    if not all(isinstance(item, str) and item.strip() and '\0' not in item
+               and len(item) <= item_limit for item in value):
+        raise ValueError(f'{label} must contain nonempty strings of at most {item_limit} characters.')
     return list(dict.fromkeys(item.strip() for item in value))
 
 
@@ -82,7 +86,7 @@ def normalize_task_fields(payload: Mapping[str, Any]) -> dict:
             payload.get('acceptance_requirements', []), 'acceptance_requirements'),
         'risk': risk,
         'priority': priority,
-        'depends_on': _string_list(payload.get('depends_on', []), 'depends_on'),
+        'depends_on': _string_list(payload.get('depends_on', []), 'depends_on', item_limit=200),
         'data_classification': classification,
         'workspace_scope': workspace_scope,
     }

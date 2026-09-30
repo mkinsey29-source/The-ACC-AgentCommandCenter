@@ -1,8 +1,11 @@
 """Connector descriptors and registry for optional ACC capability packs."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Iterable
+
+_UNSET = object()
 
 from .contracts import CONNECTOR_FACETS, capability_list, provider_id
 
@@ -73,7 +76,13 @@ class ConnectorRegistry:
 
     def update_state(self, connector_id: str, *, configured: bool | None = None,
                      healthy: bool | None = None, enabled: bool | None = None,
-                     last_error: str | None = None, metadata: dict[str, Any] | None = None) -> dict:
+                     last_error: Any = _UNSET, metadata: dict[str, Any] | None = None) -> dict:
+        """Apply one connector state transition atomically.
+
+        Every argument is validated against the complete prospective state before anything is
+        mutated, so a rejected call leaves the connector unchanged. ``last_error`` is kept unless
+        passed explicitly (``None`` clears it).
+        """
         state = self._items.get(connector_id)
         if state is None:
             raise KeyError(connector_id)
@@ -82,16 +91,25 @@ class ConnectorRegistry:
         next_enabled = state.enabled if enabled is None else bool(enabled)
         if next_enabled and not next_configured:
             raise ValueError('A connector cannot be enabled before it is configured.')
-        state.configured = next_configured
-        state.healthy = next_healthy
-        state.enabled = next_enabled
-        if last_error is not None and (not isinstance(last_error, str) or len(last_error) > 1000):
+        next_error = state.last_error if last_error is _UNSET else last_error
+        if next_error is not None and (not isinstance(next_error, str) or len(next_error) > 1000):
             raise ValueError('last_error must be a string up to 1000 characters.')
-        state.last_error = last_error
+        next_metadata = state.metadata
         if metadata is not None:
             if not isinstance(metadata, dict):
                 raise ValueError('metadata must be a JSON object.')
-            state.metadata = dict(metadata)
+            try:
+                encoded = json.dumps(metadata, separators=(',', ':'), allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise ValueError('metadata must be a JSON object.') from exc
+            if len(encoded) > 20_000:
+                raise ValueError('metadata is too large.')
+            next_metadata = json.loads(encoded)
+        state.configured = next_configured
+        state.healthy = next_healthy
+        state.enabled = next_enabled
+        state.last_error = next_error
+        state.metadata = next_metadata
         return state.snapshot()
 
     def get(self, connector_id: str) -> dict:
@@ -105,7 +123,8 @@ class ConnectorRegistry:
     def eligible(self, capability: str) -> list[dict]:
         capability_list([capability], 'capability')
         return [item for item in self.snapshot()
-                if item['enabled'] and item['healthy'] and capability in item['capabilities']]
+                if item['implemented'] and item['enabled'] and item['healthy']
+                and capability in item['capabilities']]
 
 
 SUGGESTED_CONNECTORS = (
