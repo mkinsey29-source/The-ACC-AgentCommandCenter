@@ -207,6 +207,8 @@ class PlatformApi:
             ],
             'cursor': batch.cursor,
             'has_more': batch.has_more,
+            'reset_required': batch.reset_required,
+            'oldest_available': batch.oldest_available,
         })
 
     @staticmethod
