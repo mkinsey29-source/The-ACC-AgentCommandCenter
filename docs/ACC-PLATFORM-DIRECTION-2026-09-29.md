@@ -1,7 +1,7 @@
 # ACC Platform Direction — OpenAI-First, Multi-Agent by Design
 
 **Decision date:** 2026-09-29  
-**Status:** Architectural direction. This document supersedes earlier ACC architecture decisions wherever they conflict, but it does **not** claim the announced OpenAI capabilities are already implemented in ACC.  
+**Status:** Architectural direction. This document supersedes earlier ACC architecture decisions wherever they conflict, but it does **not** claim the announced OpenAI capabilities are already implemented in ACC. Section 17 records which OpenAI capabilities were verified as available, in preview, or without a documented programmatic interface on 2026-09-30.  
 **Repository:** `mkinsey29-source/The-ACC-AgentCommandCenter`
 
 ## 1. Product decision
@@ -33,6 +33,7 @@ This means:
 - No core ACC data model may assume one model vendor.
 - No project should become unusable if an optional provider disappears.
 - ACC owns project/workforce state; model providers perform work.
+- "OpenAI-complete" means OpenAI alone is sufficient, not that OpenAI is always the routed default. When other workers are enabled, the user's routing and cost policy chooses among them (section 8).
 
 ## 3. Commercial/product model
 
@@ -87,9 +88,12 @@ Where OpenAI supports ChatGPT identity and eligible plan-backed app usage, ACC s
    OpenAI path       External agents     Tool/engine lanes
         |                 |                  |
  Codex Cloud /       Claude / Gemini /   Blender / Unity /
- Codex Harness       DeepSeek / Grok /   Unreal / Android /
-                    local models / etc.   other MCP/tools
+ Codex Harness /     DeepSeek / Grok /   Unreal / Android /
+ Agents API /       local models / etc.   other MCP/tools
+ ChatGPT Work
 ```
+
+Artifacts and connected apps sit beside the dispatcher through `WorkspaceProvider` and `AppConnector` (section 6.8). They hold user-facing content; they do not hold ACC task state.
 
 ## 5. What ACC owns
 
@@ -147,6 +151,8 @@ ACC should use Codex cloud execution for work that does not require a user's loc
 
 A user's computer should not need to stay awake for cloud-only tasks.
 
+**Integration route (unverified dependency).** As of 2026-09-30, OpenAI documents starting Codex Cloud tasks from ChatGPT/Codex, the Codex CLI, and the GitHub, GitLab, Linear and Slack integrations. It does not document a general API through which a third-party service such as ACC can create, monitor and cancel Codex Cloud tasks. The Codex SDK and App Server documented today drive a Codex process that ACC (or a host ACC controls) runs. Until OpenAI documents a Codex Cloud task API, ACC's cloud coding worker must use one of those documented routes, for example an ACC-hosted Codex App Server, the Agents API hosted sandbox, or a supported integration, and must not assume direct control of Codex Cloud tasks.
+
 ### 6.3 Open-source Codex harness / App Server
 
 For Codex execution, prefer OpenAI's own open-source Codex harness and supported App Server/event interfaces instead of inserting a generic third-party harness between ACC and Codex.
@@ -169,7 +175,7 @@ ACC's Agent View and Play-by-Play should consume real Codex events where availab
 
 Create a vendor-independent `DecisionProvider` interface in ACC.
 
-**OpenAI Decisions is the preferred primary provider when generally available and suitable.** It replaces TypeSafe Jev as a required architectural dependency for bounded semantic decisions such as:
+**OpenAI Decisions is the preferred primary provider when generally available and suitable.** It takes over from TypeSafe Jev as the planned semantic provider for bounded decisions such as:
 
 - task classification;
 - agent/model routing;
@@ -193,7 +199,7 @@ DecisionProvider
   - deterministic ACC rules
 ```
 
-TypeSafe is therefore demoted from a core dependency to a benchmark/fallback provider.
+TypeSafe is therefore a benchmark/fallback provider rather than the planned primary. The current code (`acc/routing.py`, `docs/AUTONOMOUS-ROUTING.md`) already treats Jev as optional semantic evidence over deterministic eligibility and scoring, so `DecisionProvider` generalizes that existing seam rather than removing a hard dependency.
 
 ### 6.5 Dots
 
@@ -201,7 +207,7 @@ Dots are **optional supervisory agents**, not a required ACC control layer.
 
 ACC should be able to monitor and control Codex through its direct OpenAI integrations. Do not insert a Dot merely to watch Codex.
 
-A user's Dot may still be valuable for personal 24/7 supervision, cross-application follow-up, reminders, or deciding when to contact the user. A Dot can call ACC through the plugin where permissions allow, but ACC must operate normally without one.
+No developer API for dots is documented as of 2026-09-30; a dot reaches external services through plugins. A user's Dot may still be valuable for personal 24/7 supervision, cross-application follow-up, reminders, or deciding when to contact the user. A Dot can call ACC through the plugin where permissions allow, but ACC must operate normally without one.
 
 ### 6.6 Symphony
 
@@ -217,7 +223,7 @@ Where available and eligible:
 - support OpenAI-authorized plan-backed app usage where permitted;
 - do not require every customer to understand or manually configure API keys for the baseline experience.
 
-These are integration conveniences, not the canonical ACC identity or billing database.
+These are integration conveniences, not the canonical ACC identity or billing database. As of 2026-09-30, Sign in with ChatGPT and plan-backed usage are launched only with a limited set of partners, so the baseline must also work with ACC's own sign-in and an OpenAI API key.
 
 
 ### 6.8 ChatGPT Space and ChatGPT Work
@@ -238,6 +244,14 @@ Space can reduce the need to create a Google Doc merely to obtain an editable co
 
 ChatGPT Work is also part of the OpenAI-complete baseline for non-coding work. Where available, ACC should be able to delegate work that uses connected apps/files and produces documents, spreadsheets, presentations, reports, Sites, research, or other finished artifacts rather than forcing every task through Codex.
 
+**How ACC reaches OpenAI non-coding workers.** As of 2026-09-30 there is no documented API for a third-party service to hand a task to ChatGPT Work and read back the result. The documented routes are:
+
+- **User-in-the-loop:** the user works in ChatGPT/Work, and ChatGPT calls the ACC Plugin to read tasks and record progress, artifacts and results.
+- **Agents API (public beta):** OpenAI's programmatic agent runtime, with sessions, an OpenAI-hosted sandbox, MCP connections and computer use. This is the programmatic OpenAI worker for non-coding tasks that ACC dispatches itself.
+- **Workspace agent API triggers (research preview; Business, Enterprise, Edu and Teachers plans):** these queue a run but return no run ID or result, so ACC cannot use them as a tracked worker on their own.
+
+ACC must not record a Work task as complete without a result it can see, whether through the plugin, an Agents API session, or an artifact in a `WorkspaceProvider`.
+
 Add two provider abstractions alongside execution workers:
 
 ```
@@ -257,6 +271,8 @@ AppConnector
 
 ACC task/project state remains authoritative. Space, Drive, and other stores hold user-facing artifacts and collaborative content.
 
+`AppConnector` covers SaaS/account integrations (mail, calendar, documents, business systems). `CapabilityConnector` (section 15) covers tool and engine lanes such as Blender, Unity, Unreal and local MCP tools, which need resource leases and often an execution node. Phase 1 must define where the two overlap, for example a Drive connector used both as an artifact store and as an app.
+
 ## 7. Harness strategy
 
 ACC no longer chooses one universal harness.
@@ -267,13 +283,13 @@ Use the native Codex harness for Codex.
 
 ### DeepSeek Harness — optional provider-neutral/non-OpenAI worker runtime
 
-Use behind an adapter when it is mature enough and useful for DeepSeek, compatible providers, open models, or local deployments.
+Use behind an adapter when it is mature enough and useful for DeepSeek, compatible providers, open models, or local deployments. ACC already ships this adapter (`driver: 'dsh'`, `acc/deepseek_harness.py`); keep it behind the worker-adapter contract rather than rebuilding it.
 
 Do not make ACC commercially dependent on an unstable developer-preview interface. Version/fence it behind ACC's worker adapter contract.
 
 ### HarnessX — Harness Lab, not production control plane
 
-HarnessX moves out of ACC's primary execution path.
+HarnessX stays out of ACC's primary execution path. It was already deferred on 2026-09-22 (integrated-graphics hardware) and has never been implemented in ACC. The Xiaomi HarnessX paper has no confirmed official public release (see `docs/IMPLEMENTATION-STATUS.md`), so "Harness Lab" is a role that HarnessX or another harness-optimization tool may fill once one is actually available.
 
 Use it as an optional experimentation/optimization system:
 
@@ -317,6 +333,13 @@ The same task graph/review/continuity system can therefore coordinate a mixed pr
 - a document agent maintaining the launch plan.
 
 The orchestrator/Decision Engine selects an eligible worker or app path based on required capabilities, evidence, cost, policy, and availability.
+
+Capability routing extends the existing dotted capability vocabulary and role/tier metadata in `acc/routing.py`. These routing rules from earlier decisions still apply:
+
+- An agent's **configured**, **healthy/connected** and **enabled by the user** states are separate. A disabled agent is never routed to, whatever its health or capability.
+- Cheaper agents remain valid defaults where appropriate. A more expensive agent (OpenAI included) does not silently become the default because it might perform better.
+- Routing changes that would alter standing policy are recommendations the user reviews, not silent global changes.
+- Every queued task shows its real waiting reason (lease, disabled agent, provider limit, budget, local serial slot, engine reservation, prerequisite, recovery hold).
 
 ### Optional external agents
 
@@ -395,6 +418,12 @@ It must support:
 
 It should be useful on Android/tablet without requiring ACC Desktop to be online when the work is cloud-based.
 
+This makes the ACC Platform an internet-reachable, authenticated, multi-tenant service; the ACC Plugin's MCP server must also be reachable from OpenAI. That is new infrastructure: today's ACC server is loopback-only with a local session token. Consequences:
+
+- A Desktop-only or offline user must still be able to run ACC locally with no public receiver, tunnel or relay.
+- A Desktop node connects **outbound** to the platform. The platform and web pages never receive the local control token, and web pages never become the authority for local state.
+- Provider credentials stay out of the platform where a local node or the provider's own sign-in can hold them.
+
 ### ACC Desktop — optional power mode
 
 Desktop/Tauri adds:
@@ -407,9 +436,13 @@ Desktop/Tauri adds:
 - Android devices/APK workflows;
 - local MCP servers;
 - local execution that cannot run in cloud environments;
-- optional offline operation.
+- optional offline operation;
+- the Terminal View: real files, a real PTY able to run Neovim, and shared project/branch/task context;
+- a persistent background service, so closing the window does not stop work, with state reconciliation after restart.
 
 Desktop and Web must share a service/API/state model; they are not separate products.
+
+**State authority (open design decision).** The 2026-09-22 decision made a local SQLite database authoritative so ACC works offline. With Web as the universal default, the hosted ACC Platform becomes the system of record for cloud-connected accounts, while a Desktop node keeps a durable local store so local and offline work continues and reconciles later. Phase 1 must define that sync and conflict model before either surface depends on it.
 
 ## 11. Orchestration and control rules
 
@@ -424,7 +457,10 @@ Examples:
 - stale review cannot approve changed work;
 - branch/merge/publication policy is checked by code;
 - credentials/permissions come from real integrations;
-- a semantic decision model can recommend routing but cannot fabricate availability.
+- a semantic decision model can recommend routing but cannot fabricate availability;
+- a branch/lease is released for normal transfer only after the outgoing agent's Markdown continuity handoff exists; stalls and crashes go through explicit recovery instead;
+- for cloud workers (Codex Cloud included), "cancellation requested" is not "confirmed stopped". A replacement cannot write the same branch until the previous writer can no longer write, or it works in a separate recovery workspace;
+- nothing is pushed, published or synced to GitHub or another external system only because work passed review. Publication follows the user's explicit instruction or a publication policy the user set (see section 14).
 
 AI decisions are used where interpretation is useful; deterministic software enforces facts and policy.
 
@@ -451,9 +487,9 @@ Where older ACC documents disagree, use this document.
 Specifically superseded:
 
 1. **Desktop-first product / web as companion** -> Web is now the universal zero-install full Command Center; desktop is optional local power mode.
-2. **A bespoke ChatGPT Remote bridge as the core remote strategy** -> ACC Plugin is the preferred OpenAI conversational/control integration; bridge work may remain as compatibility/local fallback.
-3. **TypeSafe Jev as a central router** -> `DecisionProvider` abstraction, with OpenAI Decisions preferred when ready and TypeSafe as fallback/benchmark.
-4. **HarnessX in the production path** -> HarnessX becomes optional Harness Lab/optimization infrastructure.
+2. **A bespoke ChatGPT Remote bridge as the core remote strategy** -> ACC Plugin is the preferred OpenAI conversational/control integration; bridge work (`acc/bridge.py`, `acc/orchestrators.py`) may remain as compatibility/local fallback.
+3. **TypeSafe Jev as the planned semantic router** -> `DecisionProvider` abstraction, with OpenAI Decisions preferred when ready and TypeSafe as fallback/benchmark. (Jev was already optional in code.)
+4. **HarnessX as a possible future production harness** -> HarnessX, if it becomes available, is an optional Harness Lab/optimization tool. (It was already deferred on 2026-09-22 and was never implemented.)
 5. **One generic harness for every worker** -> Native Codex harness for Codex, DeepSeek/provider-neutral harness where useful, additional adapters as needed.
 6. **ACC must build its own generic always-on AI supervisor** -> Use OpenAI platform capabilities where they fit; Dots are optional and not required for Codex monitoring.
 7. **Local machine required for normal use** -> Cloud-first work can operate without ACC Desktop; local machine is needed only for local-only capabilities.
@@ -476,7 +512,12 @@ The new OpenAI platform direction does **not** remove these ACC principles:
 - provider independence;
 - Second Brain/project continuity;
 - no silent use of a personal signed-in browser profile;
-- local creative-engine integrations.
+- local creative-engine integrations;
+- the orchestrator is a selectable role over one durable conversation, not a fixed vendor identity, with a lease against conflicting orchestration turns;
+- delegated instruction records: the exact brief each worker received is stored, readable and editable;
+- serialized local review/integration for local work, and GitHub/external publication only on explicit user instruction or user-set policy (2026-09-22 decision);
+- configured / healthy / enabled agent states, cost-aware defaults, and routing changes as recommendations;
+- local models serial on constrained hardware, and exclusive reservations for heavy local resources.
 
 ## 15. Implementation order
 
@@ -485,13 +526,15 @@ The new OpenAI platform direction does **not** remove these ACC principles:
 - Generalize the core domain from coding tasks to capability-based work/tasks/projects.
 - Define `WorkerProvider`, `DecisionProvider`, `ExecutionNode`, `CapabilityConnector`, `WorkspaceProvider`, and `AppConnector` interfaces.
 - Keep current Python core where useful; avoid rewriting proven persistence/review logic merely for technology preference.
+- Decide the hosted-platform vs local-store authority and sync model (section 10).
+- Define the `AppConnector` / `CapabilityConnector` boundary (section 6.8).
 
 ### Phase 2 — OpenAI-complete baseline
 - ACC Plugin.
 - Auth/account connection.
 - ACC Web as authenticated universal full UI.
-- Codex Cloud worker integration for coding/engineering work.
-- ChatGPT Work path for research, connected-app work, and artifact production.
+- Codex Cloud worker integration for coding/engineering work, through a documented route (section 6.2).
+- ChatGPT Work path (via the plugin) and Agents API worker for research, connected-app work, and artifact production (section 6.8).
 - Space-aware artifact/workspace UX where supported, without assuming an undocumented API.
 - Codex native harness/App Server event integration.
 - OpenAI-first task execution and review path across coding and non-coding work.
@@ -529,7 +572,7 @@ A user with only the supported OpenAI/ChatGPT ecosystem can:
 4. send natural-language work through ChatGPT/ACC;
 5. use Codex Cloud for coding when coding is required;
 6. use ChatGPT Work/connected apps for non-coding tasks such as research, documents, email, calendar, planning, and analysis;
-7. create and organize user-facing artifacts through supported OpenAI workspace/document surfaces such as Space/Work, while ACC retains authoritative project/task state;
+7. create and organize user-facing artifacts through supported OpenAI workspace/document surfaces such as Space/Work, or ACC's own artifact store where no programmatic OpenAI surface exists, while ACC retains authoritative project/task state;
 8. see live/structured progress across mixed worker types;
 9. run ACC review/approval/gates appropriate to the work;
 10. continue from phone/tablet;
@@ -537,7 +580,29 @@ A user with only the supported OpenAI/ChatGPT ecosystem can:
 
 No third-party model is required and no coding task is required for ACC to be useful.
 
+Some OpenAI surfaces are plan-dependent (for example, Space editing needs Pro, Business or Enterprise; dots roll out to Pro and Business Premium first). Scenario A must state which OpenAI plan it was verified on, and ACC must degrade to its own web UI and artifact store on plans without those surfaces.
+
 ### Scenario B — extended customer
 The same user can additionally connect Claude/DeepSeek/Gemini/Grok/local workers and Blender/Unity/Unreal. ACC can route suitable work to them without changing the project/task model, and can fall back to the OpenAI baseline if those integrations are unavailable.
 
 That combination — **OpenAI-complete by default, multi-agent and multi-tool by choice** — is the new ACC platform direction.
+
+## 17. OpenAI capability status (verified 2026-09-30)
+
+Checked on 2026-09-30 against official OpenAI sources: search results restricted to openai.com, help.openai.com and developers.openai.com (the reviewing environment could not open those pages directly), plus the `openai/codex` and `openai/symphony` READMEs read in full on GitHub. Recheck each row against the live page before implementing against it.
+
+| Capability | Status | What is documented for ACC's use |
+|---|---|---|
+| Plugins in ChatGPT and Codex, universal plugin directory (MCP / Apps SDK) | Available | Build as an MCP server plus UI; submit for directory listing. |
+| Plugin extensions (sidebar, composer, file-viewer panels) | Available, rolling out by plan | "Coming soon" on web for Free and Go users. |
+| Plugin monetization | External checkout generally available | In-ChatGPT checkout only with saved merchant payment methods; directory listings may not advertise pricing. Matches section 3. |
+| Sign in with ChatGPT and plan-backed usage | Limited partners | Launched with a limited set of partners; others use a contact process. |
+| Codex Cloud | Available on ChatGPT plans (limits vary; admin-controlled in managed workspaces) | Started from ChatGPT/Codex, CLI, GitHub, GitLab, Linear, Slack. **No documented third-party task API.** |
+| Codex App Server and Codex SDK | Available, open source (`openai/codex`) | JSON-RPC over stdio/WebSocket; SDK drives local Codex threads. |
+| Agents API | Public beta | Sessions, OpenAI-hosted sandbox, MCP, computer use. |
+| Decisions API | Limited preview; broad release announced "in the coming days" | Classification/routing over finite answer sets. |
+| Dots | Rolling out to Pro and Business Premium (excluding EEA, Switzerland, UK); Enterprise beta | **No developer API documented**; dots use plugins. |
+| Symphony | Open-source spec and Elixir reference (Apache-2.0), "low-key engineering preview" | Reference only. |
+| ChatGPT Work | Available on eligible paid plans | **No documented API for third-party delegation**; plugins work inside it. |
+| Workspace agent API triggers | Research preview (Business, Enterprise, Edu, Teachers) | Queue-only: 202 with no run ID or result. |
+| ChatGPT Space | Available; create/edit on Pro, Business, Enterprise (web and desktop; read-only on mobile) | **No developer or plugin API documented.** |
