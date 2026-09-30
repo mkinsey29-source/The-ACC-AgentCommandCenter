@@ -2,16 +2,18 @@
 from .api import ApiError, ApiResponse, PlatformApi, bearer_token
 from .events import EventBatch, EventCursorError, PlatformEvent, PlatformEventSource
 from .commands import (
-    COMMAND_KINDS, CommandConflict, CommandRequest, CommandResult,
-    IdempotencyConflict, PlatformCommandRepository, QuotaExceeded, QuotaReservation,
+    COMMAND_KINDS, COMMAND_QUOTAS, CommandConflict, CommandRequest, CommandResult,
+    CommandStateConflict, CommandTargetNotFound, IdempotencyConflict,
+    PlatformCommandRepository, QuotaExceeded, QuotaReservation,
 )
 from .command_memory import InMemoryCommandRepository
 from .repository import AccountProjectView, PlatformReadRepository
 from .transport import EventTicketStore, HostedTransport, OriginPolicy
 
 __all__ = [
-    'AccountProjectView', 'ApiError', 'ApiResponse', 'COMMAND_KINDS',
-    'CommandConflict', 'CommandRequest', 'CommandResult',
+    'AccountProjectView', 'ApiError', 'ApiResponse', 'COMMAND_KINDS', 'COMMAND_QUOTAS',
+    'CommandConflict', 'CommandRequest', 'CommandResult', 'CommandStateConflict',
+    'CommandTargetNotFound',
     'EventBatch', 'EventCursorError', 'IdempotencyConflict', 'InMemoryCommandRepository',
     'EventTicketStore', 'HostedTransport', 'OriginPolicy',
     'PlatformApi', 'PlatformCommandRepository', 'PlatformEvent', 'PlatformEventSource',

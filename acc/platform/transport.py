@@ -41,6 +41,20 @@ def _json_bytes(value) -> bytes:
     return _json_text(value).encode('utf-8')
 
 
+def _unique_object(pairs):
+    # A repeated key is ambiguous (different parsers keep different values); reject it.
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate JSON object key')
+        result[key] = value
+    return result
+
+
+def _reject_constant(value):
+    raise ValueError('NaN and Infinity are not JSON')
+
+
 def _query(scope) -> dict[str, list[str]]:
     # keep_blank_values: ``?after=`` must be rejected, not silently treated as a missing value.
     return parse_qs(scope.get('query_string', b'').decode('ascii', 'strict'), keep_blank_values=True)
@@ -212,7 +226,9 @@ class HostedTransport:
         try:
             query = _query(scope)
             body = None
-            if method == 'POST':
+            if method == 'POST' and self._is_command_route(parts):
+                # Only the command route has a request body; other POST routes (event-ticket)
+                # keep their PR #31 behavior and never parse one.
                 body = await self._read_json_body(receive)
             response = self._route_http(method, parts, authorization, query, body)
             if asyncio.iscoroutine(response):
@@ -274,6 +290,11 @@ class HostedTransport:
         })
 
     @staticmethod
+    def _is_command_route(parts):
+        return len(parts) == 6 and parts[:2] == ['v1', 'accounts'] and parts[3] == 'projects' \
+            and parts[5] == 'commands'
+
+    @staticmethod
     async def _read_json_body(receive):
         chunks = []
         total = 0
@@ -293,8 +314,12 @@ class HostedTransport:
             if not message.get('more_body', False):
                 break
         try:
-            return json.loads(b''.join(chunks).decode('utf-8'))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return json.loads(
+                b''.join(chunks).decode('utf-8'),
+                object_pairs_hook=_unique_object,
+                parse_constant=_reject_constant,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
             raise ValueError('invalid JSON body') from exc
 
     @staticmethod
