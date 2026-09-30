@@ -12,6 +12,7 @@ from .models import (
     EntitlementSnapshot,
     Membership,
     SessionRecord,
+    UserState,
     VerifiedIdentity,
     _bounded_id,
 )
@@ -19,6 +20,7 @@ from .models import (
 
 class AuthRepository(Protocol):
     def resolve_identity(self, identity: VerifiedIdentity) -> str | None: ...
+    def user(self, user_id: str) -> UserState | None: ...
     def account(self, account_id: str) -> AccountState | None: ...
     def membership(self, account_id: str, user_id: str) -> Membership | None: ...
     def entitlements(self, account_id: str) -> EntitlementSnapshot | None: ...
@@ -36,13 +38,19 @@ class InMemoryAuthRepository:
 
     def __init__(self) -> None:
         self._identities: dict[tuple[str, str], str] = {}
+        self._users: dict[str, UserState] = {}
         self._accounts: dict[str, AccountState] = {}
         self._memberships: dict[tuple[str, str], Membership] = {}
         self._entitlements: dict[str, EntitlementSnapshot] = {}
         self._sessions: dict[str, SessionRecord] = {}
 
+    def put_user(self, user: UserState) -> None:
+        self._users[user.user_id] = user
+
     def bind_identity(self, identity: VerifiedIdentity, user_id: str) -> None:
         user_id = _bounded_id(user_id, 'user_id')
+        if user_id not in self._users:
+            raise ValueError('ACC user must exist before an identity can be bound.')
         key = (identity.provider, identity.subject)
         current = self._identities.get(key)
         if current is not None and current != user_id:
@@ -64,6 +72,9 @@ class InMemoryAuthRepository:
 
     def resolve_identity(self, identity: VerifiedIdentity) -> str | None:
         return self._identities.get((identity.provider, identity.subject))
+
+    def user(self, user_id: str) -> UserState | None:
+        return self._users.get(user_id)
 
     def account(self, account_id: str) -> AccountState | None:
         return self._accounts.get(account_id)
