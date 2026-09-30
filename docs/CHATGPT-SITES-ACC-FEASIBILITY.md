@@ -106,6 +106,18 @@ Local verification: **6/6 staging tests pass** and the server compiles.
 The remaining operational step is to deploy this fixture to a public TLS-terminating host and put its
 HTTPS base URL plus a new staging-only token into the Site's Connection panel.
 
+### Decision on 2026-09-30
+
+Do **not** block broader ACC development on this final connectivity proof. The frontend deployment,
+mobile interaction, workspace switching, Orchestrator Chat, and 2,000-event stress test all passed,
+so ChatGPT Sites is **provisionally accepted as a viable ACC Web host** for planning purposes.
+
+The public HTTPS/WSS staging check is deferred. A new free Replit account was connected, but its
+daily Agent credits were exhausted before the staging backend could be completed/published there.
+Replit reported that daily credits reset at **00:00 UTC**. Resume the staging deployment after the
+reset; if it fails later, treat that as a hosting integration issue to solve without reopening the
+entire Sites feasibility decision.
+
 ### What only the Sites runtime can prove
 
 - Sites recognizes/builds the existing project;
