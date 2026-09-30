@@ -77,14 +77,14 @@ class ConnectorRegistry:
         state = self._items.get(connector_id)
         if state is None:
             raise KeyError(connector_id)
-        if configured is not None:
-            state.configured = bool(configured)
-        if healthy is not None:
-            state.healthy = bool(healthy)
-        if enabled is not None:
-            state.enabled = bool(enabled)
-        if state.enabled and not state.configured:
+        next_configured = state.configured if configured is None else bool(configured)
+        next_healthy = state.healthy if healthy is None else bool(healthy)
+        next_enabled = state.enabled if enabled is None else bool(enabled)
+        if next_enabled and not next_configured:
             raise ValueError('A connector cannot be enabled before it is configured.')
+        state.configured = next_configured
+        state.healthy = next_healthy
+        state.enabled = next_enabled
         if last_error is not None and (not isinstance(last_error, str) or len(last_error) > 1000):
             raise ValueError('last_error must be a string up to 1000 characters.')
         state.last_error = last_error
@@ -120,7 +120,7 @@ SUGGESTED_CONNECTORS = (
     ConnectorSpec('obsidian', 'Obsidian',
                   ('workspace', 'knowledge'),
                   ('knowledge.read', 'knowledge.write', 'knowledge.link'),
-                  requires_execution_node=True, implemented=True),
+                  requires_execution_node=True, implemented=False),
     ConnectorSpec('google-drive', 'Google Drive',
                   ('app', 'workspace', 'knowledge'),
                   ('artifact.read', 'artifact.write', 'docs.read', 'docs.write',
