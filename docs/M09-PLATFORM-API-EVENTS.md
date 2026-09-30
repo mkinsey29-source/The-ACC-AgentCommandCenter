@@ -1,6 +1,6 @@
 # M09 — Hosted Platform API and Events
 
-**Status:** Core v1 read/event contracts integrated in PR #30; hosted transport slice in progress on `temporary/m09-hosted-transport-v1`.
+**Status:** PARTIAL — read/event contracts (PR #30) and hosted HTTP/WSS transport (PR #31, merged as `8915e39`) integrated. Commands/mutations and the durable hosted runtime remain.
 
 ## Purpose
 
