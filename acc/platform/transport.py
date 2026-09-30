@@ -242,6 +242,9 @@ class HostedTransport:
                 if method == 'POST' and tail == ['event-ticket']:
                     after = self._query_int(query, 'after', 0)
                     return self._issue_ticket(authorization, account_id, project_id, after)
+                if method == 'POST' and tail == ['commands']:
+                    return self._execute_command(
+                        authorization, account_id, project_id, self._request_body)
 
         return ApiResponse(404, {'error': {'code': 'not_found', 'message': 'Not found.'}})
 
