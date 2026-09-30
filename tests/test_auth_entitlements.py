@@ -7,6 +7,7 @@ from acc.auth import (
     EntitlementSnapshot,
     InMemoryAuthRepository,
     Membership,
+    UserState,
     VerifiedIdentity,
 )
 from acc.state_authority import policy_for
@@ -25,6 +26,7 @@ class AuthEntitlementTests(unittest.TestCase):
         self.clock = Clock()
         self.repo = InMemoryAuthRepository()
         self.identity = VerifiedIdentity('openai', 'subject-123', 'owner@example.test')
+        self.repo.put_user(UserState('user-1'))
         self.repo.bind_identity(self.identity, 'user-1')
         self.repo.put_account(AccountState('acct-1'))
         self.repo.put_membership(Membership(
@@ -122,8 +124,31 @@ class AuthEntitlementTests(unittest.TestCase):
             self.auth.create_session(self.identity, 'acct-2')
 
     def test_identity_binding_is_stable(self):
+        self.repo.put_user(UserState('user-2'))
         with self.assertRaisesRegex(ValueError, 'already bound'):
             self.repo.bind_identity(self.identity, 'user-2')
+
+    def test_user_suspend_invalidates_existing_token(self):
+        token = self.token()
+        self.repo.put_user(UserState('user-1', status='suspended', revision=1))
+        with self.assertRaisesRegex(AuthError, 'user is not active'):
+            self.auth.authenticate(token)
+
+    def test_identity_verifier_is_the_login_trust_boundary(self):
+        class Verifier:
+            id = 'openai'
+
+            def verify(self, assertion):
+                self.last_assertion = assertion
+                return VerifiedIdentity('openai', assertion['subject'])
+
+        verifier = Verifier()
+        auth = AuthService(self.repo, clock=self.clock, identity_verifiers=(verifier,))
+        token = auth.exchange_identity('openai', {'subject': 'subject-123'}, 'acct-1')
+        self.assertEqual(auth.authenticate(token).session.user_id, 'user-1')
+        self.assertEqual(verifier.last_assertion, {'subject': 'subject-123'})
+        with self.assertRaisesRegex(AuthError, 'not configured'):
+            auth.exchange_identity('google', {'subject': 'x'}, 'acct-1')
 
     def test_entitlement_limits_are_nonnegative_and_dotted(self):
         with self.assertRaises(ValueError):
