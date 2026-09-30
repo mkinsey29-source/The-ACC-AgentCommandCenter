@@ -10,21 +10,40 @@ import hashlib
 import json
 import secrets
 import time
-from dataclasses import dataclass
-from urllib.parse import parse_qs
+from dataclasses import dataclass, field
+from urllib.parse import parse_qs, urlsplit
 
 from .api import ApiResponse, PlatformApi
 
 
-def _headers(scope) -> dict[str, str]:
-    result = {}
+_SINGLE_VALUE_HEADERS = frozenset(('origin', 'authorization'))
+
+
+def _headers(scope) -> dict[str, str | None]:
+    result: dict[str, str | None] = {}
     for key, value in scope.get('headers', ()):
-        result[key.decode('latin-1').lower()] = value.decode('latin-1')
+        name = key.decode('latin-1').lower()
+        if name in _SINGLE_VALUE_HEADERS and name in result:
+            # A repeated Origin or Authorization header is ambiguous; treat it as absent so the
+            # request fails closed (origin denied / authentication required).
+            result[name] = None
+            continue
+        result[name] = value.decode('latin-1')
     return result
 
 
+def _json_text(value) -> str:
+    # allow_nan=False: NaN/Infinity are not JSON and would break strict browser parsers.
+    return json.dumps(value, separators=(',', ':'), ensure_ascii=False, allow_nan=False)
+
+
 def _json_bytes(value) -> bytes:
-    return json.dumps(value, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    return _json_text(value).encode('utf-8')
+
+
+def _query(scope) -> dict[str, list[str]]:
+    # keep_blank_values: ``?after=`` must be rejected, not silently treated as a missing value.
+    return parse_qs(scope.get('query_string', b'').decode('ascii', 'strict'), keep_blank_values=True)
 
 
 @dataclass(frozen=True)
@@ -32,20 +51,40 @@ class OriginPolicy:
     allowed_origins: frozenset[str]
 
     def __post_init__(self):
+        if isinstance(self.allowed_origins, str):
+            raise ValueError('allowed_origins must be a collection of origins.')
         normalized = set()
         for value in self.allowed_origins:
-            if not isinstance(value, str) or not value.startswith('https://'):
-                raise ValueError('Hosted origins must be explicit HTTPS origins.')
-            origin = value.rstrip('/')
-            if '*' in origin or '/' in origin.split('://', 1)[1]:
-                raise ValueError('Allowed origins cannot use wildcards or paths.')
-            normalized.add(origin)
+            normalized.add(self._normalize(value))
         if not normalized:
             raise ValueError('At least one hosted origin is required.')
         object.__setattr__(self, 'allowed_origins', frozenset(normalized))
 
+    @staticmethod
+    def _normalize(value: object) -> str:
+        """Return ``https://host[:port]`` or raise; no wildcard, path, query, fragment or userinfo."""
+        if not isinstance(value, str) or not value.isascii() or not value.startswith('https://'):
+            raise ValueError('Hosted origins must be explicit HTTPS origins.')
+        origin = value.rstrip('/').lower()
+        if '*' in origin:
+            raise ValueError('Allowed origins cannot use wildcards or paths.')
+        try:
+            parts = urlsplit(origin)
+            port = parts.port
+        except ValueError as exc:
+            raise ValueError('Hosted origins must be explicit HTTPS origins.') from exc
+        if (parts.path or parts.query or parts.fragment or '?' in origin or '#' in origin
+                or parts.username is not None or parts.password is not None
+                or not parts.hostname):
+            raise ValueError('Allowed origins cannot use wildcards or paths.')
+        canonical = 'https://' + parts.hostname + ('' if port is None else ':' + str(port))
+        if canonical != origin:
+            raise ValueError('Hosted origins must be explicit HTTPS origins.')
+        return canonical
+
     def allows(self, origin: str | None) -> bool:
-        return isinstance(origin, str) and origin.rstrip('/') in self.allowed_origins
+        # Browsers serialize Origin exactly as scheme://host[:port]; compare that form exactly.
+        return isinstance(origin, str) and origin in self.allowed_origins
 
 
 @dataclass(frozen=True)
@@ -53,8 +92,9 @@ class EventTicket:
     account_id: str
     project_id: str
     cursor: int
-    authorization: str
-    expires_at: float
+    # Never shown in repr/logging. Held only in process memory; see EventTicketStore.
+    authorization: str = field(repr=False)
+    expires_at: float = 0.0
 
 
 class EventTicketStore:
@@ -62,7 +102,13 @@ class EventTicketStore:
 
     Browsers cannot attach an Authorization header to the WebSocket constructor. The bearer session
     therefore authorizes an HTTPS ticket request; only a random one-time ticket appears in the WSS
-    URL. The store persists only a SHA-256 digest of that ticket.
+    URL. The store keys records by a SHA-256 digest of that ticket.
+
+    Each record also holds the Authorization value that requested it, so the stream can be
+    reauthorized through M08 on every poll. The store is therefore process-local by design: it must
+    never be serialized, persisted, or shared across processes. A multi-process deployment must
+    route the ticket request and the WebSocket to the same process or replace this store with one
+    keyed by a server-side session reference once M08 provides one.
     """
 
     def __init__(self, *, clock=time.time, ttl_seconds: int = 60):
@@ -82,7 +128,8 @@ class EventTicketStore:
     ) -> str:
         raw = 'accw_' + secrets.token_urlsafe(32)
         record = EventTicket(
-            account_id, project_id, cursor, authorization, self.clock() + self.ttl_seconds)
+            account_id, project_id, cursor, authorization,
+            expires_at=self.clock() + self.ttl_seconds)
         async with self._lock:
             self._expire()
             digest = self._digest(raw)
@@ -131,7 +178,20 @@ class HostedTransport:
         if scope['type'] == 'websocket':
             await self._websocket(scope, receive, send)
             return
+        if scope['type'] == 'lifespan':
+            await self._lifespan(receive, send)
+            return
         raise RuntimeError('Unsupported ASGI scope.')
+
+    @staticmethod
+    async def _lifespan(receive, send):
+        while True:
+            message = await receive()
+            if message.get('type') == 'lifespan.startup':
+                await send({'type': 'lifespan.startup.complete'})
+            elif message.get('type') == 'lifespan.shutdown':
+                await send({'type': 'lifespan.shutdown.complete'})
+                return
 
     async def _http(self, scope, receive, send):
         headers = _headers(scope)
@@ -148,9 +208,9 @@ class HostedTransport:
 
         parts = [part for part in path.split('/') if part]
         authorization = headers.get('authorization')
-        query = parse_qs(scope.get('query_string', b'').decode('ascii', 'strict'))
 
         try:
+            query = _query(scope)
             response = self._route_http(method, parts, authorization, query)
             if asyncio.iscoroutine(response):
                 response = await response
@@ -235,20 +295,31 @@ class HostedTransport:
                 (b'access-control-allow-methods', b'GET, POST, OPTIONS'),
                 (b'access-control-max-age', b'600'),
             ])
-        raw = b'' if status == 204 else _json_bytes(body)
+        if status == 204:
+            raw = b''
+        else:
+            try:
+                raw = _json_bytes(body)
+            except (TypeError, ValueError, RecursionError):
+                # A non-JSON value from a read model/event source: fail closed and opaque.
+                status = 500
+                raw = _json_bytes({'error': {'code': 'internal_error', 'message': 'Internal error.'}})
         headers.append((b'content-length', str(len(raw)).encode('ascii')))
         await send({'type': 'http.response.start', 'status': status, 'headers': headers})
         await send({'type': 'http.response.body', 'body': raw})
 
     async def _websocket(self, scope, receive, send):
+        # ASGI: the first event on a WebSocket scope is websocket.connect. Validate only after it,
+        # and close before accept so the server rejects the handshake (HTTP 403).
+        first = await receive()
+        if first.get('type') != 'websocket.connect':
+            return
         headers = _headers(scope)
-        origin = headers.get('origin')
-        if not self.origins.allows(origin) or scope.get('path') != '/v1/events':
+        if not self.origins.allows(headers.get('origin')) or scope.get('path') != '/v1/events':
             await send({'type': 'websocket.close', 'code': 4403, 'reason': 'Origin denied.'})
             return
         try:
-            query = parse_qs(scope.get('query_string', b'').decode('ascii', 'strict'))
-            values = query.get('ticket', [])
+            values = _query(scope).get('ticket', [])
             if len(values) != 1:
                 raise ValueError()
             ticket = await self.tickets.consume(values[0])
@@ -258,13 +329,21 @@ class HostedTransport:
             await send({'type': 'websocket.close', 'code': 4401, 'reason': 'Authentication required.'})
             return
 
-        first = await receive()
-        if first.get('type') != 'websocket.connect':
-            await send({'type': 'websocket.close', 'code': 4400, 'reason': 'Invalid handshake.'})
-            return
         await send({'type': 'websocket.accept'})
-        cursor = ticket.cursor
+        # One outstanding receive() at a time; a poll timeout never cancels it mid-message.
+        pending = [asyncio.ensure_future(receive())]
+        try:
+            await self._stream(ticket, receive, send, pending)
+        finally:
+            if not pending[0].done():
+                pending[0].cancel()
+                try:
+                    await pending[0]
+                except (asyncio.CancelledError, Exception):
+                    pass
 
+    async def _stream(self, ticket: EventTicket, receive, send, pending):
+        cursor = ticket.cursor
         while True:
             # Re-authorize every poll using the session that created the one-time ticket. The
             # bearer is held only in process memory for this short-lived connection and is never
@@ -286,38 +365,46 @@ class HostedTransport:
                 await send({'type': 'websocket.close', 'code': 1011, 'reason': 'Event stream failed.'})
                 return
 
-            body = dict(response.body)
+            body = response.body
             if body.get('reset_required'):
-                await send({'type': 'websocket.send', 'text': json.dumps({
+                message = {
                     'type': 'reset_required',
                     'cursor': body['cursor'],
                     'oldest_available': body.get('oldest_available'),
-                }, separators=(',', ':'))})
+                }
+                await send({'type': 'websocket.send', 'text': _json_text(message)})
                 await send({'type': 'websocket.close', 'code': 4009, 'reason': 'State refresh required.'})
                 return
 
             events = body.get('events', [])
+            has_more = bool(events) and bool(body.get('has_more'))
             if events:
-                cursor = body['cursor']
-                await send({'type': 'websocket.send', 'text': json.dumps({
-                    'type': 'events',
-                    'events': events,
-                    'cursor': cursor,
-                    'has_more': body.get('has_more', False),
-                }, separators=(',', ':'))})
-                if body.get('has_more'):
-                    continue
-
-            try:
-                message = await asyncio.wait_for(receive(), timeout=self.poll_seconds)
-            except asyncio.TimeoutError:
-                continue
-            if message.get('type') == 'websocket.disconnect':
-                return
-            if message.get('type') == 'websocket.receive':
-                # Client data is not a command channel. A tiny ping is the only accepted input.
-                if message.get('text') == 'ping':
-                    await send({'type': 'websocket.send', 'text': '{"type":"pong"}'})
-                else:
-                    await send({'type': 'websocket.close', 'code': 4400, 'reason': 'Read-only stream.'})
+                try:
+                    text = _json_text({
+                        'type': 'events',
+                        'events': events,
+                        'cursor': body['cursor'],
+                        'has_more': has_more,
+                    })
+                except (TypeError, ValueError, RecursionError):
+                    await send({'type': 'websocket.close', 'code': 1011, 'reason': 'Event stream failed.'})
                     return
+                await send({'type': 'websocket.send', 'text': text})
+                cursor = body['cursor']
+
+            incoming = pending[0]
+            if not has_more:
+                await asyncio.wait((incoming,), timeout=self.poll_seconds)
+            if not incoming.done():
+                continue
+            message = incoming.result()
+            kind = message.get('type')
+            if kind == 'websocket.disconnect':
+                return
+            if kind == 'websocket.receive' and message.get('text') == 'ping':
+                await send({'type': 'websocket.send', 'text': '{"type":"pong"}'})
+            elif kind == 'websocket.receive':
+                # Client data is not a command channel. A tiny ping is the only accepted input.
+                await send({'type': 'websocket.close', 'code': 4400, 'reason': 'Read-only stream.'})
+                return
+            pending[0] = asyncio.ensure_future(receive())

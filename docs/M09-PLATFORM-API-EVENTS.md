@@ -92,6 +92,19 @@ pruned-history gaps and a cursor that is no longer valid after restore/recovery.
 endpoint returns `409 event_reset_required` rather than opening a stream from a stale cursor; an
 already-open WebSocket can also emit `reset_required` and close with code 4009.
 
+An event source must set the reset cursor to a real stream position no later than the stream head
+at the time it reports the reset. The client procedure is fixed:
+
+1. Record the reset `cursor` **before** doing anything else.
+2. Refetch project state (`GET .../projects/{project_id}`) and replace local state with it.
+3. Request a new ticket with `after=<recorded cursor>` and reconnect.
+
+Because the cursor was captured before the refetch, every event after it is replayed, so nothing
+is lost between the refetch and the resume. Events that the refetched state already reflects can
+be replayed as well, so clients must apply events idempotently (for example by comparing entity
+revisions). If the recorded cursor has itself been pruned by the time the client reconnects, the
+ticket request returns 409 again and the client repeats the procedure.
+
 Other reconnect notes:
 - repeated reconnects with the same cursor are idempotent;
 - duplicates and replays (`seq <= cursor`) fail closed as 500;
@@ -120,8 +133,43 @@ It provides:
 - read-only WebSocket input (only `ping` is accepted).
 
 The one-time ticket store retains the already-presented ACC session Authorization value only in
-process memory for the short-lived stream. It is never serialized, logged, returned to the client,
-or placed in the WebSocket URL.
+process memory for the short-lived stream. It is never serialized, logged (it is excluded from the
+ticket record's `repr`), returned to the client, or placed in the WebSocket URL. The store is
+process-local by design: it must not be persisted or shared between processes. A multi-process
+deployment must keep the ticket request and the WebSocket on the same process (or replace the store
+with one keyed by a server-side session reference once M08 provides one). Retaining the value
+gives no more than the session itself does: the stream re-runs full M08 authorization on every
+poll, so revocation, expiry, account suspension, membership removal, loss of `event.read` or loss
+of `acc.web` closes it.
+
+Transport rules:
+
+- `Origin` is required on every HTTP request and WebSocket handshake and must equal one allowed
+  origin exactly (`https://host[:port]`, lowercase, no path, query, fragment, userinfo or
+  wildcard). A repeated `Origin` or `Authorization` header is treated as absent, so the request
+  fails closed. Preflight and error responses never carry CORS headers for a disallowed origin,
+  and `Access-Control-Allow-Credentials` is never sent (the API uses bearer headers, not cookies).
+- Query integers must be ASCII digits and appear at most once; `after=` (blank), repeats,
+  non-ASCII query strings and out-of-range values return 400.
+- The WebSocket handler receives `websocket.connect` before validating the Origin, path or ticket.
+  A rejected Origin or path closes the handshake with 4403 before the ticket is looked at, so it
+  does not burn a ticket. A missing, malformed, repeated, expired or reused ticket closes with 4401.
+- Close codes: 4401 session ended or ticket invalid; 4403 origin denied or access lost; 4009 reset
+  required; 4400 client sent anything other than the text `ping`; 1011 invalid event source or
+  non-JSON event data (HTTP returns an opaque 500 for the same case).
+- One `receive()` is kept outstanding between polls and is never cancelled by a poll timeout;
+  disconnects and cancellation cancel it. A `has_more` backlog is drained without waiting for the
+  poll interval, reauthorizing before every batch.
+- The ASGI `lifespan` scope is supported.
+
+Deployment requirements not handled inside this module:
+
+- `PlatformApi` calls are synchronous. With a blocking durable repository or event source the
+  adapter must run them off the event loop (for example with `asyncio.to_thread`) or use an async
+  repository; the in-memory test doubles do not block.
+- The ticket store has no size cap beyond the 10-300 second TTL. Rate-limit ticket issuance and
+  concurrent WebSocket connections per session/account at the hosting layer.
+- Terminate TLS in front of the ASGI server; this module does not listen on sockets.
 
 ## Still deliberately deferred
 
