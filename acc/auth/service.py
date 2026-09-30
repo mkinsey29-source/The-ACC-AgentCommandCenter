@@ -9,7 +9,8 @@ from collections.abc import Callable, Iterable
 
 from ..contracts import capability_list, capability_name
 from ..state_authority import policy_for
-from .models import AuthContext, EntitlementSnapshot, SessionRecord, VerifiedIdentity
+from .identity import IdentityVerifier, verifier_map
+from .models import AuthContext, SessionRecord, VerifiedIdentity
 from .repository import AuthRepository
 
 
@@ -42,6 +43,7 @@ class AuthService:
         clock: Callable[[], float] = time.time,
         default_ttl_seconds: int = 3600,
         max_ttl_seconds: int = 86400,
+        identity_verifiers: tuple[IdentityVerifier, ...] = (),
     ) -> None:
         credential_policy = policy_for('credential')
         account_policy = policy_for('account')
@@ -57,6 +59,23 @@ class AuthService:
         self.clock = clock
         self.default_ttl_seconds = default_ttl_seconds
         self.max_ttl_seconds = max_ttl_seconds
+        self.identity_verifiers = verifier_map(identity_verifiers)
+
+    def exchange_identity(
+        self,
+        provider: str,
+        assertion: dict,
+        account_id: str,
+        *,
+        ttl_seconds: int | None = None,
+    ) -> str:
+        verifier = self.identity_verifiers.get(provider)
+        if verifier is None:
+            raise AuthError('Identity provider is not configured.')
+        identity = verifier.verify(assertion)
+        if not isinstance(identity, VerifiedIdentity) or identity.provider != provider:
+            raise AuthError('Identity verifier returned an invalid provider assertion.')
+        return self.create_session(identity, account_id, ttl_seconds=ttl_seconds)
 
     def create_session(
         self,
@@ -68,6 +87,9 @@ class AuthService:
         user_id = self.repository.resolve_identity(identity)
         if user_id is None:
             raise AuthError('Identity is not linked to an ACC user.')
+        user = self.repository.user(user_id)
+        if user is None or user.status != 'active':
+            raise AuthError('ACC user is not active.')
         account = self.repository.account(account_id)
         if account is None:
             raise AuthError('ACC account not found.')
@@ -104,6 +126,9 @@ class AuthService:
         if int(self.clock()) >= record.expires_at:
             raise AuthError('ACC session has expired.')
 
+        user = self.repository.user(record.user_id)
+        if user is None or user.status != 'active':
+            raise AuthError('ACC user is not active.')
         account = self.repository.account(record.account_id)
         if account is None or account.status != 'active':
             raise AuthError('ACC account is not active.')
