@@ -10,6 +10,7 @@ from ..contracts import capability_list, capability_name, provider_id
 
 ACCOUNT_ROLES = frozenset(('owner', 'admin', 'member', 'viewer'))
 ACCOUNT_STATUSES = frozenset(('active', 'suspended', 'closed'))
+USER_STATUSES = frozenset(('active', 'suspended', 'closed'))
 
 
 def _bounded_id(value: object, label: str) -> str:
@@ -39,6 +40,20 @@ class VerifiedIdentity:
             if not isinstance(self.email, str) or not 3 <= len(self.email.strip()) <= 320:
                 raise ValueError('email must contain 3-320 characters when supplied.')
             object.__setattr__(self, 'email', self.email.strip())
+
+
+@dataclass(frozen=True)
+class UserState:
+    user_id: str
+    status: str = 'active'
+    revision: int = 0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'user_id', _bounded_id(self.user_id, 'user_id'))
+        if self.status not in USER_STATUSES:
+            raise ValueError('Unsupported user status.')
+        if type(self.revision) is not int or self.revision < 0:
+            raise ValueError('user revision must be a nonnegative integer.')
 
 
 @dataclass(frozen=True)
