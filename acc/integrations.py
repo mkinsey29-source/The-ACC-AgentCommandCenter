@@ -8,6 +8,7 @@ import re
 import secrets
 import time
 
+from .contracts import CAPABILITY_RE
 from .core import Conflict, identifier, now
 
 
@@ -35,7 +36,7 @@ PROVIDER_CATALOG = (
 FINAL_JOB_STATES = frozenset(('succeeded', 'failed', 'cancelled'))
 WAITING_JOB_STATES = frozenset(('queued', 'blocked_offline', 'waiting_provider'))
 MEMORY_KINDS = frozenset(('architecture', 'constraint', 'decision', 'fact', 'finding', 'procedure'))
-CAPABILITY = re.compile(r'[a-z][a-z0-9-]{0,39}(?:\.[a-z][a-z0-9-]{0,39}){0,3}\Z')
+CAPABILITY = CAPABILITY_RE
 PROVIDER_ID = re.compile(r'[a-z][a-z0-9-]{0,39}\Z')
 DATA_CLASSIFICATIONS = ('public', 'internal', 'confidential')
 WORKSPACE_SCOPES = ('project', 'isolated_repository')
