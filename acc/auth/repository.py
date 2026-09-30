@@ -7,7 +7,14 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .models import AccountState, EntitlementSnapshot, Membership, SessionRecord, VerifiedIdentity
+from .models import (
+    AccountState,
+    EntitlementSnapshot,
+    Membership,
+    SessionRecord,
+    VerifiedIdentity,
+    _bounded_id,
+)
 
 
 class AuthRepository(Protocol):
@@ -35,6 +42,7 @@ class InMemoryAuthRepository:
         self._sessions: dict[str, SessionRecord] = {}
 
     def bind_identity(self, identity: VerifiedIdentity, user_id: str) -> None:
+        user_id = _bounded_id(user_id, 'user_id')
         key = (identity.provider, identity.subject)
         current = self._identities.get(key)
         if current is not None and current != user_id:
@@ -49,6 +57,10 @@ class InMemoryAuthRepository:
 
     def put_entitlements(self, entitlements: EntitlementSnapshot) -> None:
         self._entitlements[entitlements.account_id] = entitlements
+
+    def remove_membership(self, account_id: str, user_id: str) -> bool:
+        key = (_bounded_id(account_id, 'account_id'), _bounded_id(user_id, 'user_id'))
+        return self._memberships.pop(key, None) is not None
 
     def resolve_identity(self, identity: VerifiedIdentity) -> str | None:
         return self._identities.get((identity.provider, identity.subject))
