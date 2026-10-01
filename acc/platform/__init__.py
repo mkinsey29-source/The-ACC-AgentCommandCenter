@@ -1,12 +1,22 @@
 """Hosted ACC Platform API/event contracts (M09)."""
 from .api import ApiError, ApiResponse, PlatformApi, bearer_token
 from .events import EventBatch, EventCursorError, PlatformEvent, PlatformEventSource
+from .commands import (
+    COMMAND_KINDS, COMMAND_QUOTAS, CommandConflict, CommandRequest, CommandResult,
+    CommandStateConflict, CommandTargetNotFound, IdempotencyConflict,
+    PlatformCommandRepository, QuotaExceeded, QuotaReservation,
+)
+from .command_memory import InMemoryCommandRepository
 from .repository import AccountProjectView, PlatformReadRepository
 from .transport import EventTicketStore, HostedTransport, OriginPolicy
 
 __all__ = [
-    'AccountProjectView', 'ApiError', 'ApiResponse', 'EventBatch', 'EventCursorError',
+    'AccountProjectView', 'ApiError', 'ApiResponse', 'COMMAND_KINDS', 'COMMAND_QUOTAS',
+    'CommandConflict', 'CommandRequest', 'CommandResult', 'CommandStateConflict',
+    'CommandTargetNotFound',
+    'EventBatch', 'EventCursorError', 'IdempotencyConflict', 'InMemoryCommandRepository',
     'EventTicketStore', 'HostedTransport', 'OriginPolicy',
-    'PlatformApi', 'PlatformEvent', 'PlatformEventSource', 'PlatformReadRepository',
+    'PlatformApi', 'PlatformCommandRepository', 'PlatformEvent', 'PlatformEventSource',
+    'PlatformReadRepository', 'QuotaExceeded', 'QuotaReservation',
     'bearer_token',
 ]

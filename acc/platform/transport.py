@@ -41,6 +41,20 @@ def _json_bytes(value) -> bytes:
     return _json_text(value).encode('utf-8')
 
 
+def _unique_object(pairs):
+    # A repeated key is ambiguous (different parsers keep different values); reject it.
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate JSON object key')
+        result[key] = value
+    return result
+
+
+def _reject_constant(value):
+    raise ValueError('NaN and Infinity are not JSON')
+
+
 def _query(scope) -> dict[str, list[str]]:
     # keep_blank_values: ``?after=`` must be rejected, not silently treated as a missing value.
     return parse_qs(scope.get('query_string', b'').decode('ascii', 'strict'), keep_blank_values=True)
@@ -211,14 +225,19 @@ class HostedTransport:
 
         try:
             query = _query(scope)
-            response = self._route_http(method, parts, authorization, query)
+            body = None
+            if method == 'POST' and self._is_command_route(parts):
+                # Only the command route has a request body; other POST routes (event-ticket)
+                # keep their PR #31 behavior and never parse one.
+                body = await self._read_json_body(receive)
+            response = self._route_http(method, parts, authorization, query, body)
             if asyncio.iscoroutine(response):
                 response = await response
         except (UnicodeError, ValueError):
             response = ApiResponse(400, {'error': {'code': 'invalid_request', 'message': 'Invalid request.'}})
         await self._send_json(send, response.status, response.body, origin=origin)
 
-    def _route_http(self, method, parts, authorization, query):
+    def _route_http(self, method, parts, authorization, query, body=None):
         if len(parts) >= 3 and parts[:2] == ['v1', 'accounts']:
             account_id = parts[2]
             if method == 'GET' and parts[3:] == ['projects']:
@@ -242,6 +261,9 @@ class HostedTransport:
                 if method == 'POST' and tail == ['event-ticket']:
                     after = self._query_int(query, 'after', 0)
                     return self._issue_ticket(authorization, account_id, project_id, after)
+                if method == 'POST' and tail == ['commands']:
+                    return self.api.handle(
+                        self.api.command, authorization, account_id, project_id, body)
 
         return ApiResponse(404, {'error': {'code': 'not_found', 'message': 'Not found.'}})
 
@@ -266,6 +288,39 @@ class HostedTransport:
             'expires_in': self.tickets.ttl_seconds,
             'websocket_path': '/v1/events',
         })
+
+    @staticmethod
+    def _is_command_route(parts):
+        return len(parts) == 6 and parts[:2] == ['v1', 'accounts'] and parts[3] == 'projects' \
+            and parts[5] == 'commands'
+
+    @staticmethod
+    async def _read_json_body(receive):
+        chunks = []
+        total = 0
+        while True:
+            message = await receive()
+            if message.get('type') == 'http.disconnect':
+                raise ValueError('request disconnected')
+            if message.get('type') != 'http.request':
+                raise ValueError('invalid HTTP request event')
+            chunk = message.get('body', b'')
+            if not isinstance(chunk, bytes):
+                raise ValueError('invalid HTTP request body')
+            total += len(chunk)
+            if total > 100_000:
+                raise ValueError('request body too large')
+            chunks.append(chunk)
+            if not message.get('more_body', False):
+                break
+        try:
+            return json.loads(
+                b''.join(chunks).decode('utf-8'),
+                object_pairs_hook=_unique_object,
+                parse_constant=_reject_constant,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+            raise ValueError('invalid JSON body') from exc
 
     @staticmethod
     def _query_int(query, name, default):

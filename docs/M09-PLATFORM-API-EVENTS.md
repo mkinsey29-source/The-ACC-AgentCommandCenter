@@ -181,3 +181,113 @@ Deployment requirements not handled inside this module:
 After independent review and executable verification of this transport slice, the next M09 work is
 command/mutation endpoints with idempotent operation IDs and optimistic revisions, plus the durable
 hosted repository/runtime needed to deploy the real Platform service.
+
+
+## Remote command/mutation slice
+
+**Status:** implemented on `temporary/m09-command-mutations-v1` (PR #33). The independent review
+corrected the quota model and tightened the request schemas; those corrections are a public-contract
+change awaiting independent confirmation.
+
+### Route and request
+
+`POST /v1/accounts/{account_id}/projects/{project_id}/commands` with a JSON object body of exactly:
+
+```json
+{"operation_id": "op-...", "kind": "task.create", "expected_revision": 3,
+ "payload": {"task_id": "task-9"}}
+```
+
+- The body must be one JSON object with exactly these four fields; unknown fields (including the
+  former `quotas`) are rejected with 400. At most 100,000 bytes, UTF-8, no repeated object keys, no
+  `NaN`/`Infinity`. Only this route reads a request body.
+- `operation_id`: 1-200 characters, client-generated, unique per account for the lifetime of the
+  stored result.
+- `expected_revision`: required non-negative JSON integer (booleans, strings and floats are 400).
+- `payload`: exact per-kind schema; every field required, no other field accepted:
+
+| Kind | Permission | Payload | Valid when | Quota (server-derived) |
+|---|---|---|---|---|
+| `task.create` | `task.write` | `{"task_id"}` | task ID unused in the project | reserves `tasks.active` 1 |
+| `task.cancel` | `task.cancel` | `{"task_id"}` | task exists and is not cancelled | releases what the task reserved |
+| `project.mode` | `project.write` | `{"mode": "online"\|"offline"}` | mode differs from current | none |
+| `worker.pause` | `worker.control` | `{"worker_id"}` | worker exists and is active | none |
+| `worker.resume` | `worker.control` | `{"worker_id"}` | worker exists and is paused | none |
+
+The command kind alone selects both the required permission and the mutation, so a weaker kind
+cannot carry a payload that performs a stronger mutation.
+
+### Authorization and quota ownership
+
+Every request re-runs M08 `authorize` for the route's account with the kind's exact permission and
+the `acc.web` entitlement, so revocation, expiry, account suspension, membership removal and loss
+of the permission or entitlement stop the next mutation.
+
+Clients never choose quotas. `COMMAND_QUOTAS` maps each kind to its reservations, and the ceiling
+for each is the account's **live M08 entitlement limit**, passed into the repository transaction.
+A missing limit fails closed (409 `quota_exceeded`). The repository compares recorded usage plus
+the reservation with that ceiling inside the same transaction as the mutation, so concurrent
+requests cannot overshoot.
+
+### Responses
+
+| Status | Code | Meaning | Effects |
+|---|---|---|---|
+| 201 | — | applied; body has `operation_id`, `status`, `revision`, `result`, `replayed:false` | exactly one mutation, revision +1, quota change, audit record, event, stored result |
+| 200 | — | replay of the same operation; original body with `replayed:true` | none |
+| 400 | `invalid_request` | malformed body, IDs, kind or payload | none |
+| 401 / 403 | `authentication_required` / `access_denied` | M08 check failed | none |
+| 404 | `not_found` | project, task or worker not in this account/project | none |
+| 409 | `idempotency_conflict` | operation ID already applied with a different fingerprint | none |
+| 409 | `revision_conflict` | stale or future `expected_revision`; body includes `current_revision` | none |
+| 409 | `quota_exceeded` | reservation would exceed the M08 ceiling, or none is configured | none |
+| 409 | `state_conflict` | invalid transition (duplicate task, already cancelled/paused/active, same mode) | none |
+| 500 | `internal_error` | repository fault; opaque | none |
+
+A rejected command (any 4xx) does **not** claim the operation ID, so the client may correct and
+retry with the same ID.
+
+### Idempotency semantics
+
+- Operation IDs are scoped to the account: the key is `(account_id, operation_id)`.
+- The fingerprint is SHA-256 over account, project, kind, expected revision, normalized payload and
+  the **authenticated actor**. A retry by the same user with the same input replays; any other
+  input, a different project, or **another user in the same account** reusing the ID gets 409
+  `idempotency_conflict` and never sees the original result. Clients must therefore generate
+  operation IDs per user (for example random UUIDs), not per shared workflow.
+- A replay still requires the caller's current permission; it does not re-check revision or quota.
+
+### Audit and events
+
+Each applied command writes one audit record (`operation_id`, `account_id`, `project_id`,
+`actor_user_id`, `kind`, resulting `revision`, `at`) and one `command.applied` Platform event whose
+data carries `operation_id`, `kind`, `actor_user_id`, `revision` and the command `result`, with the
+same timestamp. No bearer token or session value is recorded. The event is served by the existing
+`events_after`/WebSocket path: the command store must be the `PlatformEventSource` (or share its
+sequence), not a second event model.
+
+### Durable repository requirements
+
+`InMemoryCommandRepository` is reference semantics. A SQL implementation of
+`PlatformCommandRepository.execute` must run steps 1-6 of its docstring in one serializable (or
+equivalently locked) transaction and needs at least:
+
+- **Command results:** unique key `(account_id, operation_id)`, storing fingerprint, result and
+  revision. Insert it in the same transaction as the mutation; a unique-violation on commit means a
+  concurrent winner, so re-read and replay or raise `IdempotencyConflict`. Retain results at least
+  as long as clients may retry (define a retention window before pruning).
+- **Project revision:** compare-and-swap, e.g. `UPDATE projects SET revision = revision + 1 WHERE
+  account_id = ? AND project_id = ? AND revision = ?`, requiring exactly one updated row, or
+  `SELECT ... FOR UPDATE` before validating the transition.
+- **Quota usage:** one row per `(account_id, quota_name)`, updated with a conditional increment
+  (`SET used = used + ? WHERE used + ? <= ?`, the ceiling from M08) or under a row lock; releases
+  never go below zero. Each task records what it reserved so a release is exact.
+- **Audit:** append-only insert in the same transaction.
+- **Events:** a sequence allocated inside the transaction and strictly increasing per
+  `(account_id, project_id)` stream (a global sequence is fine; gaps are allowed). Sequences must
+  become visible in order: if concurrent transactions can commit out of sequence order, readers
+  must not advance past an uncommitted gap (e.g. allocate under the project row lock).
+- **Tasks/workers:** keyed by `(account_id, project_id, id)` so IDs never cross projects.
+
+The production runtime must also run these synchronous calls off the ASGI event loop and add rate
+limits (see the hosted transport deployment requirements).

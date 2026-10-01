@@ -43,10 +43,14 @@ class PlatformApi:
     neutral makes tenant/auth/event behavior testable without choosing the public server framework.
     """
 
-    def __init__(self, auth: AuthService, reads: PlatformReadRepository, events: PlatformEventSource):
+    def __init__(
+        self, auth: AuthService, reads: PlatformReadRepository, events: PlatformEventSource,
+        commands=None,
+    ):
         self.auth = auth
         self.reads = reads
         self.events = events
+        self.commands = commands
 
     def _authorize(
         self,
@@ -210,6 +214,15 @@ class PlatformApi:
             'reset_required': batch.reset_required,
             'oldest_available': batch.oldest_available,
         })
+
+    def command(
+        self, authorization: object, account_id: object, project_id: object, body: object,
+    ) -> ApiResponse:
+        if self.commands is None:
+            raise ApiError(503, 'commands_unavailable', 'Commands are unavailable.')
+        from .command_api import CommandApi
+        return CommandApi(self.auth, self.commands).execute(
+            authorization, account_id, project_id, body)
 
     @staticmethod
     def handle(callable_, *args, **kwargs) -> ApiResponse:
