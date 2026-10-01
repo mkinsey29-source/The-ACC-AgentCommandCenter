@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from acc.platform.commands import CommandRequest
-from acc.platform.sqlite_repository import SQLiteCommandRepository
+from acc.platform.sqlite_repository import SQLiteCommandRepository, _Transaction
 
 
 def _run_command_in_process(database, command, barrier, results):
@@ -23,6 +23,29 @@ def _run_command_in_process(database, command, barrier, results):
 
 
 class SQLiteCommandRepositoryTests(unittest.TestCase):
+    def test_failed_rollback_closes_connection_and_preserves_original_error(self):
+        class BrokenRollbackConnection:
+            closed = False
+
+            def execute(self, statement):
+                if statement in ('COMMIT', 'ROLLBACK'):
+                    raise sqlite3.OperationalError(statement.lower() + ' failure')
+
+            def close(self):
+                self.closed = True
+
+        connection = BrokenRollbackConnection()
+        with self.assertRaisesRegex(sqlite3.OperationalError, 'commit failure'):
+            with _Transaction(connection):
+                pass
+        self.assertTrue(connection.closed)
+
+        connection = BrokenRollbackConnection()
+        with self.assertRaisesRegex(ValueError, 'body failure'):
+            with _Transaction(connection):
+                raise ValueError('body failure')
+        self.assertTrue(connection.closed)
+
     def test_commit_failure_rolls_back_and_leaves_repository_usable(self):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / 'platform.sqlite3'

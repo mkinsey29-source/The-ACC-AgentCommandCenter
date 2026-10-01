@@ -391,12 +391,20 @@ def _finish_transaction(db: sqlite3.Connection, error_type) -> bool:
             try:
                 db.execute('ROLLBACK')
             except BaseException:
-                pass
+                # The transaction state is now unknown; never reuse this connection.
+                try:
+                    db.close()
+                except BaseException:
+                    pass
             raise
     else:
         try:
             db.execute('ROLLBACK')
         except BaseException:
             # Returning False preserves the original exception from the with block.
-            pass
+            # The transaction state is now unknown; never reuse this connection.
+            try:
+                db.close()
+            except BaseException:
+                pass
     return False
