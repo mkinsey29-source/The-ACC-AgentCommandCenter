@@ -1,6 +1,6 @@
 # M09 — Hosted Platform API and Events
 
-**Status:** PARTIAL — read/event contracts (PR #30) and hosted HTTP/WSS transport (PR #31, merged as `8915e39`) integrated. Commands/mutations and the durable hosted runtime remain.
+**Status:** PARTIAL — read/event contracts, hosted HTTP/WSS transport, and permissioned commands are integrated (PR #33 merged as `c3d3794`). `SQLiteCommandRepository` now provides an initial durable atomic command/event store; production composition, durable read projections, M08 production integration, event/session retention policy, off-loop execution and deployment controls remain.
 
 ## Purpose
 
@@ -291,3 +291,10 @@ equivalently locked) transaction and needs at least:
 
 The production runtime must also run these synchronous calls off the ASGI event loop and add rate
 limits (see the hosted transport deployment requirements).
+
+
+## Initial SQLite command/event adapter
+
+`acc.platform.SQLiteCommandRepository` implements the M09 command repository and event source using a durable SQLite file. Each command runs under `BEGIN IMMEDIATE`, serializing revision checks, quota usage, mutation, idempotency result, audit row and per-project event sequence in one transaction. A result keyed by `(account_id, operation_id)` is retained indefinitely; pruning is disabled until a client retry-retention policy is specified. Event sequence allocation is stored on the project row and event replay uses the same database.
+
+This is a storage adapter, not yet the production hosted runtime. The hosted read projection adapter and composition/configuration are still needed. SQLite calls are synchronous, so the ASGI transport must move them off the event loop. Production also needs a shared durable disk/database deployment, rate limits, and an M08 server-side session-reference design for WebSocket authorization. The in-memory staging service remains separate and was not changed by this adapter.
