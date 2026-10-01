@@ -472,6 +472,8 @@ class Coordinator:
         self.conversation = Conversation(self, settings.get('conversation'), settings.get('transcription'))
         from .orchestrators import OrchestratorSessions
         self.orchestrators = OrchestratorSessions(self, settings.get('orchestrators'))
+        from .bridge_status import BridgeStatus
+        self.bridge_status = BridgeStatus(self)
         from .voice import Voice
         self.voice = Voice(self, settings.get('transcription'))
         from .controls import Controls
@@ -516,6 +518,7 @@ class Coordinator:
                     'tasks': [t for t in self.store.tasks() if not t.get('internal')],
                     'conversation': self.conversation.state(), 'github': self.github.snapshot(),
                     'orchestrators': self.orchestrators.snapshot(),
+                    'bridge': self.bridge_status.snapshot(),
                     'integrations': self.integrations.snapshot(),
                     'knowledge': self.knowledge.state(),
                     'routing': self.router.snapshot(),

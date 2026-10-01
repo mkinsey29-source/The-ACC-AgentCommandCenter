@@ -131,6 +131,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('JSON object required.')
             parts = urlsplit(self.path).path.strip('/').split('/')
             c = self.server.coordinator
+            if parts == ['api', 'bridge', 'observe']:
+                return self.reply(200, c.bridge_status.observe(payload))
             if parts == ['api', 'voice', 'save']:
                 return self.reply(200, c.voice.save(payload))
             if parts == ['api', 'voice', 'retry']:

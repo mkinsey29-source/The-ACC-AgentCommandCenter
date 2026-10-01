@@ -113,7 +113,7 @@ Knowledge tools: `acc_knowledge_state`, `acc_knowledge_search`, `acc_knowledge_c
 
 Task tools: `acc_configure_workflow`, `acc_state`, `acc_create_task`, `acc_start_task`, `acc_stop_task`, `acc_assign_task`, `acc_update_instructions`, `acc_report`, and `acc_record_review`.
 
-Your connected orchestrator explicitly records instructions and actions through these tools. ACC does not read unrelated chats or automatically connect this repository to ChatGPT Remote. The bridge's HTTP operations are tested; native host setup still needs verification on your computer.
+Your connected orchestrator explicitly records instructions and actions through these tools. ACC does not read unrelated chats or automatically connect this repository to ChatGPT Remote. ACC records privacy-preserving bridge milestones (client name/version, tool discovery, and tool names only) so the dashboard and `doctor` can distinguish configured from live-verified. It never stores MCP arguments, message text, or credentials in that bridge record. Native host setup still needs one acceptance turn on your computer.
 
 ## Configure a coding worker
 

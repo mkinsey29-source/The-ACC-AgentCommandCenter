@@ -345,10 +345,16 @@ class ConversationTests(unittest.TestCase):
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         url='http://127.0.0.1:'+str(server.server_port)
         def call(name,args):
-            response=dispatch({'id':1,'method':'tools/call','params':{'name':name,'arguments':args}},url,'fixture')['result']
+            response=dispatch({'id':1,'method':'tools/call','params':{'name':name,'arguments':args}},
+                              url,'fixture','bridge-fixture')['result']
             self.assertFalse(response['isError'],response)
             return json.loads(response['content'][0]['text'])
         try:
+            initialized=dispatch({'id':1,'method':'initialize','params':{
+                'protocolVersion':'2025-06-18','clientInfo':{'name':'native-fixture','version':'1.2'}}},
+                url,'fixture','bridge-fixture')
+            self.assertEqual(initialized['result']['serverInfo']['name'],'acc')
+            dispatch({'id':2,'method':'tools/list','params':{}},url,'fixture','bridge-fixture')
             selected=call('acc_orchestrator_select',{'session_id':'chatgpt-remote'})
             self.assertEqual(selected['selected'],'chatgpt-remote')
             claim=call('acc_conversation_claim',{'owner':'ChatGPT remote fixture',
@@ -361,6 +367,17 @@ class ConversationTests(unittest.TestCase):
             messages=call('acc_conversation_read',{'session_id':'chatgpt-remote'})['messages']
             self.assertEqual(len(messages),2)
             self.assertEqual(messages[0]['status'],'handled')
+            bridge=self.c.bridge_status.snapshot()
+            self.assertEqual(bridge['client'],{'name':'native-fixture','version':'1.2'})
+            self.assertTrue(bridge['tools_discovered'])
+            self.assertIsNotNone(bridge['conversation_verified_at'])
+            self.assertEqual(tuple(bridge['conversation_steps']),self.c.bridge_status.FLOW)
+            self.assertNotIn('keep this exact wording',json.dumps(bridge))
+            self.assertNotIn('keep this exact wording',json.dumps(
+                self.c.conversation.meta('bridge_status')))
+            verified_at=bridge['conversation_verified_at']
+            call('acc_state',{})
+            self.assertEqual(self.c.bridge_status.snapshot()['conversation_verified_at'],verified_at)
         finally:
             server.shutdown();server.server_close();thread.join()
 

@@ -57,6 +57,8 @@ Claim before saving a new remote instruction, then renew to include it in the ca
 
 The connected orchestrator must make these calls. ACC cannot automatically copy unrelated ChatGPT conversations, wake a dormant ChatGPT session, or install an MCP server into the desktop app. The remote app continues using its own built-in desktop connection. If ChatGPT Remote is selected but no native ChatGPT lease is active, a message typed directly into ACC can be handled by the configured backup; the UI names the active owner and keeps that exchange in the selected ChatGPT-associated transcript.
 
+The bridge reports a small validation trail to ACC after successful calls. The Conversation panel shows connection, tool discovery, progress through select → claim → send → renew → complete → read, and the last verified time. This trail stores tool names and MCP client name/version, never arguments, prompts, lease tokens, or credentials. It proves that the configured native host exercised ACC; it does not claim that ACC can inspect unrelated native chats or wake a dormant conversation.
+
 Leases cover conversation decisions, not arbitrary direct filesystem access by other applications. The supervised runner and workspace lock serialize ACC's own workers. While an external lease is active, ACC waits before launching another worker. If a worker already owns the project, claim waits until it completes; messages can still be saved immediately.
 
 ## Local voice
@@ -97,6 +99,6 @@ The database and browser outbox are local storage, not an encrypted backup servi
 
 ## What was exercised
 
-`tests/test_conversation.py` uses scripted planner/worker responses with real SQLite transactions, subprocesses, authenticated HTTP, and MCP dispatch. It exercises an online failure → local plan → local implementation/review → desktop context handoff → next online turn, plus duplicate delivery, rollback, ideas with no execution, lease expiry, old revisions, concurrent message arrival, restart recovery, planner edits, and recording/transcript persistence.
+`tests/test_conversation.py` uses scripted planner/worker responses with real SQLite transactions, subprocesses, authenticated HTTP, and MCP dispatch. It exercises an online failure → local plan → local implementation/review → desktop context handoff → next online turn, plus duplicate delivery, rollback, ideas with no execution, lease expiry, old revisions, concurrent message arrival, restart recovery, planner edits, recording/transcript persistence, and the privacy-preserving bridge acceptance trail.
 
 The optional speech adapter's API contract is tested with a stub module, not recorded human speech. Browser microphone capture, layout/click behavior, real Hermes/provider/model quality, native Windows process handling, and the user's desktop MCP installation remain host checks. No paid inference was used in this verification.
