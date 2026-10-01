@@ -336,9 +336,15 @@ class SQLiteCommandRepository:
         with self._lock, _ReadTransaction(self._db):
             project = self._db.execute('''SELECT event_seq FROM m09_projects
                 WHERE account_id=? AND project_id=?''', (account_id, project_id)).fetchone()
-            if project is not None and after > project['event_seq']:
-                # A cursor ahead of the durable head can happen after restoring an older backup.
-                # Ask the client to refetch state from this stream head before reconnecting.
+            if project is not None and after > 0 and (
+                    after > project['event_seq'] or self._db.execute('''SELECT 1 FROM m09_events
+                        WHERE account_id=? AND project_id=? AND seq=?''',
+                        (account_id, project_id, after)).fetchone() is None):
+                # Events are never pruned, so a valid cursor is 0 or the seq of an event in this
+                # stream. A cursor ahead of the head, or naming an event this store does not have,
+                # means the client applied history that is not here (for example events lost by
+                # restoring an older backup, even if later commands have since moved the head past
+                # that cursor). Ask the client to refetch state from this head before reconnecting.
                 return EventBatch((), project['event_seq'], reset_required=True,
                                   oldest_available=project['event_seq'] + 1)
             rows = self._db.execute('''SELECT seq, kind, at, data_json FROM m09_events

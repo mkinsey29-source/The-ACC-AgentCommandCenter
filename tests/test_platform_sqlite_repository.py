@@ -140,13 +140,73 @@ class SQLiteCommandRepositoryTests(unittest.TestCase):
                                           {'mode': 'online'}, 'user-1')
             restored.execute(after_restore, limits={})
             replay = restored.execute(after_restore, limits={})
-            batch = restored.read_events('acct-1', 'project-1', after=old_cursor)
             self.assertTrue(replay.replayed)
-            self.assertFalse(batch.reset_required)
-            self.assertEqual([event.data['operation_id'] for event in batch.events], ['op-4'])
-            self.assertGreater(batch.events[0].seq, old_cursor)
+            # New events never reuse a pre-restore sequence...
+            events = restored.read_events('acct-1', 'project-1', after=0).events
+            self.assertGreater(events[-1].seq, old_cursor)
+            # ...and the client that applied op-2/op-3 (lost by the restore) must refetch even
+            # though the head has already moved past its cursor.
+            batch = restored.read_events('acct-1', 'project-1', after=old_cursor)
+            self.assertTrue(batch.reset_required)
+            self.assertEqual(batch.cursor, events[-1].seq)
+            resumed = restored.read_events('acct-1', 'project-1', after=batch.cursor)
+            self.assertEqual((resumed.reset_required, resumed.events), (False, ()))
             self.assertEqual(len(restored.audit()), 2)
             restored.close()
+
+    def test_restore_then_new_command_still_resets_client_holding_lost_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'platform.sqlite3'
+            backup = Path(directory) / 'backup.sqlite3'
+            now = [1000.0]
+            repository = SQLiteCommandRepository(database, clock=lambda: now[0])
+            repository.put_project('acct-1', 'project-1')
+
+            def create(repo, operation, revision, task_id):
+                return repo.execute(CommandRequest(
+                    operation, 'acct-1', 'project-1', 'task.create', revision,
+                    {'task_id': task_id}, 'user-1'), limits={'tasks.active': 10})
+
+            create(repository, 'op-1', 0, 'task-1')
+            with sqlite3.connect(backup) as backup_db:
+                repository._db.backup(backup_db)
+            now[0] = 1001.0
+            create(repository, 'op-2', 1, 'task-2')           # lost by the restore
+            client_cursor = repository.read_events('acct-1', 'project-1', after=0).cursor
+            repository.close()
+            with sqlite3.connect(database) as live, sqlite3.connect(backup) as backup_db:
+                backup_db.backup(live)
+
+            now[0] = 1002.0
+            restored = SQLiteCommandRepository(database, clock=lambda: now[0])
+            create(restored, 'op-3', 1, 'task-3')              # head moves past the client's cursor
+            batch = restored.read_events('acct-1', 'project-1', after=client_cursor)
+            self.assertTrue(batch.reset_required)
+            self.assertEqual(batch.events, ())
+            self.assertEqual(sorted(restored.project('acct-1', 'project-1')['tasks']),
+                             ['task-1', 'task-3'])
+            # A client that had only seen history still present continues normally.
+            first_seq = restored.read_events('acct-1', 'project-1', after=0).events[0].seq
+            normal = restored.read_events('acct-1', 'project-1', after=first_seq)
+            self.assertFalse(normal.reset_required)
+            self.assertEqual([e.data['operation_id'] for e in normal.events], ['op-3'])
+            restored.close()
+
+    def test_unknown_cursor_requires_reset_and_zero_never_does(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SQLiteCommandRepository(Path(directory) / 'platform.sqlite3',
+                                                 clock=lambda: 50.0)
+            repository.put_project('acct-1', 'project-1')
+            self.assertFalse(repository.read_events('acct-1', 'project-1', after=0).reset_required)
+            repository.execute(CommandRequest('op-1', 'acct-1', 'project-1', 'project.mode', 0,
+                                              {'mode': 'offline'}, 'user-1'), limits={})
+            head = repository.read_events('acct-1', 'project-1', after=0).cursor
+            self.assertFalse(repository.read_events('acct-1', 'project-1', after=head).reset_required)
+            stale = repository.read_events('acct-1', 'project-1', after=head - 1)
+            self.assertTrue(stale.reset_required)
+            self.assertEqual(stale.cursor, head)
+            self.assertEqual(repository.read_events('acct-1', 'missing', after=7).events, ())
+            repository.close()
 
     def test_applied_command_and_retry_survive_repository_restart(self):
         with tempfile.TemporaryDirectory() as directory:
