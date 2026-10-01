@@ -42,6 +42,29 @@ The response returns a normal opaque M08 ACC bearer session plus the staging acc
 The secret is not an ACC session and is never stored in M08 state. Do not reuse a production
 credential as the bootstrap secret.
 
+Bootstrap rules (enforced and tested in `tests/test_staging_e2e.py`):
+
+- The secret is read **only** from the `X-ACC-Staging-Secret` header, never from the query string,
+  body or `Authorization`. It is compared in constant time and never appears in responses, errors,
+  `repr`, health output, audit or event data.
+- A wrong, missing or repeated secret header returns the generic
+  `401 authentication_required`. A wrong, missing or repeated `Origin` returns `403` with no CORS
+  headers.
+- `OPTIONS /staging/session` answers the browser's CORS preflight (the custom header forces one)
+  for the configured Origin only, allowing `POST` and the `X-ACC-Staging-Secret`/`Content-Type`
+  headers. No `Access-Control-Allow-Credentials` is ever sent.
+- The bootstrap cannot choose an account, user or project: the staging verifier maps the secret to
+  the single staging identity, and M08 `exchange_identity` issues an ordinary 15-minute session for
+  `staging-account`. Every later request goes through normal M08/M09 authorization, so the bearer
+  cannot reach another account or project.
+- `StagingVerifier` is composed only by `StagingApplication`; no production composition registers
+  it, and importing `acc.staging` has no side effects.
+
+**The secret is a tester credential, not part of the published console.** Generate it with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`, store it only as a host secret, and
+have the tester enter it into the running console (memory or `sessionStorage`). Never bake it into
+the published console bundle, a URL or a repository.
+
 ## End-to-end path
 
 After bootstrap, the browser uses the ordinary accepted M09 contract:
@@ -59,8 +82,33 @@ mocks.
 
 ## Health
 
-`GET /health` returns only non-secret staging identifiers/status. It is intended for hosting
-health checks.
+`GET /health` (and `HEAD`) returns only `{"status", "service", "account_id", "project_id"}`.
+It is **deliberately public**: hosting health checks send no `Origin`, and the fixed identifiers are
+not secret. It never returns CORS headers, session data, repository contents or environment values.
+Other methods return 404.
+
+## Deployment requirements
+
+- **ASGI entrypoint:** `staging_app:app`. Any ASGI server works; for example
+  `pip install uvicorn` then
+  `uvicorn staging_app:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers`.
+  Uvicorn is a hosting dependency only, not an ACC dependency.
+- **Environment:** `ACC_STAGING_BOOTSTRAP_SECRET` (required, 24+ characters; generate as above).
+  `ACC_STAGING_ORIGIN` is optional and defaults to the console Origin below. Missing or malformed
+  values stop the process at import, before it serves anything.
+- **Single process:** run exactly one worker process. Sessions, WebSocket tickets, commands and
+  events all live in that process's memory, so a second worker would reject the first worker's
+  sessions and tickets. Restarting resets all staging state; that is intended.
+- **Blocking calls:** M09 API calls are synchronous. For this small in-memory test that is
+  acceptable; the production runtime must move them off the event loop.
+- **TLS:** terminate HTTPS/WSS at the host. The console must use `https://` and `wss://`.
+- **Published console Origin:** `https://acc-staging-console--memph1510.replit.app` (exact).
+- **Fixture:** `staging-account` / `staging-project` / `staging-user`, `worker-1`, `tasks.active` 25.
+- **Rate limits (host requirement):** limit `POST /staging/session` (for example 10/minute per
+  client IP) and concurrent WebSocket connections at the host or proxy. With a 32-byte random secret
+  brute force is not practical, so this is not a code blocker, but each successful bootstrap creates
+  an in-memory session.
+- **Lifetime:** take the service down after the browser test; it is not a long-running environment.
 
 ## Safety
 
