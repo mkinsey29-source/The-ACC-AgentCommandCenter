@@ -35,7 +35,8 @@ class SQLiteCommandRepository:
 
     def __init__(self, database: str | Path, *, clock=time.time, timeout: float = 5.0):
         self.database = str(database)
-        if self.database == ':memory:':
+        if (not self.database.strip() or self.database == ':memory:'
+                or self.database.lower().startswith('file:')):
             raise ValueError('SQLite command storage requires a durable database file.')
         Path(self.database).parent.mkdir(parents=True, exist_ok=True)
         self.clock = clock
@@ -155,7 +156,7 @@ class SQLiteCommandRepository:
         with self._lock, self._transaction():
             self._db.execute('''INSERT INTO m09_workers VALUES (?, ?, ?, ?)
                 ON CONFLICT(account_id, project_id, worker_id)
-                DO UPDATE SET status=excluded.status''',
+                DO NOTHING''',
                 (account_id, project_id, worker_id, status))
 
     def set_quota_usage(self, account_id: str, name: str, used: int) -> None:
@@ -206,9 +207,12 @@ class SQLiteCommandRepository:
                     WHERE account_id=? AND quota_name=?''',
                     (amount, command.account_id, name))
 
-            new_revision = project['revision'] + 1
-            seq = project['event_seq'] + 1
             now = self.clock()
+            # Use a time-based high-water mark as well as the stored counter. After a backup
+            # restore, the counter may move backwards; a forward-moving wall clock keeps newly
+            # appended events beyond cursors observed before the restore. Gaps are valid in M09.
+            seq = max(project['event_seq'] + 1, int(now * 1_000_000))
+            new_revision = project['revision'] + 1
             changed = self._db.execute('''UPDATE m09_projects
                 SET revision=?, mode=?, event_seq=?
                 WHERE account_id=? AND project_id=? AND revision=?''',
@@ -330,6 +334,13 @@ class SQLiteCommandRepository:
 
     def read_events(self, account_id: str, project_id: str, *, after: int, limit: int = 200):
         with self._lock, _ReadTransaction(self._db):
+            project = self._db.execute('''SELECT event_seq FROM m09_projects
+                WHERE account_id=? AND project_id=?''', (account_id, project_id)).fetchone()
+            if project is not None and after > project['event_seq']:
+                # A cursor ahead of the durable head can happen after restoring an older backup.
+                # Ask the client to refetch state from this stream head before reconnecting.
+                return EventBatch((), project['event_seq'], reset_required=True,
+                                  oldest_available=project['event_seq'] + 1)
             rows = self._db.execute('''SELECT seq, kind, at, data_json FROM m09_events
                 WHERE account_id=? AND project_id=? AND seq>? ORDER BY seq LIMIT ?''',
                 (account_id, project_id, after, limit + 1)).fetchall()
@@ -349,8 +360,7 @@ class _ReadTransaction:
         return self.db
 
     def __exit__(self, error_type, error, traceback):
-        self.db.execute('ROLLBACK' if error_type else 'COMMIT')
-        return False
+        return _finish_transaction(self.db, error_type)
 
 
 class _Transaction:
@@ -362,8 +372,25 @@ class _Transaction:
         return self.db
 
     def __exit__(self, error_type, error, traceback):
-        if error_type is None:
-            self.db.execute('COMMIT')
-        else:
-            self.db.execute('ROLLBACK')
-        return False
+        return _finish_transaction(self.db, error_type)
+
+
+def _finish_transaction(db: sqlite3.Connection, error_type) -> bool:
+    if error_type is None:
+        try:
+            db.execute('COMMIT')
+        except BaseException:
+            # SQLite can leave a transaction active when COMMIT fails (for example,
+            # SQLITE_BUSY or an I/O error). Release any lock but preserve the commit error.
+            try:
+                db.execute('ROLLBACK')
+            except BaseException:
+                pass
+            raise
+    else:
+        try:
+            db.execute('ROLLBACK')
+        except BaseException:
+            # Returning False preserves the original exception from the with block.
+            pass
+    return False
