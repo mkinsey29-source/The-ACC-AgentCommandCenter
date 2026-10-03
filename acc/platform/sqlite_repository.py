@@ -48,17 +48,34 @@ class SQLiteCommandRepository:
         self._db.row_factory = sqlite3.Row
         self._db.execute('PRAGMA foreign_keys = ON')
         self._db.execute('PRAGMA busy_timeout = %d' % max(1, int(timeout * 1000)))
-        self._db.execute('PRAGMA journal_mode = WAL')
+        self._enable_wal(timeout)
         self._db.execute('PRAGMA synchronous = FULL')
         self._create_schema()
+
+    def _enable_wal(self, timeout: float) -> None:
+        # Switching a rollback-journal file to WAL needs an exclusive lock and SQLite does not apply
+        # busy_timeout to it, so workers opening the same file concurrently retry until the timeout.
+        deadline = time.monotonic() + max(timeout, 0.0)
+        while True:
+            try:
+                if self._db.execute('PRAGMA journal_mode').fetchone()[0].lower() != 'wal':
+                    self._db.execute('PRAGMA journal_mode = WAL')
+                return
+            except sqlite3.OperationalError as exc:
+                if 'locked' not in str(exc).lower() or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
 
     def _create_schema(self) -> None:
         self._db.execute('''CREATE TABLE IF NOT EXISTS m09_schema_meta (
             singleton INTEGER PRIMARY KEY CHECK (singleton=1),
             version INTEGER NOT NULL)''')
-        self._db.execute('INSERT OR IGNORE INTO m09_schema_meta VALUES (1, 2)')
-        schema = self._db.execute(
-            'SELECT version FROM m09_schema_meta WHERE singleton=1').fetchone()['version']
+        row = self._db.execute('SELECT version FROM m09_schema_meta WHERE singleton=1').fetchone()
+        if row is None:
+            self._db.execute('INSERT OR IGNORE INTO m09_schema_meta VALUES (1, 2)')
+            row = self._db.execute(
+                'SELECT version FROM m09_schema_meta WHERE singleton=1').fetchone()
+        schema = row['version']
         if schema not in (1, 2):
             raise RuntimeError('Unsupported M09 SQLite schema version.')
         self._db.executescript('''
@@ -133,11 +150,16 @@ class SQLiteCommandRepository:
                     REFERENCES m09_projects(account_id, project_id)
             );
         ''')
-        columns = {row['name'] for row in self._db.execute('PRAGMA table_info(m09_projects)')}
-        if 'name' not in columns:
-            self._db.execute("ALTER TABLE m09_projects ADD COLUMN name TEXT NOT NULL DEFAULT ''")
-        self._db.execute("UPDATE m09_projects SET name=project_id WHERE name=''")
-        self._db.execute('UPDATE m09_schema_meta SET version=2 WHERE singleton=1')
+        if self._needs_v2_migration():
+            # Re-check under the writer reservation: another worker may have migrated the file
+            # between the unlocked check and BEGIN IMMEDIATE.
+            with self._transaction() as db:
+                if self._needs_v2_migration():
+                    columns = {row['name'] for row in db.execute('PRAGMA table_info(m09_projects)')}
+                    if 'name' not in columns:
+                        db.execute("ALTER TABLE m09_projects ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+                    db.execute("UPDATE m09_projects SET name=project_id WHERE name=''")
+                    db.execute('UPDATE m09_schema_meta SET version=2 WHERE singleton=1')
         self._db.executescript('''
             CREATE TABLE IF NOT EXISTS m09_attention (
                 account_id TEXT NOT NULL,
@@ -149,6 +171,12 @@ class SQLiteCommandRepository:
                     REFERENCES m09_projects(account_id, project_id)
             );
         ''')
+
+    def _needs_v2_migration(self) -> bool:
+        version = self._db.execute(
+            'SELECT version FROM m09_schema_meta WHERE singleton=1').fetchone()['version']
+        columns = {row['name'] for row in self._db.execute('PRAGMA table_info(m09_projects)')}
+        return version != 2 or 'name' not in columns
 
     def close(self) -> None:
         with self._lock:
@@ -431,22 +459,22 @@ class SQLitePlatformReadRepository:
 
     def tasks(self, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
         with self.store._lock:
-            rows = self.store._db.execute('''SELECT task_id, status, reserved_json FROM m09_tasks
+            rows = self.store._db.execute('''SELECT task_id, status FROM m09_tasks
                 WHERE account_id=? AND project_id=? ORDER BY task_id''',
                 (account_id, project_id)).fetchall()
+        # Quota reservations are internal bookkeeping; like StagingReads, never expose them.
         return [{'id': row['task_id'], 'account_id': account_id, 'project_id': project_id,
-                 'status': row['status'], 'reserved': json.loads(row['reserved_json'])}
-                for row in rows]
+                 'status': row['status']} for row in rows]
 
     def task(self, account_id: str, project_id: str, task_id: str) -> Mapping[str, Any] | None:
         with self.store._lock:
-            row = self.store._db.execute('''SELECT status, reserved_json FROM m09_tasks
+            row = self.store._db.execute('''SELECT status FROM m09_tasks
                 WHERE account_id=? AND project_id=? AND task_id=?''',
                 (account_id, project_id, task_id)).fetchone()
         if row is None:
             return None
         return {'id': task_id, 'account_id': account_id, 'project_id': project_id,
-                'status': row['status'], 'reserved': json.loads(row['reserved_json'])}
+                'status': row['status']}
 
     def workers(self, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
         with self.store._lock:

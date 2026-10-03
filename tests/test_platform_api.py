@@ -131,6 +131,9 @@ class PlatformApiTests(unittest.TestCase):
             self.assertEqual(state.body['tasks'][0]['id'], 'task-1')
             self.assertEqual(state.body['workers'][0]['id'], 'worker-1')
             self.assertEqual(task.body['task']['status'], 'queued')
+            # Internal quota reservations are not public API data.
+            self.assertNotIn('reserved', state.body['tasks'][0])
+            self.assertNotIn('reserved', task.body['task'])
             store.close()
 
     def authz(self, token):

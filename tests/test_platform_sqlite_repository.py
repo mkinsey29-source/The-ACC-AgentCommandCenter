@@ -24,6 +24,26 @@ def _run_command_in_process(database, command, barrier, results):
         repository.close()
 
 
+def _open_repository_in_process(database, barrier, results):
+    barrier.wait(timeout=10)
+    try:
+        SQLiteCommandRepository(database, timeout=10).close()
+        results.put('ok')
+    except Exception as error:
+        results.put(f'{type(error).__name__}: {error}')
+
+
+_SCHEMA_V1 = '''
+    CREATE TABLE m09_schema_meta (singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);
+    INSERT INTO m09_schema_meta VALUES (1, 1);
+    CREATE TABLE m09_projects (
+        account_id TEXT NOT NULL, project_id TEXT NOT NULL,
+        revision INTEGER NOT NULL, mode TEXT NOT NULL, event_seq INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, project_id));
+    INSERT INTO m09_projects VALUES ('acct-1', 'project-1', 4, 'offline', 77);
+'''
+
+
 class SQLiteCommandRepositoryTests(unittest.TestCase):
     def test_durable_read_projection_tracks_commands_and_attention_across_restart(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -51,8 +71,9 @@ class SQLiteCommandRepositoryTests(unittest.TestCase):
             self.assertEqual(reads.project('acct-2', 'project-1'), None)
             self.assertEqual(reads.tasks('acct-1', 'project-1'), [{
                 'id': 'task-1', 'account_id': 'acct-1', 'project_id': 'project-1',
-                'status': 'queued', 'reserved': {'tasks.active': 1},
+                'status': 'queued',
             }])
+            self.assertNotIn('reserved', reads.task('acct-1', 'project-1', 'task-1'))
             self.assertEqual(reads.task('acct-1', 'project-1', 'missing'), None)
             self.assertEqual(reads.workers('acct-1', 'project-1')[0]['status'], 'active')
             self.assertEqual(reads.attention('acct-1', 'project-1')[0]['id'], 'alert-1')
@@ -81,6 +102,46 @@ class SQLiteCommandRepositoryTests(unittest.TestCase):
             self.assertEqual(store._db.execute(
                 'SELECT version FROM m09_schema_meta WHERE singleton=1').fetchone()['version'], 2)
             store.close()
+
+    def test_concurrent_workers_opening_v1_database_migrate_once_without_crashing(self):
+        import multiprocessing
+
+        context = multiprocessing.get_context('spawn')
+        for journal in ('delete', 'wal'):
+            for _ in range(3):
+                with self.subTest(journal=journal), tempfile.TemporaryDirectory() as directory:
+                    database = str(Path(directory) / 'platform.sqlite3')
+                    with sqlite3.connect(database) as db:
+                        db.executescript(_SCHEMA_V1)
+                        db.execute(f'PRAGMA journal_mode={journal}')
+                    barrier, results = context.Barrier(6), context.Queue()
+                    workers = [context.Process(target=_open_repository_in_process,
+                                               args=(database, barrier, results))
+                               for _ in range(6)]
+                    for worker in workers:
+                        worker.start()
+                    for worker in workers:
+                        worker.join(30)
+                    self.assertEqual(sorted(results.get(timeout=5) for _ in workers), ['ok'] * 6)
+                    store = SQLiteCommandRepository(database)
+                    project = SQLitePlatformReadRepository(store).project('acct-1', 'project-1')
+                    self.assertEqual((project.name, project.revision, project.mode),
+                                     ('project-1', 4, 'offline'))
+                    self.assertEqual(store._db.execute(
+                        'SELECT version FROM m09_schema_meta').fetchone()['version'], 2)
+                    store.close()
+
+    def test_reopening_migrated_database_does_not_take_writer_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'platform.sqlite3'
+            SQLiteCommandRepository(database).close()
+            blocker = sqlite3.connect(database, isolation_level=None)
+            blocker.execute('BEGIN IMMEDIATE')
+            try:
+                SQLiteCommandRepository(database, timeout=0.2).close()
+            finally:
+                blocker.execute('ROLLBACK')
+                blocker.close()
 
     def test_failed_rollback_closes_connection_and_preserves_original_error(self):
         class BrokenRollbackConnection:
