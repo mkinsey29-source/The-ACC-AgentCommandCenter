@@ -15,11 +15,13 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..auth.models import _bounded_id
 from .commands import (
     CommandConflict, CommandRequest, CommandResult, CommandStateConflict,
     CommandTargetNotFound, IdempotencyConflict, QuotaExceeded,
 )
 from .events import EventBatch, PlatformEvent
+from .repository import AccountProjectView
 
 
 def _json(value: Any) -> str:
@@ -54,15 +56,16 @@ class SQLiteCommandRepository:
         self._db.execute('''CREATE TABLE IF NOT EXISTS m09_schema_meta (
             singleton INTEGER PRIMARY KEY CHECK (singleton=1),
             version INTEGER NOT NULL)''')
-        self._db.execute('INSERT OR IGNORE INTO m09_schema_meta VALUES (1, 1)')
+        self._db.execute('INSERT OR IGNORE INTO m09_schema_meta VALUES (1, 2)')
         schema = self._db.execute(
             'SELECT version FROM m09_schema_meta WHERE singleton=1').fetchone()['version']
-        if schema != 1:
+        if schema not in (1, 2):
             raise RuntimeError('Unsupported M09 SQLite schema version.')
         self._db.executescript('''
             CREATE TABLE IF NOT EXISTS m09_projects (
                 account_id TEXT NOT NULL,
                 project_id TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
                 revision INTEGER NOT NULL CHECK (revision >= 0),
                 mode TEXT NOT NULL CHECK (mode IN ('online', 'offline')),
                 event_seq INTEGER NOT NULL DEFAULT 0 CHECK (event_seq >= 0),
@@ -130,6 +133,22 @@ class SQLiteCommandRepository:
                     REFERENCES m09_projects(account_id, project_id)
             );
         ''')
+        columns = {row['name'] for row in self._db.execute('PRAGMA table_info(m09_projects)')}
+        if 'name' not in columns:
+            self._db.execute("ALTER TABLE m09_projects ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+        self._db.execute("UPDATE m09_projects SET name=project_id WHERE name=''")
+        self._db.execute('UPDATE m09_schema_meta SET version=2 WHERE singleton=1')
+        self._db.executescript('''
+            CREATE TABLE IF NOT EXISTS m09_attention (
+                account_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                attention_id TEXT NOT NULL,
+                record_json TEXT NOT NULL,
+                PRIMARY KEY (account_id, project_id, attention_id),
+                FOREIGN KEY (account_id, project_id)
+                    REFERENCES m09_projects(account_id, project_id)
+            );
+        ''')
 
     def close(self) -> None:
         with self._lock:
@@ -141,13 +160,45 @@ class SQLiteCommandRepository:
 
     # Fixture/bootstrap operations are also transactions so a caller never sees partial rows.
     def put_project(self, account_id: str, project_id: str, *, revision: int = 0,
-                    mode: str = 'online') -> None:
+                    mode: str = 'online', name: str | None = None) -> None:
         """Provision an initial project row without overwriting durable state."""
+        project = AccountProjectView(
+            account_id, project_id, project_id if name is None else name, mode, revision)
         with self._lock, self._transaction():
             self._db.execute('''INSERT INTO m09_projects
-                (account_id, project_id, revision, mode, event_seq) VALUES (?, ?, ?, ?, 0)
+                (account_id, project_id, name, revision, mode, event_seq) VALUES (?, ?, ?, ?, ?, 0)
                 ON CONFLICT(account_id, project_id) DO NOTHING''',
-                (account_id, project_id, revision, mode))
+                (project.account_id, project.project_id, project.name,
+                 project.revision, project.mode))
+
+    def put_attention(self, account_id: str, project_id: str, attention_id: str,
+                      record: Mapping[str, Any]) -> None:
+        """Persist one account/project-scoped attention projection record."""
+        account_id = _bounded_id(account_id, 'account_id')
+        project_id = _bounded_id(project_id, 'project_id')
+        attention_id = _bounded_id(attention_id, 'attention_id')
+        if not isinstance(record, Mapping):
+            raise ValueError('attention record must be an object')
+        value = dict(record)
+        if value.get('account_id') != account_id or value.get('project_id') != project_id:
+            raise ValueError('attention record scope does not match its key')
+        if value.get('id') != attention_id:
+            raise ValueError('attention record id does not match its key')
+        with self._lock, self._transaction():
+            self._db.execute('''INSERT INTO m09_attention VALUES (?, ?, ?, ?)
+                ON CONFLICT(account_id, project_id, attention_id)
+                DO UPDATE SET record_json=excluded.record_json''',
+                (account_id, project_id, attention_id, _json(value)))
+
+    def delete_attention(self, account_id: str, project_id: str, attention_id: str) -> bool:
+        account_id = _bounded_id(account_id, 'account_id')
+        project_id = _bounded_id(project_id, 'project_id')
+        attention_id = _bounded_id(attention_id, 'attention_id')
+        with self._lock, self._transaction():
+            result = self._db.execute('''DELETE FROM m09_attention
+                WHERE account_id=? AND project_id=? AND attention_id=?''',
+                (account_id, project_id, attention_id))
+            return result.rowcount == 1
 
     def put_worker(self, account_id: str, project_id: str, worker_id: str,
                    *, status: str = 'active') -> None:
@@ -355,6 +406,62 @@ class SQLiteCommandRepository:
                 row['seq'], account_id, project_id, row['kind'], row['at'],
                 json.loads(row['data_json'])) for row in rows[:limit])
             return EventBatch(events, events[-1].seq if events else after, has_more)
+
+
+class SQLitePlatformReadRepository:
+    """Durable M09 read projection backed by the command store's SQLite database."""
+
+    def __init__(self, store: SQLiteCommandRepository):
+        self.store = store
+
+    def projects(self, account_id: str) -> list[AccountProjectView]:
+        with self.store._lock:
+            rows = self.store._db.execute('''SELECT account_id, project_id, name, mode, revision
+                FROM m09_projects WHERE account_id=? ORDER BY project_id''', (account_id,)).fetchall()
+        return [AccountProjectView(row['account_id'], row['project_id'], row['name'],
+                                   row['mode'], row['revision']) for row in rows]
+
+    def project(self, account_id: str, project_id: str) -> AccountProjectView | None:
+        with self.store._lock:
+            row = self.store._db.execute('''SELECT account_id, project_id, name, mode, revision
+                FROM m09_projects WHERE account_id=? AND project_id=?''',
+                (account_id, project_id)).fetchone()
+        return None if row is None else AccountProjectView(
+            row['account_id'], row['project_id'], row['name'], row['mode'], row['revision'])
+
+    def tasks(self, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
+        with self.store._lock:
+            rows = self.store._db.execute('''SELECT task_id, status, reserved_json FROM m09_tasks
+                WHERE account_id=? AND project_id=? ORDER BY task_id''',
+                (account_id, project_id)).fetchall()
+        return [{'id': row['task_id'], 'account_id': account_id, 'project_id': project_id,
+                 'status': row['status'], 'reserved': json.loads(row['reserved_json'])}
+                for row in rows]
+
+    def task(self, account_id: str, project_id: str, task_id: str) -> Mapping[str, Any] | None:
+        with self.store._lock:
+            row = self.store._db.execute('''SELECT status, reserved_json FROM m09_tasks
+                WHERE account_id=? AND project_id=? AND task_id=?''',
+                (account_id, project_id, task_id)).fetchone()
+        if row is None:
+            return None
+        return {'id': task_id, 'account_id': account_id, 'project_id': project_id,
+                'status': row['status'], 'reserved': json.loads(row['reserved_json'])}
+
+    def workers(self, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
+        with self.store._lock:
+            rows = self.store._db.execute('''SELECT worker_id, status FROM m09_workers
+                WHERE account_id=? AND project_id=? ORDER BY worker_id''',
+                (account_id, project_id)).fetchall()
+        return [{'id': row['worker_id'], 'account_id': account_id,
+                 'project_id': project_id, 'status': row['status']} for row in rows]
+
+    def attention(self, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
+        with self.store._lock:
+            rows = self.store._db.execute('''SELECT record_json FROM m09_attention
+                WHERE account_id=? AND project_id=? ORDER BY attention_id''',
+                (account_id, project_id)).fetchall()
+        return [json.loads(row['record_json']) for row in rows]
 
 
 class _ReadTransaction:

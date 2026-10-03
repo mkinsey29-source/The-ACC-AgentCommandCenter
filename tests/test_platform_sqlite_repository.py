@@ -7,7 +7,9 @@ import unittest
 from pathlib import Path
 
 from acc.platform.commands import CommandRequest
-from acc.platform.sqlite_repository import SQLiteCommandRepository, _Transaction
+from acc.platform.sqlite_repository import (
+    SQLiteCommandRepository, SQLitePlatformReadRepository, _Transaction,
+)
 
 
 def _run_command_in_process(database, command, barrier, results):
@@ -23,6 +25,63 @@ def _run_command_in_process(database, command, barrier, results):
 
 
 class SQLiteCommandRepositoryTests(unittest.TestCase):
+    def test_durable_read_projection_tracks_commands_and_attention_across_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'platform.sqlite3'
+            store = SQLiteCommandRepository(database)
+            store.put_project('acct-1', 'project-1', name='Alpha')
+            store.put_project('acct-2', 'project-2', name='Private')
+            store.put_worker('acct-1', 'project-1', 'worker-1')
+            store.put_attention('acct-1', 'project-1', 'alert-1', {
+                'id': 'alert-1', 'account_id': 'acct-1', 'project_id': 'project-1',
+                'severity': 'warning',
+            })
+            with self.assertRaises(ValueError):
+                store.put_attention('acct-2', 'project-1', 'alert-2', {
+                    'id': 'alert-2', 'account_id': 'acct-1', 'project_id': 'project-1',
+                })
+            command = CommandRequest('op-1', 'acct-1', 'project-1', 'task.create', 0,
+                                     {'task_id': 'task-1'}, 'user-1')
+            store.execute(command, limits={'tasks.active': 2})
+            store.close()
+
+            store = SQLiteCommandRepository(database)
+            reads = SQLitePlatformReadRepository(store)
+            self.assertEqual(reads.projects('acct-1')[0].name, 'Alpha')
+            self.assertEqual(reads.project('acct-2', 'project-1'), None)
+            self.assertEqual(reads.tasks('acct-1', 'project-1'), [{
+                'id': 'task-1', 'account_id': 'acct-1', 'project_id': 'project-1',
+                'status': 'queued', 'reserved': {'tasks.active': 1},
+            }])
+            self.assertEqual(reads.task('acct-1', 'project-1', 'missing'), None)
+            self.assertEqual(reads.workers('acct-1', 'project-1')[0]['status'], 'active')
+            self.assertEqual(reads.attention('acct-1', 'project-1')[0]['id'], 'alert-1')
+            self.assertTrue(store.delete_attention('acct-1', 'project-1', 'alert-1'))
+            self.assertEqual(reads.attention('acct-1', 'project-1'), [])
+            store.close()
+
+    def test_schema_v1_migrates_project_names_without_losing_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'platform.sqlite3'
+            with sqlite3.connect(database) as db:
+                db.executescript('''
+                    CREATE TABLE m09_schema_meta (singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);
+                    INSERT INTO m09_schema_meta VALUES (1, 1);
+                    CREATE TABLE m09_projects (
+                        account_id TEXT NOT NULL, project_id TEXT NOT NULL,
+                        revision INTEGER NOT NULL, mode TEXT NOT NULL, event_seq INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (account_id, project_id));
+                    INSERT INTO m09_projects VALUES ('acct-1', 'project-1', 4, 'offline', 77);
+                ''')
+            store = SQLiteCommandRepository(database)
+            reads = SQLitePlatformReadRepository(store)
+            self.assertEqual(reads.project('acct-1', 'project-1').name, 'project-1')
+            self.assertEqual((reads.project('acct-1', 'project-1').revision,
+                              reads.project('acct-1', 'project-1').mode), (4, 'offline'))
+            self.assertEqual(store._db.execute(
+                'SELECT version FROM m09_schema_meta WHERE singleton=1').fetchone()['version'], 2)
+            store.close()
+
     def test_failed_rollback_closes_connection_and_preserves_original_error(self):
         class BrokenRollbackConnection:
             closed = False

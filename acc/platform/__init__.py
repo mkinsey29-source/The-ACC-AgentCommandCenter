@@ -7,7 +7,7 @@ from .commands import (
     PlatformCommandRepository, QuotaExceeded, QuotaReservation,
 )
 from .command_memory import InMemoryCommandRepository
-from .sqlite_repository import SQLiteCommandRepository
+from .sqlite_repository import SQLiteCommandRepository, SQLitePlatformReadRepository
 from .repository import AccountProjectView, PlatformReadRepository
 from .transport import EventTicketStore, HostedTransport, OriginPolicy
 
@@ -19,5 +19,6 @@ __all__ = [
     'EventTicketStore', 'HostedTransport', 'OriginPolicy',
     'PlatformApi', 'PlatformCommandRepository', 'PlatformEvent', 'PlatformEventSource',
     'PlatformReadRepository', 'QuotaExceeded', 'QuotaReservation', 'SQLiteCommandRepository',
+    'SQLitePlatformReadRepository',
     'bearer_token',
 ]

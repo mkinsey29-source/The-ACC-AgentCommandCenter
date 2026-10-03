@@ -12,6 +12,7 @@ from acc.auth import (
 from acc.platform import (
     AccountProjectView,
     ApiError,
+    CommandRequest,
     EventBatch,
     PlatformApi,
     PlatformEvent,
@@ -107,6 +108,30 @@ class PlatformApiTests(unittest.TestCase):
         self.reads = Reads()
         self.events = Events()
         self.api = PlatformApi(self.auth, self.reads, self.events)
+
+    def test_hosted_api_serves_durable_sqlite_read_projection(self):
+        import tempfile
+        from pathlib import Path
+        from acc.platform.sqlite_repository import (
+            SQLiteCommandRepository, SQLitePlatformReadRepository,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = SQLiteCommandRepository(Path(directory) / 'platform.sqlite3')
+            store.put_project('acct-1', 'project-1', name='Durable project')
+            store.put_worker('acct-1', 'project-1', 'worker-1')
+            store.execute(CommandRequest('op-1', 'acct-1', 'project-1', 'task.create', 0,
+                                         {'task_id': 'task-1'}, 'user-1'),
+                          limits={'tasks.active': 2})
+            api = PlatformApi(self.auth, SQLitePlatformReadRepository(store), store)
+            projects = api.list_projects(self.authz(self.token1), 'acct-1')
+            state = api.project_state(self.authz(self.token1), 'acct-1', 'project-1')
+            task = api.task(self.authz(self.token1), 'acct-1', 'project-1', 'task-1')
+            self.assertEqual(projects.body['projects'][0]['name'], 'Durable project')
+            self.assertEqual(state.body['tasks'][0]['id'], 'task-1')
+            self.assertEqual(state.body['workers'][0]['id'], 'worker-1')
+            self.assertEqual(task.body['task']['status'], 'queued')
+            store.close()
 
     def authz(self, token):
         return 'Bearer ' + token
