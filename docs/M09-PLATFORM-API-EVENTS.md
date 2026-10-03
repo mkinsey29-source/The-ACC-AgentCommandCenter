@@ -1,6 +1,6 @@
 # M09 — Hosted Platform API and Events
 
-**Status:** PARTIAL — read/event contracts (PR #30) and hosted HTTP/WSS transport (PR #31, merged as `8915e39`) integrated. Commands/mutations and the durable hosted runtime remain.
+**Status:** PARTIAL — read/event contracts, hosted HTTP/WSS transport, permissioned commands, and a durable SQLite read projection are integrated. `SQLiteCommandRepository` provides the atomic command/event store; `SQLitePlatformReadRepository` exposes durable project, task, worker, and attention projections. Production composition, M08 production integration, event/session retention policy, off-loop execution and deployment controls remain.
 
 ## Purpose
 
@@ -291,3 +291,16 @@ equivalently locked) transaction and needs at least:
 
 The production runtime must also run these synchronous calls off the ASGI event loop and add rate
 limits (see the hosted transport deployment requirements).
+
+
+## Initial SQLite command/event adapter
+
+`acc.platform.SQLiteCommandRepository` implements the M09 command repository and event source using a durable SQLite file. Each command runs under `BEGIN IMMEDIATE`, serializing revision checks, quota usage, mutation, idempotency result, audit row and per-project event sequence in one transaction. A result keyed by `(account_id, operation_id)` is retained indefinitely; pruning is disabled until a client retry-retention policy is specified. Event sequence allocation is stored on the project row and event replay uses the same database.
+
+SQLite event sequence values are strictly increasing but may have gaps. Allocation uses the greater of the stored high-water mark plus one and the command timestamp in microseconds. This keeps new events beyond cursors from before a restored backup while the host clock moves forward. Events are never pruned, so a valid cursor is `0` or the sequence of an event in that stream. If a client presents a cursor beyond the head, or one naming an event the store does not have, `read_events` returns `reset_required` with the current head as the reset cursor. This catches a restored older backup even when later commands have already moved the head past the client's cursor; the client refetches project state and resumes from the head. The time-based allocation keeps new sequences from reusing pre-restore values while the host clock moves forward. The residual risk is a clock rollback that makes a post-restore event land on exactly the client's pre-restore cursor; a future hosted-runtime decision should add an explicit stream epoch or external high-water mark if restores must stay safe across clock rollback. Any future event pruning must also return `reset_required` for cursors older than the retained window.
+
+`SQLitePlatformReadRepository` now projects the command store's durable project, task, worker, and attention rows through the `PlatformReadRepository` contract. Schema version 2 adds a durable project name and attention table; opening a version 1 database migrates existing projects by using their IDs as names without changing revisions, modes, or event sequence values. The repository is covered through the hosted API read endpoints and restart/migration tests.
+
+**Project state consistency.** `GET .../projects/{project_id}` is served by one `PlatformReadRepository.project_snapshot` call, so the project, tasks, workers and attention in a response all come from the same committed state and `project.revision` describes exactly the returned tasks and workers. A client may therefore use that revision both as `expected_revision` for its next command and to skip replayed events with `revision <= project.revision`. SQLite reads the four parts inside one deferred read transaction on the store's connection (one WAL snapshot; it does not block writers on other connections); the staging repository takes one locked copy. Attention records are not revisioned, so the guarantee for them is point-in-time only. The response does not yet carry the event-stream position it reflects; clients still follow the reset procedure above (record the cursor first, then refetch).
+
+This remains a storage adapter, not yet the production hosted runtime. SQLite calls are synchronous, so the ASGI transport must move them off the event loop. Production also needs a shared durable database/deployment topology, rate limits, an M08 server-side session-reference design for WebSocket authorization, and a backup/restore policy. The in-memory staging service remains separate and was not changed by this adapter.
