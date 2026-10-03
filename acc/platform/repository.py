@@ -27,8 +27,23 @@ class AccountProjectView:
             raise ValueError('project revision must be a nonnegative integer.')
 
 
+@dataclass(frozen=True)
+class ProjectSnapshot:
+    """One project's state as of a single committed point in time."""
+    project: AccountProjectView
+    tasks: tuple[Mapping[str, Any], ...]
+    workers: tuple[Mapping[str, Any], ...]
+    attention: tuple[Mapping[str, Any], ...]
+
+
 class PlatformReadRepository(Protocol):
-    """Account-scoped read model consumed by M09."""
+    """Account-scoped read model consumed by M09.
+
+    ``project_snapshot`` must return every part from the same committed state: no command or
+    fixture write may be visible in one part and missing from another, so ``project.revision``
+    describes exactly the returned tasks and workers. ``None`` means the project does not exist.
+    """
+    def project_snapshot(self, account_id: str, project_id: str) -> ProjectSnapshot | None: ...
     def projects(self, account_id: str) -> list[AccountProjectView]: ...
     def project(self, account_id: str, project_id: str) -> AccountProjectView | None: ...
     def tasks(self, account_id: str, project_id: str) -> list[Mapping[str, Any]]: ...

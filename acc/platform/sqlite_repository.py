@@ -21,7 +21,7 @@ from .commands import (
     CommandTargetNotFound, IdempotencyConflict, QuotaExceeded,
 )
 from .events import EventBatch, PlatformEvent
-from .repository import AccountProjectView
+from .repository import AccountProjectView, ProjectSnapshot
 
 
 def _json(value: Any) -> str:
@@ -449,22 +449,26 @@ class SQLitePlatformReadRepository:
         return [AccountProjectView(row['account_id'], row['project_id'], row['name'],
                                    row['mode'], row['revision']) for row in rows]
 
+    def project_snapshot(self, account_id: str, project_id: str) -> ProjectSnapshot | None:
+        # A deferred read transaction pins one WAL snapshot for all four queries. Under WAL it
+        # does not block writers on other connections; same-process commands wait on the lock.
+        with self.store._lock, _ReadTransaction(self.store._db) as db:
+            project = self._project(db, account_id, project_id)
+            if project is None:
+                return None
+            return ProjectSnapshot(
+                project,
+                tuple(self._tasks(db, account_id, project_id)),
+                tuple(self._workers(db, account_id, project_id)),
+                tuple(self._attention(db, account_id, project_id)))
+
     def project(self, account_id: str, project_id: str) -> AccountProjectView | None:
         with self.store._lock:
-            row = self.store._db.execute('''SELECT account_id, project_id, name, mode, revision
-                FROM m09_projects WHERE account_id=? AND project_id=?''',
-                (account_id, project_id)).fetchone()
-        return None if row is None else AccountProjectView(
-            row['account_id'], row['project_id'], row['name'], row['mode'], row['revision'])
+            return self._project(self.store._db, account_id, project_id)
 
     def tasks(self, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
         with self.store._lock:
-            rows = self.store._db.execute('''SELECT task_id, status FROM m09_tasks
-                WHERE account_id=? AND project_id=? ORDER BY task_id''',
-                (account_id, project_id)).fetchall()
-        # Quota reservations are internal bookkeeping; like StagingReads, never expose them.
-        return [{'id': row['task_id'], 'account_id': account_id, 'project_id': project_id,
-                 'status': row['status']} for row in rows]
+            return self._tasks(self.store._db, account_id, project_id)
 
     def task(self, account_id: str, project_id: str, task_id: str) -> Mapping[str, Any] | None:
         with self.store._lock:
@@ -478,17 +482,42 @@ class SQLitePlatformReadRepository:
 
     def workers(self, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
         with self.store._lock:
-            rows = self.store._db.execute('''SELECT worker_id, status FROM m09_workers
-                WHERE account_id=? AND project_id=? ORDER BY worker_id''',
-                (account_id, project_id)).fetchall()
-        return [{'id': row['worker_id'], 'account_id': account_id,
-                 'project_id': project_id, 'status': row['status']} for row in rows]
+            return self._workers(self.store._db, account_id, project_id)
 
     def attention(self, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
         with self.store._lock:
-            rows = self.store._db.execute('''SELECT record_json FROM m09_attention
-                WHERE account_id=? AND project_id=? ORDER BY attention_id''',
-                (account_id, project_id)).fetchall()
+            return self._attention(self.store._db, account_id, project_id)
+
+    @staticmethod
+    def _project(db, account_id: str, project_id: str) -> AccountProjectView | None:
+        row = db.execute('''SELECT account_id, project_id, name, mode, revision
+            FROM m09_projects WHERE account_id=? AND project_id=?''',
+            (account_id, project_id)).fetchone()
+        return None if row is None else AccountProjectView(
+            row['account_id'], row['project_id'], row['name'], row['mode'], row['revision'])
+
+    @staticmethod
+    def _tasks(db, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
+        rows = db.execute('''SELECT task_id, status FROM m09_tasks
+            WHERE account_id=? AND project_id=? ORDER BY task_id''',
+            (account_id, project_id)).fetchall()
+        # Quota reservations are internal bookkeeping; like StagingReads, never expose them.
+        return [{'id': row['task_id'], 'account_id': account_id, 'project_id': project_id,
+                 'status': row['status']} for row in rows]
+
+    @staticmethod
+    def _workers(db, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
+        rows = db.execute('''SELECT worker_id, status FROM m09_workers
+            WHERE account_id=? AND project_id=? ORDER BY worker_id''',
+            (account_id, project_id)).fetchall()
+        return [{'id': row['worker_id'], 'account_id': account_id,
+                 'project_id': project_id, 'status': row['status']} for row in rows]
+
+    @staticmethod
+    def _attention(db, account_id: str, project_id: str) -> list[Mapping[str, Any]]:
+        rows = db.execute('''SELECT record_json FROM m09_attention
+            WHERE account_id=? AND project_id=? ORDER BY attention_id''',
+            (account_id, project_id)).fetchall()
         return [json.loads(row['record_json']) for row in rows]
 
 

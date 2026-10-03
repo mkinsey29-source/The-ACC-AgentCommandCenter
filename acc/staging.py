@@ -7,7 +7,8 @@ from copy import deepcopy
 
 from .auth import (AccountState, AuthService, EntitlementSnapshot, InMemoryAuthRepository,
                    Membership, UserState, VerifiedIdentity)
-from .platform import AccountProjectView, HostedTransport, OriginPolicy, PlatformApi
+from .platform import (AccountProjectView, HostedTransport, OriginPolicy, PlatformApi,
+                       ProjectSnapshot)
 from .platform.command_memory import InMemoryCommandRepository
 
 STAGING_ACCOUNT_ID = 'staging-account'
@@ -42,6 +43,17 @@ class StagingReads:
         p = self.state.project(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID)
         return [AccountProjectView(account_id, STAGING_PROJECT_ID, "ACC Staging",
                                    p['mode'], p['revision'])]
+
+    def project_snapshot(self, account_id, project_id):
+        if (account_id, project_id) != (STAGING_ACCOUNT_ID, STAGING_PROJECT_ID):
+            return None
+        # One locked deep copy, so revision, tasks and workers come from the same state.
+        p = self.state.project(account_id, project_id)
+        return ProjectSnapshot(
+            AccountProjectView(account_id, project_id, "ACC Staging", p['mode'], p['revision']),
+            tuple(self._public(account_id, project_id, v) for v in p['tasks'].values()),
+            tuple(self._public(account_id, project_id, v) for v in p['workers'].values()),
+            ())
 
     def project(self, account_id, project_id):
         if (account_id, project_id) != (STAGING_ACCOUNT_ID, STAGING_PROJECT_ID):

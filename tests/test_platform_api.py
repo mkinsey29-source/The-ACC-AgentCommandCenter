@@ -16,6 +16,7 @@ from acc.platform import (
     EventBatch,
     PlatformApi,
     PlatformEvent,
+    ProjectSnapshot,
 )
 
 
@@ -32,6 +33,15 @@ class Reads:
             'acct-1': [AccountProjectView('acct-1', 'project-1', 'Alpha')],
             'acct-2': [AccountProjectView('acct-2', 'project-2', 'Beta')],
         }
+
+    def project_snapshot(self, account_id, project_id):
+        # Static fixtures, so composing the parts is already a single point in time.
+        project = self.project(account_id, project_id)
+        if project is None:
+            return None
+        return ProjectSnapshot(project, tuple(self.tasks(account_id, project_id)),
+                               tuple(self.workers(account_id, project_id)),
+                               tuple(self.attention(account_id, project_id)))
 
     def projects(self, account_id):
         return list(self.projects_by_account.get(account_id, ()))
@@ -135,6 +145,87 @@ class PlatformApiTests(unittest.TestCase):
             self.assertNotIn('reserved', state.body['tasks'][0])
             self.assertNotIn('reserved', task.body['task'])
             store.close()
+
+    def test_project_state_never_mixes_state_from_before_and_after_a_command(self):
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+        from acc.platform.sqlite_repository import (
+            SQLiteCommandRepository, SQLitePlatformReadRepository,
+        )
+
+        class WriteAfterFirstRead:
+            """Connection proxy: commits a command on another connection after the first read."""
+            def __init__(self, db, write):
+                self.db, self.write = db, write
+
+            def execute(self, sql, *args):
+                cursor = self.db.execute(sql, *args)
+                if self.write is not None and sql.lstrip().upper().startswith('SELECT'):
+                    write, self.write = self.write, None
+                    write()
+                return cursor
+
+            def __getattr__(self, name):
+                return getattr(self.db, name)
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'platform.sqlite3'
+            reader = SQLiteCommandRepository(database)
+            reader.put_project('acct-1', 'project-1', name='Snapshot')
+            reader.put_worker('acct-1', 'project-1', 'worker-1')
+            writer = SQLiteCommandRepository(database)  # separate connection, like another worker
+            api = PlatformApi(self.auth, SQLitePlatformReadRepository(reader), reader)
+
+            def create(n):
+                return lambda: writer.execute(CommandRequest(
+                    f'op-{n}', 'acct-1', 'project-1', 'task.create', n,
+                    {'task_id': f'task-{n}'}, 'user-1'), limits={'tasks.active': 100})
+
+            def pause():
+                writer.execute(CommandRequest('op-pause', 'acct-1', 'project-1', 'worker.pause',
+                                              1, {'worker_id': 'worker-1'}, 'user-1'), limits={})
+
+            # A command commits between the project read and the remaining reads.
+            for write, expected in ((create(0), (0, [], 'active')),
+                                    (pause, (1, ['task-0'], 'active'))):
+                reader._db = WriteAfterFirstRead(reader._db, write)
+                body = api.project_state(self.authz(self.token1), 'acct-1', 'project-1').body
+                reader._db = reader._db.db
+                self.assertEqual((body['project']['revision'], [t['id'] for t in body['tasks']],
+                                  body['workers'][0]['status']), expected)
+            # The next read sees the committed commands as one consistent state.
+            body = api.project_state(self.authz(self.token1), 'acct-1', 'project-1').body
+            self.assertEqual((body['project']['revision'], [t['id'] for t in body['tasks']],
+                              body['workers'][0]['status']), (2, ['task-0'], 'paused'))
+
+            # Free-running writer on its own connection: revision always equals the task count.
+            stop, errors = [False], []
+
+            def write_loop():
+                n = 2
+                try:
+                    while not stop[0] and n < 400:
+                        writer.execute(CommandRequest(
+                            f'op-{n}', 'acct-1', 'project-1', 'task.create', n,
+                            {'task_id': f'task-{n}'}, 'user-1'), limits={'tasks.active': 1000})
+                        n += 1
+                except (sqlite3.Error, Exception) as error:  # surface in the main thread
+                    errors.append(error)
+
+            import threading
+            thread = threading.Thread(target=write_loop)
+            thread.start()
+            try:
+                for _ in range(300):
+                    body = api.project_state(self.authz(self.token1), 'acct-1', 'project-1').body
+                    self.assertEqual(body['project']['revision'], len(body['tasks']) + 1)
+            finally:
+                stop[0] = True
+                thread.join(30)
+            self.assertEqual(errors, [])
+            reader.close()
+            writer.close()
 
     def authz(self, token):
         return 'Bearer ' + token
