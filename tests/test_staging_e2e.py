@@ -530,6 +530,29 @@ class DurableStagingRestartTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.execute('SELECT count(*) FROM m08_provisioning').fetchone()[0], 1)
             self.assertEqual(db.execute('SELECT count(*) FROM m09_projects').fetchone()[0], 1)
 
+    def test_invalid_configuration_never_creates_or_provisions_a_database(self):
+        for origin, secret in (('http://insecure.example', SECRET), (ORIGIN, 'short')):
+            with self.subTest(origin=origin), self.assertRaises(ValueError):
+                StagingApplication(origin=origin, bootstrap_secret=secret, database=self.path)
+            self.assertFalse(self.path.exists())
+
+    def test_failure_after_storage_opens_closes_every_connection(self):
+        from acc.platform.sqlite_repository import SQLiteCommandRepository
+        self.restart(self.start())  # create a valid durable store, then break its M09 schema
+        self.apps[-1].close()
+        with sqlite3.connect(self.path) as db:
+            db.execute('UPDATE m09_schema_meta SET version=99')
+        closed = []
+        real_auth_close = __import__('acc.auth', fromlist=['SQLiteAuthRepository']).SQLiteAuthRepository.close
+        with mock.patch('acc.staging.SQLiteAuthRepository.close', autospec=True,
+                        side_effect=lambda repo: (closed.append('auth'), real_auth_close(repo))):
+            with self.assertRaisesRegex(RuntimeError, 'Unsupported M09'):
+                StagingApplication(origin=ORIGIN, bootstrap_secret=SECRET, database=self.path)
+        self.assertEqual(closed, ['auth'])
+        with sqlite3.connect(self.path) as db:
+            db.execute('UPDATE m09_schema_meta SET version=2')
+        SQLiteCommandRepository(self.path).close()
+
     def test_database_setting_must_be_an_absolute_path(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith('ACC_STAGING_')}
         env['ACC_STAGING_BOOTSTRAP_SECRET'] = SECRET

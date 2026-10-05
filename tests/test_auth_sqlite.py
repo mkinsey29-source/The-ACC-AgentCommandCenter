@@ -214,7 +214,8 @@ class ProvisionOnceTests(unittest.TestCase):
 
     def repositories(self):
         from acc.auth import InMemoryAuthRepository
-        sqlite_repo = SQLiteAuthRepository(Path(self.temp.name) / 'auth.sqlite3')
+        self._stores = getattr(self, '_stores', 0) + 1  # a fresh file per call
+        sqlite_repo = SQLiteAuthRepository(Path(self.temp.name) / f'auth-{self._stores}.sqlite3')
         self.addCleanup(sqlite_repo.close)
         return (('memory', InMemoryAuthRepository()), ('sqlite', sqlite_repo))
 
@@ -261,6 +262,28 @@ class ProvisionOnceTests(unittest.TestCase):
                     self.fixture(repo, subject='taken')
                 self.assertIsNone(repo.account('acct-1'))
                 self.assertTrue(self.fixture(repo, subject='free'))  # the key was not consumed
+
+
+    def test_refused_fixture_changes_nothing_in_either_repository(self):
+        cases = (
+            ('identity for a missing user', dict(
+                users=(UserState('user-1'),), accounts=(AccountState('acct-1'),),
+                identities=((VerifiedIdentity('openai', 'subject-x'), 'ghost'),))),
+            ('membership for a missing account', dict(
+                users=(UserState('user-1'),), memberships=(Membership('ghost-acct', 'user-1'),))),
+            ('entitlements for a missing account', dict(
+                users=(UserState('user-1'),),
+                entitlements=(EntitlementSnapshot('ghost-acct', ('acc.web',)),))),
+        )
+        for number, (label, fixture) in enumerate(cases):
+            key = f'fixture-{number}'
+            for name, repo in self.repositories():
+                with self.subTest(case=label, repository=name):
+                    with self.assertRaises((ValueError, sqlite3.IntegrityError)):
+                        repo.provision_once(key, **fixture)
+                    self.assertIsNone(repo.user('user-1'))
+                    self.assertIsNone(repo.account('acct-1'))
+                    self.assertTrue(repo.provision_once(key))  # the key was not consumed
 
 
 if __name__ == '__main__':

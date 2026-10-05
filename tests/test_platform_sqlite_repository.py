@@ -143,6 +143,23 @@ class SQLiteCommandRepositoryTests(unittest.TestCase):
                 blocker.execute('ROLLBACK')
                 blocker.close()
 
+    def test_failed_construction_closes_the_connection(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'platform.sqlite3'
+            SQLiteCommandRepository(database).close()
+            with sqlite3.connect(database) as db:
+                db.execute('UPDATE m09_schema_meta SET version=99')
+            connections = []
+            real_connect = sqlite3.connect
+            with mock.patch('acc.platform.sqlite_repository.sqlite3.connect',
+                            side_effect=lambda *a, **k: connections.append(real_connect(*a, **k))
+                            or connections[-1]):
+                with self.assertRaisesRegex(RuntimeError, 'Unsupported M09'):
+                    SQLiteCommandRepository(database)
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connections[-1].execute('SELECT 1')
+
     def test_failed_rollback_closes_connection_and_preserves_original_error(self):
         class BrokenRollbackConnection:
             closed = False

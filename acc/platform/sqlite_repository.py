@@ -45,12 +45,16 @@ class SQLiteCommandRepository:
         self._lock = threading.RLock()
         self._db = sqlite3.connect(
             self.database, timeout=timeout, isolation_level=None, check_same_thread=False)
-        self._db.row_factory = sqlite3.Row
-        self._db.execute('PRAGMA foreign_keys = ON')
-        self._db.execute('PRAGMA busy_timeout = %d' % max(1, int(timeout * 1000)))
-        self._enable_wal(timeout)
-        self._db.execute('PRAGMA synchronous = FULL')
-        self._create_schema()
+        try:
+            self._db.row_factory = sqlite3.Row
+            self._db.execute('PRAGMA foreign_keys = ON')
+            self._db.execute('PRAGMA busy_timeout = %d' % max(1, int(timeout * 1000)))
+            self._enable_wal(timeout)
+            self._db.execute('PRAGMA synchronous = FULL')
+            self._create_schema()
+        except BaseException:
+            self._db.close()
+            raise
 
     def _enable_wal(self, timeout: float) -> None:
         # Switching a rollback-journal file to WAL needs an exclusive lock and SQLite does not apply

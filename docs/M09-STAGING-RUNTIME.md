@@ -44,8 +44,15 @@ stored, only SHA-256 digests.
 The fixture above is applied **once per database** under the provisioning key
 `acc-m09-staging-fixture-v1`, in the same transaction as its records. Later starts never overwrite
 or resurrect fixture state, so a suspended user, removed membership or changed entitlement stays as
-it is. Changing the fixture deliberately requires a new key. The project and worker are
-insert-if-missing, so a restart never resets the project's revision.
+it is. A new key only inserts records that are still missing; it never changes an existing user,
+membership or entitlement, so changing one of those needs an explicit, reviewed migration. The
+project and worker are insert-if-missing, so a restart never resets the project's revision.
+
+Configuration (secret, Origin, database path) is validated before the database is opened, so a bad
+setting never creates or provisions a file. Every successful bootstrap stores one session row, and
+durable mode keeps those rows (revoked and expired ones included) until session cleanup exists. That
+cleanup is an open M08 item, so host-level rate limits on `POST /staging/session` matter more here
+than in memory mode.
 
 WebSocket tickets remain process-local by design. A second worker on the same file accepts the
 first worker's sessions and state, but refuses its tickets. Keep `--workers 1`.
@@ -139,7 +146,7 @@ Other methods return 404.
 - **Rate limits (host requirement):** limit `POST /staging/session` (for example 10/minute per
   client IP) and concurrent WebSocket connections at the host or proxy. With a 32-byte random secret
   brute force is not practical, so this is not a code blocker, but each successful bootstrap creates
-  an in-memory session.
+  a session: in memory, or a durable row kept until session cleanup exists.
 - **Lifetime:** take the service down after the browser test; it is not a long-running environment.
 
 ## Safety

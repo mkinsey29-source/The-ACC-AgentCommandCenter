@@ -20,7 +20,8 @@ STAGING_ORIGIN_DEFAULT = 'https://acc-staging-console--memph1510.replit.app'
 STAGING_SECRET_HEADER = 'x-acc-staging-secret'
 STAGING_SESSION_SECONDS = 900
 STAGING_PROJECT_NAME = 'ACC Staging'
-# Bump the suffix only for a deliberate fixture change; an applied key is never re-applied.
+# An applied key is never re-applied. A new key only inserts records that are missing; it never
+# changes existing ones, so changing an existing record needs an explicit, reviewed migration.
 STAGING_FIXTURE_KEY = 'acc-m09-staging-fixture-v1'
 STAGING_PERMISSIONS = ('project.read', 'task.read', 'event.read', 'project.write',
                        'task.write', 'task.cancel', 'worker.control')
@@ -134,6 +135,10 @@ class StagingApplication:
             raise ValueError('staging bootstrap secret must contain at least 24 characters')
         if database is not None and not Path(database).is_absolute():
             raise ValueError('staging database must be an absolute file path')
+        # Validate all configuration before storage is opened, so bad settings never create or
+        # provision a database file.
+        origins = OriginPolicy(frozenset((origin,)))
+        verifier = StagingVerifier(bootstrap_secret)
         self.database = None if database is None else str(database)
         self._closers = []
         try:
@@ -153,13 +158,13 @@ class StagingApplication:
                 self.reads = SQLitePlatformReadRepository(self.state)
             _provision_staging_fixture(auth_repo)
             self.state.put_worker(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID, 'worker-1')
+            self.auth = AuthService(auth_repo, identity_verifiers=(verifier,),
+                                    default_ttl_seconds=STAGING_SESSION_SECONDS)
+            self.api = PlatformApi(self.auth, self.reads, self.state, self.state)
+            self.transport = HostedTransport(self.api, origins=origins)
         except BaseException:
             self.close()
             raise
-        self.auth = AuthService(auth_repo, identity_verifiers=(StagingVerifier(bootstrap_secret),),
-                                default_ttl_seconds=STAGING_SESSION_SECONDS)
-        self.api = PlatformApi(self.auth, self.reads, self.state, self.state)
-        self.transport = HostedTransport(self.api, origins=OriginPolicy(frozenset((origin,))))
 
     def close(self) -> None:
         """Close durable storage connections; a no-op for in-memory staging."""
