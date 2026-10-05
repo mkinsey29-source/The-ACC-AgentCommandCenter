@@ -314,6 +314,16 @@ class AuthSecurityReviewTests(unittest.TestCase):
                 'acct-2', snapshot.session.user_id, permissions=('project.read',)))
         with self.assertRaises(AuthorizationError):
             self.auth.authenticate(token)
+        # Another account's record or another user's record must fail with the same semantics
+        # as a missing one: wrong account is 403, wrong user is 401.
+        self.repo.auth_snapshot = lambda _digest: replace(
+            snapshot, account=self.repo.account('acct-2'))
+        with self.assertRaises(AuthorizationError):
+            self.auth.authenticate(token)
+        self.repo.auth_snapshot = lambda _digest: replace(
+            snapshot, user=UserState('someone-else'))
+        with self.assertRaises(AuthenticationError):
+            self.auth.authenticate(token)
         self.repo.auth_snapshot = original
 
     def test_invalid_ttl_is_a_request_error_not_an_auth_failure(self):

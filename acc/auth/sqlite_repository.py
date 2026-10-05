@@ -9,6 +9,7 @@ import json
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from .models import (
@@ -20,6 +21,43 @@ from .repository import AuthSnapshot
 
 def _json(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+_TABLES = ('m08_schema_meta', 'm08_users', 'm08_accounts', 'm08_identities', 'm08_memberships',
+           'm08_entitlements', 'm08_sessions')
+
+
+class AuthStateError(RuntimeError):
+    """Stored auth state could not be decoded into valid records.
+
+    Deliberately not a ``ValueError``: callers map ``ValueError`` to a client 400, but corrupt or
+    no-longer-valid stored state is a server fault and must surface as an opaque 500 (fail closed).
+    """
+
+
+@contextmanager
+def _decoding():
+    try:
+        yield
+    except (ValueError, TypeError, KeyError) as exc:
+        raise AuthStateError('Stored M08 auth state is invalid.') from exc
+
+
+def _finish(db: sqlite3.Connection, error: BaseException | None) -> None:
+    """Commit, or roll back while preserving the original error; never reuse a stuck connection."""
+    if error is None:
+        try:
+            db.execute('COMMIT')
+            return
+        except BaseException as commit_error:
+            error = commit_error
+    try:
+        if db.in_transaction:
+            db.execute('ROLLBACK')
+    except BaseException:
+        # Transaction state is now unknown: close so no later call runs inside it.
+        db.close()
+    raise error
 
 
 class SQLiteAuthRepository:
@@ -59,13 +97,26 @@ class SQLiteAuthRepository:
                     raise
                 time.sleep(0.01)
 
+    def _schema_is_current(self) -> bool:
+        tables = {row[0] for row in self._db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'm08_%'")}
+        if not set(_TABLES) <= tables:
+            return False
+        row = self._db.execute('SELECT version FROM m08_schema_meta WHERE singleton=1').fetchone()
+        if row is not None and row['version'] != 1:
+            raise RuntimeError('Unsupported M08 SQLite schema version.')
+        return row is not None
+
     def _create_schema(self) -> None:
-        # Serialize first-open races and keep schema metadata plus all tables atomic.
+        # A current database opens read-only, so a worker can start while another holds the writer
+        # lock. Otherwise serialize first-open races and keep metadata plus all tables atomic.
+        if self._schema_is_current():
+            return
         self._db.execute('BEGIN IMMEDIATE')
         try:
             self._db.execute('''CREATE TABLE IF NOT EXISTS m08_schema_meta (
                 singleton INTEGER PRIMARY KEY CHECK(singleton=1),
-                version INTEGER NOT NULL CHECK(version=1))''')
+                version INTEGER NOT NULL CHECK(version>=1))''')
             self._db.execute('INSERT OR IGNORE INTO m08_schema_meta VALUES (1, 1)')
             version = self._db.execute(
                 'SELECT version FROM m08_schema_meta WHERE singleton=1').fetchone()['version']
@@ -105,11 +156,9 @@ class SQLiteAuthRepository:
             )
             for statement in statements:
                 self._db.execute(statement)
-            self._db.execute('COMMIT')
-        except Exception:
-            if self._db.in_transaction:
-                self._db.execute('ROLLBACK')
-            raise
+        except BaseException as error:
+            _finish(self._db, error)
+        _finish(self._db, None)
 
     def close(self) -> None:
         with self._lock:
@@ -120,12 +169,10 @@ class SQLiteAuthRepository:
             self._db.execute('BEGIN IMMEDIATE')
             try:
                 result = callback()
-                self._db.execute('COMMIT')
-                return result
-            except Exception:
-                if self._db.in_transaction:
-                    self._db.execute('ROLLBACK')
-                raise
+            except BaseException as error:
+                _finish(self._db, error)
+            _finish(self._db, None)
+            return result
 
     def put_user(self, user: UserState) -> None:
         self._write(lambda: self._db.execute('''INSERT INTO m08_users VALUES (?,?,?)
@@ -229,6 +276,7 @@ class SQLiteAuthRepository:
     def auth_snapshot(self, token_digest: str) -> AuthSnapshot | None:
         with self._lock:
             row = self._select_session(token_digest)
+        with _decoding():
             session = self._session(row)
             if session is None:
                 return None
@@ -239,18 +287,21 @@ class SQLiteAuthRepository:
         with self._lock:
             row = self._db.execute('SELECT user_id,status,revision FROM m08_users WHERE user_id=?',
                                    (user_id,)).fetchone()
+        with _decoding():
             return None if row is None else UserState(row['user_id'], row['status'], row['revision'])
 
     def account(self, account_id: str) -> AccountState | None:
         with self._lock:
             row = self._db.execute('SELECT account_id,status,revision FROM m08_accounts WHERE account_id=?',
                                    (account_id,)).fetchone()
+        with _decoding():
             return None if row is None else AccountState(row['account_id'], row['status'], row['revision'])
 
     def membership(self, account_id: str, user_id: str) -> Membership | None:
         with self._lock:
             row = self._db.execute('''SELECT account_id,user_id,role,permissions_json
                 FROM m08_memberships WHERE account_id=? AND user_id=?''', (account_id, user_id)).fetchone()
+        with _decoding():
             return None if row is None else Membership(row['account_id'], row['user_id'], row['role'],
                                                         tuple(json.loads(row['permissions_json'])))
 
@@ -258,6 +309,7 @@ class SQLiteAuthRepository:
         with self._lock:
             row = self._db.execute('''SELECT account_id,features_json,limits_json,revision
                 FROM m08_entitlements WHERE account_id=?''', (account_id,)).fetchone()
+        with _decoding():
             return None if row is None else EntitlementSnapshot(
                 row['account_id'], tuple(json.loads(row['features_json'])),
                 json.loads(row['limits_json']), row['revision'])
@@ -267,6 +319,7 @@ class SQLiteAuthRepository:
             row = self._db.execute('''SELECT token_digest,session_id,account_id AS session_account_id,
                 user_id AS session_user_id,issued_at,expires_at,identity_provider,revoked
                 FROM m08_sessions WHERE token_digest=?''', (token_digest,)).fetchone()
+        with _decoding():
             return self._session(row)
 
     def save_session(self, token_digest: str, session: SessionRecord) -> None:

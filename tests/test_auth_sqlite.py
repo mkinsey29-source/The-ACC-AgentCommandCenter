@@ -5,9 +5,10 @@ import unittest
 from pathlib import Path
 
 from acc.auth import (
-    AccountState, AuthenticationError, AuthorizationError, AuthService, EntitlementSnapshot,
-    Membership, SQLiteAuthRepository, UserState, VerifiedIdentity,
+    AccountState, AuthenticationError, AuthorizationError, AuthService, AuthStateError,
+    EntitlementSnapshot, Membership, SQLiteAuthRepository, UserState, VerifiedIdentity,
 )
+from acc.platform import PlatformApi
 
 
 class Clock:
@@ -90,6 +91,75 @@ class SQLiteAuthRepositoryTests(unittest.TestCase):
         self.repo.remove_membership('acct-1', 'user-1')
         with self.assertRaisesRegex(AuthorizationError, 'membership is no longer active'):
             self.auth.authenticate(token)
+
+    def test_invalid_stored_auth_state_is_an_opaque_500_not_a_client_400(self):
+        class Reads:
+            def projects(self, account_id):
+                return []
+
+        token = self.auth._issue_session(self.identity, 'acct-1')
+        api = PlatformApi(self.auth, Reads(), None)
+        self.assertEqual(PlatformApi.handle(
+            api.list_projects, 'Bearer ' + token, 'acct-1').status, 200)
+        for column, value in (('permissions_json', '{not json'), ('role', 'superadmin')):
+            with self.subTest(column=column), sqlite3.connect(self.path) as db:
+                original = db.execute(f'SELECT {column} FROM m08_memberships').fetchone()[0]
+                db.execute(f'UPDATE m08_memberships SET {column}=?', (value,))
+                db.commit()
+                with self.assertRaises(AuthStateError):
+                    self.auth.authenticate(token)
+                response = PlatformApi.handle(api.list_projects, 'Bearer ' + token, 'acct-1')
+                self.assertEqual((response.status, response.body['error']['code']),
+                                 (500, 'internal_error'))
+                db.execute(f'UPDATE m08_memberships SET {column}=?', (original,))
+                db.commit()
+
+    def test_reopening_a_current_database_does_not_need_the_writer_lock(self):
+        self.repo.close()
+        blocker = sqlite3.connect(self.path, isolation_level=None)
+        blocker.execute('BEGIN IMMEDIATE')
+        try:
+            self.repo = SQLiteAuthRepository(self.path, timeout=0.2)
+        finally:
+            blocker.execute('ROLLBACK')
+            blocker.close()
+        self.assertEqual(self.repo.resolve_identity(self.identity), 'user-1')
+
+    def test_schema_version_can_advance_and_an_unknown_version_is_refused(self):
+        self.repo.close()
+        with sqlite3.connect(self.path) as db:
+            db.execute('UPDATE m08_schema_meta SET version=2')
+        with self.assertRaisesRegex(RuntimeError, 'Unsupported M08 SQLite schema version'):
+            SQLiteAuthRepository(self.path)
+        with sqlite3.connect(self.path) as db:
+            db.execute('UPDATE m08_schema_meta SET version=1')
+        self.repo = SQLiteAuthRepository(self.path)
+
+    def test_failed_rollback_closes_connection_and_preserves_original_error(self):
+        class BrokenEnd:
+            """Connection proxy whose COMMIT and ROLLBACK both fail, as on an I/O error."""
+            def __init__(self, db):
+                self.db, self.closed = db, False
+
+            def execute(self, sql, *args):
+                if sql in ('COMMIT', 'ROLLBACK'):
+                    raise sqlite3.OperationalError(sql.lower() + ' failure')
+                return self.db.execute(sql, *args)
+
+            def close(self):
+                self.closed = True
+                self.db.close()
+
+            def __getattr__(self, name):
+                return getattr(self.db, name)
+
+        broken = BrokenEnd(self.repo._db)
+        self.repo._db = broken
+        with self.assertRaisesRegex(sqlite3.OperationalError, 'commit failure'):
+            self.repo.put_user(UserState('user-2'))
+        self.assertTrue(broken.closed)
+        self.repo = SQLiteAuthRepository(self.path)  # a fresh connection sees no partial write
+        self.assertIsNone(self.repo.user('user-2'))
 
 
 if __name__ == '__main__':
