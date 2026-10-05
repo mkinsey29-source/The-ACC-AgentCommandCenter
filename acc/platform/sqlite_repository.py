@@ -16,16 +16,38 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..auth.models import _bounded_id
-from .commands import (
-    CommandConflict, CommandRequest, CommandResult, CommandStateConflict,
-    CommandTargetNotFound, IdempotencyConflict, QuotaExceeded,
-)
+from . import command_rules as rules
+from .commands import CommandConflict, CommandRequest, CommandResult, CommandTargetNotFound
 from .events import EventBatch, PlatformEvent
 from .repository import AccountProjectView, ProjectSnapshot
 
 
 def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+class _SQLiteProjectState:
+    """``CommandState`` read from the open command transaction."""
+
+    def __init__(self, db, account_id, project_id, mode):
+        self._db, self._account_id, self._project_id, self._mode = db, account_id, project_id, mode
+
+    def mode(self):
+        return self._mode
+
+    def task(self, task_id):
+        row = self._db.execute('''SELECT status, reserved_json FROM m09_tasks
+            WHERE account_id=? AND project_id=? AND task_id=?''',
+            (self._account_id, self._project_id, task_id)).fetchone()
+        if row is None:
+            return None
+        return {'status': row['status'], 'reserved': json.loads(row['reserved_json'])}
+
+    def worker_status(self, worker_id):
+        row = self._db.execute('''SELECT status FROM m09_workers
+            WHERE account_id=? AND project_id=? AND worker_id=?''',
+            (self._account_id, self._project_id, worker_id)).fetchone()
+        return None if row is None else row['status']
 
 
 class SQLiteCommandRepository:
@@ -251,129 +273,90 @@ class SQLiteCommandRepository:
                 (account_id, name, used))
 
     def execute(self, command: CommandRequest, *, limits: Mapping[str, int | None]) -> CommandResult:
+        account_id, project_id = command.account_id, command.project_id
         with self._lock, self._transaction():
             existing = self._db.execute('''SELECT fingerprint, revision, result_json
                 FROM m09_command_results WHERE account_id=? AND operation_id=?''',
-                (command.account_id, command.operation_id)).fetchone()
+                (account_id, command.operation_id)).fetchone()
             if existing is not None:
-                if existing['fingerprint'] != command.fingerprint:
-                    raise IdempotencyConflict('Operation ID was already used for another command.')
-                return CommandResult(command.operation_id, 'applied', existing['revision'],
-                                     json.loads(existing['result_json']), replayed=True)
+                return rules.replay(command, existing['fingerprint'], existing['revision'],
+                                    json.loads(existing['result_json']))
 
             project = self._db.execute('''SELECT revision, mode, event_seq FROM m09_projects
-                WHERE account_id=? AND project_id=?''',
-                (command.account_id, command.project_id)).fetchone()
-            if project is None:
-                raise CommandTargetNotFound('project')
-            if project['revision'] != command.expected_revision:
-                raise CommandConflict(project['revision'])
+                WHERE account_id=? AND project_id=?''', (account_id, project_id)).fetchone()
+            change = rules.decide(
+                command,
+                revision=None if project is None else project['revision'],
+                state=_SQLiteProjectState(self._db, account_id, project_id,
+                                          None if project is None else project['mode']),
+                quota_used=lambda name: self._quota_used(account_id, name),
+                limits=limits)
 
-            reservations = {q.name: q.amount for q in command.quotas}
-            for name, amount in reservations.items():
-                allowed = limits.get(name)
-                row = self._db.execute('''SELECT used FROM m09_quota_usage
-                    WHERE account_id=? AND quota_name=?''',
-                    (command.account_id, name)).fetchone()
-                used = row['used'] if row else 0
-                if type(allowed) is not int or used + amount > allowed:
-                    raise QuotaExceeded('Quota unavailable.')
-
-            outcome, released = self._apply(command, project, reservations)
-            for name, amount in reservations.items():
+            if change.task is not None:
+                if change.task.created:
+                    self._db.execute('''INSERT INTO m09_tasks VALUES (?, ?, ?, ?, ?)''',
+                        (account_id, project_id, change.task.task_id, change.task.status,
+                         _json(dict(change.task.reserved))))
+                else:
+                    self._db.execute('''UPDATE m09_tasks SET status=?, reserved_json=?
+                        WHERE account_id=? AND project_id=? AND task_id=?''',
+                        (change.task.status, _json(dict(change.task.reserved)),
+                         account_id, project_id, change.task.task_id))
+            if change.worker is not None:
+                self._db.execute('''UPDATE m09_workers SET status=?
+                    WHERE account_id=? AND project_id=? AND worker_id=?''',
+                    (change.worker.status, account_id, project_id, change.worker.worker_id))
+            for name, amount in change.reserve.items():
                 self._db.execute('''INSERT INTO m09_quota_usage VALUES (?, ?, ?)
                     ON CONFLICT(account_id, quota_name) DO UPDATE
                     SET used=m09_quota_usage.used + excluded.used''',
-                    (command.account_id, name, amount))
-            for name, amount in released.items():
-                self._db.execute('''UPDATE m09_quota_usage SET used=MAX(0, used-?)
+                    (account_id, name, amount))
+            for name, amount in change.release.items():
+                self._db.execute('''UPDATE m09_quota_usage SET used=?
                     WHERE account_id=? AND quota_name=?''',
-                    (amount, command.account_id, name))
+                    (rules.released_usage(self._quota_used(account_id, name), amount),
+                     account_id, name))
 
             now = self.clock()
             # Use a time-based high-water mark as well as the stored counter. After a backup
             # restore, the counter may move backwards; a forward-moving wall clock keeps newly
             # appended events beyond cursors observed before the restore. Gaps are valid in M09.
             seq = max(project['event_seq'] + 1, int(now * 1_000_000))
-            new_revision = project['revision'] + 1
             changed = self._db.execute('''UPDATE m09_projects
                 SET revision=?, mode=?, event_seq=?
                 WHERE account_id=? AND project_id=? AND revision=?''',
-                (new_revision, outcome.pop('_mode', project['mode']), seq,
-                 command.account_id, command.project_id, project['revision']))
+                (change.revision, change.mode or project['mode'], seq,
+                 account_id, project_id, project['revision']))
             if changed.rowcount != 1:
                 # BEGIN IMMEDIATE should make this unreachable, but keep the contract explicit.
                 row = self._db.execute('''SELECT revision FROM m09_projects
-                    WHERE account_id=? AND project_id=?''',
-                    (command.account_id, command.project_id)).fetchone()
+                    WHERE account_id=? AND project_id=?''', (account_id, project_id)).fetchone()
                 raise CommandConflict(row['revision'] if row else 0)
 
-            result = CommandResult(command.operation_id, 'applied', new_revision, outcome)
+            result = CommandResult(command.operation_id, 'applied', change.revision, change.result)
             self._db.execute('''INSERT INTO m09_command_results
                 (account_id, operation_id, fingerprint, revision, result_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)''',
-                (command.account_id, command.operation_id, command.fingerprint,
-                 new_revision, _json(dict(outcome)), now))
+                (account_id, command.operation_id, command.fingerprint,
+                 change.revision, _json(change.result), now))
+            audit = rules.audit_record(command, change.revision, now)
             self._db.execute('''INSERT INTO m09_audit
                 (operation_id, account_id, project_id, actor_user_id, kind, revision, at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                (command.operation_id, command.account_id, command.project_id,
-                 command.actor_user_id, command.kind, new_revision, now))
-            event_data = {
-                'operation_id': command.operation_id, 'kind': command.kind,
-                'actor_user_id': command.actor_user_id, 'revision': new_revision,
-                'result': dict(outcome),
-            }
-            event = PlatformEvent(seq, command.account_id, command.project_id,
-                                  'command.applied', now, event_data)
+                VALUES (:operation_id, :account_id, :project_id, :actor_user_id, :kind,
+                        :revision, :at)''', audit)
+            # Building the event validates the sequence and clock value before it is stored.
+            event = PlatformEvent(seq, account_id, project_id, 'command.applied', now,
+                                  rules.event_data(command, change.revision, change.result))
             self._db.execute('''INSERT INTO m09_events
                 (account_id, project_id, seq, kind, at, data_json)
                 VALUES (?, ?, ?, 'command.applied', ?, ?)''',
                 (event.account_id, event.project_id, event.seq, event.at, _json(event.data)))
             return result
 
-    def _apply(self, command, project, reservations):
-        kind, payload = command.kind, command.payload
-        if kind == 'project.mode':
-            if project['mode'] == payload['mode']:
-                raise CommandStateConflict('project is already in that mode')
-            return {'mode': payload['mode'], '_mode': payload['mode']}, {}
-        if kind == 'task.create':
-            task_id = payload['task_id']
-            if self._db.execute('''SELECT 1 FROM m09_tasks
-                WHERE account_id=? AND project_id=? AND task_id=?''',
-                (command.account_id, command.project_id, task_id)).fetchone():
-                raise CommandStateConflict('task already exists')
-            self._db.execute('''INSERT INTO m09_tasks VALUES (?, ?, ?, 'queued', ?)''',
-                (command.account_id, command.project_id, task_id, _json(reservations)))
-            return {'task_id': task_id, 'status': 'queued'}, {}
-        if kind == 'task.cancel':
-            task = self._db.execute('''SELECT status, reserved_json FROM m09_tasks
-                WHERE account_id=? AND project_id=? AND task_id=?''',
-                (command.account_id, command.project_id, payload['task_id'])).fetchone()
-            if task is None:
-                raise CommandTargetNotFound('task')
-            if task['status'] == 'cancelled':
-                raise CommandStateConflict('task is already cancelled')
-            self._db.execute('''UPDATE m09_tasks SET status='cancelled', reserved_json='{}'
-                WHERE account_id=? AND project_id=? AND task_id=?''',
-                (command.account_id, command.project_id, payload['task_id']))
-            return {'task_id': payload['task_id'], 'status': 'cancelled'}, json.loads(task['reserved_json'])
-        if kind in ('worker.pause', 'worker.resume'):
-            worker_id = payload['worker_id']
-            worker = self._db.execute('''SELECT status FROM m09_workers
-                WHERE account_id=? AND project_id=? AND worker_id=?''',
-                (command.account_id, command.project_id, worker_id)).fetchone()
-            if worker is None:
-                raise CommandTargetNotFound('worker')
-            target = 'paused' if kind == 'worker.pause' else 'active'
-            if worker['status'] == target:
-                raise CommandStateConflict('worker is already ' + target)
-            self._db.execute('''UPDATE m09_workers SET status=?
-                WHERE account_id=? AND project_id=? AND worker_id=?''',
-                (target, command.account_id, command.project_id, worker_id))
-            return {'worker_id': worker_id, 'status': target}, {}
-        raise CommandStateConflict('unsupported command')
+    def _quota_used(self, account_id: str, name: str) -> int:
+        row = self._db.execute('''SELECT used FROM m09_quota_usage
+            WHERE account_id=? AND quota_name=?''', (account_id, name)).fetchone()
+        return row['used'] if row else 0
 
     def project_revision(self, account_id: str, project_id: str) -> int:
         with self._lock:

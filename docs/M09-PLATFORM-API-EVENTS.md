@@ -268,7 +268,12 @@ sequence), not a second event model.
 
 ### Durable repository requirements
 
-`InMemoryCommandRepository` is reference semantics. A SQL implementation of
+The business rules live once, in `acc/platform/command_rules.py`: `replay` (idempotent retry),
+`decide` (target, revision, quota ceiling and the task/worker/project transition), `audit_record`
+and `event_data`. Every store calls them and only reads its state and writes the returned
+`Transition`; a store must not re-implement a rule. `InMemoryCommandRepository` and
+`SQLiteCommandRepository` must give identical results on the same commands, which
+`tests/test_platform_command_parity.py` checks. A SQL implementation of
 `PlatformCommandRepository.execute` must run steps 1-6 of its docstring in one serializable (or
 equivalently locked) transaction and needs at least:
 
