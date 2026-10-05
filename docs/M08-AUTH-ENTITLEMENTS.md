@@ -152,8 +152,11 @@ the real checkout, including 13 security regressions.
    accounts, stable provider/subject links, memberships, entitlement snapshots, and session digests.
    Its `auth_snapshot` query reads session + user + account + membership + entitlements as one
    SQLite statement, and `save_session` is insert-only. `AuthService.authenticate` consumes exactly
-   one snapshot per request. The staging service still uses the in-memory repository; shared
-   deployment wiring, hosted integration tests, and the database operations policy remain open.
+   one snapshot per request. The staging composition can now run on it (`ACC_STAGING_DATABASE`;
+   see `M09-STAGING-RUNTIME.md`). Startup fixtures go through `provision_once`, which applies a
+   keyed fixture once per database and never overwrites or resurrects later state. Shared
+   production deployment wiring, hosted integration against a deployed service, and the database
+   operations policy remain open.
 2. Add at least one production identity-provider verifier and account-linking/provisioning flow.
 3. Define session cleanup/rotation, **revoke-all-sessions for a user or account** (incident response;
    today only per-token revocation exists, though status checks still block suspended principals), and

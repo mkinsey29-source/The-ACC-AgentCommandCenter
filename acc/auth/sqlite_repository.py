@@ -24,7 +24,7 @@ def _json(value) -> str:
 
 
 _TABLES = ('m08_schema_meta', 'm08_users', 'm08_accounts', 'm08_identities', 'm08_memberships',
-           'm08_entitlements', 'm08_sessions')
+           'm08_entitlements', 'm08_sessions', 'm08_provisioning')
 
 
 class AuthStateError(RuntimeError):
@@ -153,6 +153,10 @@ class SQLiteAuthRepository:
                         CHECK(revoked IN (0,1)),
                     FOREIGN KEY(account_id) REFERENCES m08_accounts(account_id),
                     FOREIGN KEY(user_id) REFERENCES m08_users(user_id))''',
+                # Additive within schema version 1: databases created before it gain the table on
+                # their next open through the locked path above.
+                '''CREATE TABLE IF NOT EXISTS m08_provisioning (
+                    key TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)''',
             )
             for statement in statements:
                 self._db.execute(statement)
@@ -212,6 +216,50 @@ class SQLiteAuthRepository:
             limits_json=excluded.limits_json,revision=excluded.revision''',
             (entitlements.account_id, _json(entitlements.features),
              _json(dict(entitlements.limits)), entitlements.revision)))
+
+    def provision_once(self, key: str, *, users=(), identities=(), accounts=(), memberships=(),
+                       entitlements=()) -> bool:
+        """Apply a named startup fixture at most once per database; return whether it ran.
+
+        Startup provisioning must never overwrite or resurrect durable state: once ``key`` is
+        recorded, a restart leaves later changes (a suspended user, a removed membership, revised
+        entitlements) exactly as they are. Records that already exist are never overwritten, and
+        the whole fixture plus its key commit in one transaction, so concurrent first starts of
+        several workers apply it once.
+        """
+        key = _bounded_id(key, 'provisioning key')
+
+        def write():
+            if self._db.execute('SELECT 1 FROM m08_provisioning WHERE key=?', (key,)).fetchone():
+                return False
+            for user in users:
+                self._db.execute('INSERT OR IGNORE INTO m08_users VALUES (?,?,?)',
+                                 (user.user_id, user.status, user.revision))
+            for account in accounts:
+                self._db.execute('INSERT OR IGNORE INTO m08_accounts VALUES (?,?,?)',
+                                 (account.account_id, account.status, account.revision))
+            for identity, user_id in identities:
+                user_id = _bounded_id(user_id, 'user_id')
+                current = self._db.execute(
+                    'SELECT user_id FROM m08_identities WHERE provider=? AND subject=?',
+                    (identity.provider, identity.subject)).fetchone()
+                if current is not None and current['user_id'] != user_id:
+                    raise ValueError('Identity is already bound to another ACC user.')
+                if self._db.execute('SELECT 1 FROM m08_users WHERE user_id=?', (user_id,)).fetchone() is None:
+                    raise ValueError('ACC user must exist before an identity can be bound.')
+                self._db.execute('INSERT OR IGNORE INTO m08_identities VALUES (?,?,?)',
+                                 (identity.provider, identity.subject, user_id))
+            for membership in memberships:
+                self._db.execute('INSERT OR IGNORE INTO m08_memberships VALUES (?,?,?,?)',
+                                 (membership.account_id, membership.user_id, membership.role,
+                                  _json(membership.permissions)))
+            for snapshot in entitlements:
+                self._db.execute('INSERT OR IGNORE INTO m08_entitlements VALUES (?,?,?,?)',
+                                 (snapshot.account_id, _json(snapshot.features),
+                                  _json(dict(snapshot.limits)), snapshot.revision))
+            self._db.execute('INSERT INTO m08_provisioning VALUES (?,?)', (key, int(time.time())))
+            return True
+        return self._write(write)
 
     def remove_membership(self, account_id: str, user_id: str) -> bool:
         account_id = _bounded_id(account_id, 'account_id')

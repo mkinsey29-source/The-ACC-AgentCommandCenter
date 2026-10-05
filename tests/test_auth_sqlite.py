@@ -189,5 +189,79 @@ class SQLiteAuthRepositoryTests(unittest.TestCase):
         self.repo = SQLiteAuthRepository(Path(self.temp.name) / 'fresh.sqlite3')
 
 
+    def test_database_from_before_the_provisioning_table_gains_it_on_open(self):
+        token = self.auth._issue_session(self.identity, 'acct-1')
+        self.repo.close()
+        with sqlite3.connect(self.path) as db:
+            db.execute('DROP TABLE m08_provisioning')
+        self.repo = SQLiteAuthRepository(self.path)
+        self.auth = AuthService(self.repo, clock=Clock())
+        self.assertEqual(self.auth.authenticate(token).session.user_id, 'user-1')
+        with sqlite3.connect(self.path) as db:
+            self.assertIsNotNone(db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='m08_provisioning'").fetchone())
+            self.assertEqual(db.execute('SELECT version FROM m08_schema_meta').fetchone()[0], 1)
+
+
+class ProvisionOnceTests(unittest.TestCase):
+    """Startup fixtures apply once per store and never overwrite or resurrect durable state."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def repositories(self):
+        from acc.auth import InMemoryAuthRepository
+        sqlite_repo = SQLiteAuthRepository(Path(self.temp.name) / 'auth.sqlite3')
+        self.addCleanup(sqlite_repo.close)
+        return (('memory', InMemoryAuthRepository()), ('sqlite', sqlite_repo))
+
+    @staticmethod
+    def fixture(repo, key='fixture-v1', subject='subject-1'):
+        return repo.provision_once(
+            key,
+            users=(UserState('user-1'),),
+            accounts=(AccountState('acct-1'),),
+            identities=((VerifiedIdentity('openai', subject), 'user-1'),),
+            memberships=(Membership('acct-1', 'user-1', 'owner', ('project.read',)),),
+            entitlements=(EntitlementSnapshot('acct-1', ('acc.web',), {'tasks.active': 5}),),
+        )
+
+    def test_applies_once_then_leaves_later_changes_alone(self):
+        for name, repo in self.repositories():
+            with self.subTest(repository=name):
+                self.assertTrue(self.fixture(repo))
+                self.assertEqual(repo.resolve_identity(VerifiedIdentity('openai', 'subject-1')),
+                                 'user-1')
+                repo.put_user(UserState('user-1', status='suspended'))
+                self.assertTrue(repo.remove_membership('acct-1', 'user-1'))
+                self.assertFalse(self.fixture(repo))
+                self.assertEqual(repo.user('user-1').status, 'suspended')
+                self.assertIsNone(repo.membership('acct-1', 'user-1'))
+
+    def test_never_overwrites_records_that_already_exist(self):
+        for name, repo in self.repositories():
+            with self.subTest(repository=name):
+                repo.put_user(UserState('user-1', status='suspended', revision=4))
+                repo.put_account(AccountState('acct-1'))
+                repo.put_entitlements(EntitlementSnapshot('acct-1', (), {}, revision=9))
+                self.assertTrue(self.fixture(repo))
+                self.assertEqual((repo.user('user-1').status, repo.user('user-1').revision),
+                                 ('suspended', 4))
+                self.assertEqual(repo.entitlements('acct-1').revision, 9)
+
+    def test_identity_conflict_applies_nothing_and_records_no_key(self):
+        for name, repo in self.repositories():
+            with self.subTest(repository=name):
+                repo.put_user(UserState('user-9'))
+                repo.bind_identity(VerifiedIdentity('openai', 'taken'), 'user-9')
+                with self.assertRaisesRegex(ValueError, 'already bound'):
+                    self.fixture(repo, subject='taken')
+                self.assertIsNone(repo.account('acct-1'))
+                self.assertTrue(self.fixture(repo, subject='free'))  # the key was not consumed
+
+
 if __name__ == '__main__':
     unittest.main()

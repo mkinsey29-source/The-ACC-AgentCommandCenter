@@ -12,6 +12,8 @@ The host supplies:
 - `ACC_STAGING_BOOTSTRAP_SECRET`: required random secret, at least 24 characters;
 - `ACC_STAGING_ORIGIN`: optional exact HTTPS browser Origin. Default:
   `https://acc-staging-console--memph1510.replit.app`.
+- `ACC_STAGING_DATABASE`: optional absolute path to a SQLite file. Unset means in-memory staging.
+  An empty, relative or `:memory:` value stops the process at import.
 
 A generic ASGI server can run the entrypoint. For example, a host may install Uvicorn and point it
 at `staging_app:app`; Uvicorn is intentionally not made a core ACC dependency.
@@ -25,7 +27,28 @@ at `staging_app:app`; Uvicorn is intentionally not made a core ACC dependency.
 - `tasks.active` quota: 25
 - session lifetime: 15 minutes
 
-Everything is process-memory only and disappears when the staging service restarts.
+Without `ACC_STAGING_DATABASE`, everything is process memory and disappears when the service
+restarts.
+
+### Durable mode
+
+With `ACC_STAGING_DATABASE`, one SQLite file holds:
+- M08 users, accounts, identity links, memberships, entitlements and session digests
+  (`SQLiteAuthRepository`);
+- M09 commands, events, quota usage and project reads (`SQLiteCommandRepository` and
+  `SQLitePlatformReadRepository`).
+
+Sessions, revocations, project state and event cursors survive restarts. Bearer plaintext is never
+stored, only SHA-256 digests.
+
+The fixture above is applied **once per database** under the provisioning key
+`acc-m09-staging-fixture-v1`, in the same transaction as its records. Later starts never overwrite
+or resurrect fixture state, so a suspended user, removed membership or changed entitlement stays as
+it is. Changing the fixture deliberately requires a new key. The project and worker are
+insert-if-missing, so a restart never resets the project's revision.
+
+WebSocket tickets remain process-local by design. A second worker on the same file accepts the
+first worker's sessions and state, but refuses its tickets. Keep `--workers 1`.
 
 ## Staging session bootstrap
 
@@ -96,11 +119,20 @@ Other methods return 404.
 - **Environment:** `ACC_STAGING_BOOTSTRAP_SECRET` (required, 24+ characters; generate as above).
   `ACC_STAGING_ORIGIN` is optional and defaults to the console Origin below. Missing or malformed
   values stop the process at import, before it serves anything.
-- **Single process:** run exactly one worker process. Sessions, WebSocket tickets, commands and
-  events all live in that process's memory, so a second worker would reject the first worker's
-  sessions and tickets. Restarting resets all staging state; that is intended.
-- **Blocking calls:** M09 API calls are synchronous. For this small in-memory test that is
-  acceptable; the production runtime must move them off the event loop.
+- **Single process:** run exactly one worker process.
+  - In-memory mode: sessions, WebSocket tickets, commands and events all live in that process, so a
+    second worker would reject the first worker's sessions and tickets, and restarting resets all
+    staging state (intended).
+  - Durable mode: state and sessions are shared through the SQLite file, but tickets are still
+    process-local.
+- **Durable storage (optional):** `ACC_STAGING_DATABASE` must name a file on persistent local disk
+  (not a network share), owned by the service account and outside any web root. Back it up as a
+  SQLite file, using the online backup API or a copy while stopped, never a raw copy of a live WAL
+  database. Durable mode is wiring, not a production deployment: no deployment is authorized for
+  storage-only work.
+- **Blocking calls:** M09 API calls are synchronous, and in durable mode they include SQLite
+  `synchronous=FULL` commits on the event loop. That is acceptable for this single-tester staging
+  service; the production runtime must move them off the event loop.
 - **TLS:** terminate HTTPS/WSS at the host. The console must use `https://` and `wss://`.
 - **Published console Origin:** `https://acc-staging-console--memph1510.replit.app` (exact).
 - **Fixture:** `staging-account` / `staging-project` / `staging-user`, `worker-1`, `tasks.active` 25.
@@ -113,5 +145,6 @@ Other methods return 404.
 ## Safety
 
 This module must remain staging-only. It does not weaken M08 login or add a production bypass.
-Production still needs durable repositories, real identity provisioning, billing-backed
-entitlements, rate limits and deployment infrastructure.
+Durable SQLite repositories are now wired as an option (above). Production still needs real
+identity provisioning, server-side WSS session references, nonblocking execution, billing-backed
+entitlements, rate limits, shared database/deployment topology and backup/restore policy.

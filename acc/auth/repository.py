@@ -61,6 +61,7 @@ class InMemoryAuthRepository:
         self._memberships: dict[tuple[str, str], Membership] = {}
         self._entitlements: dict[str, EntitlementSnapshot] = {}
         self._sessions: dict[str, SessionRecord] = {}
+        self._provisioned: set[str] = set()
 
     def put_user(self, user: UserState) -> None:
         with self._lock:
@@ -151,6 +152,32 @@ class InMemoryAuthRepository:
                 identity_provider=session.identity_provider,
                 revoked=True,
             )
+            return True
+
+    def provision_once(self, key: str, *, users=(), identities=(), accounts=(), memberships=(),
+                       entitlements=()) -> bool:
+        """Apply a named fixture once; later calls change nothing. See ``SQLiteAuthRepository``."""
+        key = _bounded_id(key, 'provisioning key')
+        with self._lock:
+            if key in self._provisioned:
+                return False
+            for identity, user_id in identities:
+                current = self._identities.get((identity.provider, identity.subject))
+                if current is not None and current != user_id:
+                    raise ValueError('Identity is already bound to another ACC user.')
+            for user in users:
+                self._users.setdefault(user.user_id, user)
+            for account in accounts:
+                self._accounts.setdefault(account.account_id, account)
+            for identity, user_id in identities:
+                if user_id not in self._users:
+                    raise ValueError('ACC user must exist before an identity can be bound.')
+                self._identities.setdefault((identity.provider, identity.subject), user_id)
+            for membership in memberships:
+                self._memberships.setdefault((membership.account_id, membership.user_id), membership)
+            for snapshot in entitlements:
+                self._entitlements.setdefault(snapshot.account_id, snapshot)
+            self._provisioned.add(key)
             return True
 
     def session_digests(self) -> tuple[str, ...]:
