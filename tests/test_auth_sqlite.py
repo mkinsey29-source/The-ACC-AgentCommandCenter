@@ -161,6 +161,33 @@ class SQLiteAuthRepositoryTests(unittest.TestCase):
         self.repo = SQLiteAuthRepository(self.path)  # a fresh connection sees no partial write
         self.assertIsNone(self.repo.user('user-2'))
 
+    def test_commit_failure_rolls_back_and_the_connection_stays_usable(self):
+        token = self.auth._issue_session(self.identity, 'acct-1')
+        db = self.repo._db
+        db.set_authorizer(lambda action, arg1, *_: sqlite3.SQLITE_DENY
+                          if action == sqlite3.SQLITE_TRANSACTION and arg1 == 'COMMIT'
+                          else sqlite3.SQLITE_OK)
+        with self.assertRaises(sqlite3.DatabaseError):
+            self.repo.put_user(UserState('user-2'))
+        db.set_authorizer(None)
+        self.assertFalse(db.in_transaction)
+        self.assertIsNone(self.repo.user('user-2'))
+        self.repo.put_user(UserState('user-3'))
+        self.assertEqual(self.auth.authenticate(token).session.user_id, 'user-1')
+
+    def test_newer_schema_is_refused_without_recreating_missing_tables(self):
+        self.repo.close()
+        with sqlite3.connect(self.path) as db:
+            db.execute('PRAGMA foreign_keys=OFF')
+            db.execute('DROP TABLE m08_sessions')
+            db.execute('UPDATE m08_schema_meta SET version=2')
+        with self.assertRaisesRegex(RuntimeError, 'Unsupported M08 SQLite schema version'):
+            SQLiteAuthRepository(self.path)
+        with sqlite3.connect(self.path) as db:
+            self.assertIsNone(db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='m08_sessions'").fetchone())
+        self.repo = SQLiteAuthRepository(Path(self.temp.name) / 'fresh.sqlite3')
+
 
 if __name__ == '__main__':
     unittest.main()
