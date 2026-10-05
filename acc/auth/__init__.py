@@ -14,7 +14,8 @@ from .models import (
     VerifiedIdentity,
 )
 from .identity import IdentityVerificationError, IdentityVerifier
-from .repository import AuthRepository, InMemoryAuthRepository
+from .repository import AuthRepository, AuthSnapshot, InMemoryAuthRepository
+from .sqlite_repository import SQLiteAuthRepository
 from .service import AuthenticationError, AuthorizationError, AuthError, AuthService
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     'AuthorizationError',
     'AuthError',
     'AuthRepository',
+    'AuthSnapshot',
     'AuthService',
     'EntitlementSnapshot',
     'IdentityVerificationError',
@@ -32,6 +34,7 @@ __all__ = [
     'InMemoryAuthRepository',
     'Membership',
     'SessionRecord',
+    'SQLiteAuthRepository',
     'UserState',
     'VerifiedIdentity',
 ]

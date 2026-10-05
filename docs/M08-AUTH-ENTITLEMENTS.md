@@ -138,6 +138,8 @@ Focused M08 verification currently covers:
 - identity binding conflicts;
 - identity-verifier success/rejection;
 - M02 account/credential authority invariants.
+- SQLite restart persistence, digest-only storage, insert-only session creation, durable revocation,
+  stable identity binding, and one-snapshot authentication.
 
 Independent review (2026-09-30) found that the committed package did not import:
 `@runtime_checkable` had been applied to the exception class. The earlier 13/13 result came from a
@@ -146,9 +148,12 @@ the real checkout, including 13 security regressions.
 
 ## Remaining work before M08 is production-complete
 
-1. Add a durable hosted `AuthRepository` adapter with transactional account/membership/session state.
-   Prefer one snapshot read per request (session + user + account + membership + entitlements in one
-   transaction) over five separate reads, and implement `save_session` as insert-only.
+1. **Adapter implemented, production wiring pending.** `SQLiteAuthRepository` durably stores users,
+   accounts, stable provider/subject links, memberships, entitlement snapshots, and session digests.
+   Its `auth_snapshot` query reads session + user + account + membership + entitlements as one
+   SQLite statement, and `save_session` is insert-only. `AuthService.authenticate` consumes exactly
+   one snapshot per request. The staging service still uses the in-memory repository; shared
+   deployment wiring, hosted integration tests, and the database operations policy remain open.
 2. Add at least one production identity-provider verifier and account-linking/provisioning flow.
 3. Define session cleanup/rotation, **revoke-all-sessions for a user or account** (incident response;
    today only per-token revocation exists, though status checks still block suspended principals), and
