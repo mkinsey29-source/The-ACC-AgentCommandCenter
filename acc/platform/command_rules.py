@@ -78,7 +78,7 @@ def decide(command: CommandRequest, *, revision: int | None, state: CommandState
     reserve = {q.name: q.amount for q in command.quotas}
     for name, amount in reserve.items():
         allowed = limits.get(name)
-        if allowed is not None and quota_used(name) + amount > allowed:
+        if type(allowed) is not int or quota_used(name) + amount > allowed:
             raise QuotaExceeded('Quota unavailable.')
 
     payload, kind, new_revision = command.payload, command.kind, revision + 1
