@@ -165,12 +165,15 @@ class InMemoryAuthRepository:
             # including the references SQLite enforces with foreign keys.
             user_ids = set(self._users) | {user.user_id for user in users}
             account_ids = set(self._accounts) | {account.account_id for account in accounts}
+            planned_identities = dict(self._identities)
             for identity, user_id in identities:
-                current = self._identities.get((identity.provider, identity.subject))
+                identity_key = (identity.provider, identity.subject)
+                current = planned_identities.get(identity_key)
                 if current is not None and current != user_id:
                     raise ValueError('Identity is already bound to another ACC user.')
                 if user_id not in user_ids:
                     raise ValueError('ACC user must exist before an identity can be bound.')
+                planned_identities[identity_key] = user_id
             for membership in memberships:
                 if membership.account_id not in account_ids or membership.user_id not in user_ids:
                     raise ValueError('Membership references a missing account or user.')
