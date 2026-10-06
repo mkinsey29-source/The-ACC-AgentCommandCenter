@@ -68,3 +68,31 @@ class StagingApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.body['project']['revision'],1)
 
 if __name__=='__main__': unittest.main()
+
+
+class StagingSnapshotTests(unittest.TestCase):
+    def test_project_snapshot_is_one_state_even_when_commands_land_between_reads(self):
+        from acc.platform.command_memory import InMemoryCommandRepository
+        from acc.platform.commands import CommandRequest
+        from acc.staging import StagingReads
+
+        state = InMemoryCommandRepository()
+        state.put_project(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID)
+        read_project, created = state.project, [0]
+
+        def project_then_command(account_id, project_id):
+            # Commit a command right after every state read, as a concurrent client could.
+            value = read_project(account_id, project_id)
+            n = created[0]
+            created[0] += 1
+            state.execute(CommandRequest(f'op-{n}', STAGING_ACCOUNT_ID, STAGING_PROJECT_ID,
+                                         'task.create', n, {'task_id': f'task-{n}'}, 'user'),
+                          limits={'tasks.active': 100})
+            return value
+
+        state.project = project_then_command
+        for _ in range(3):
+            snapshot = StagingReads(state).project_snapshot(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID)
+            self.assertEqual(snapshot.project.revision, len(snapshot.tasks))
+            self.assertTrue(all('reserved' not in task for task in snapshot.tasks))
+        self.assertIsNone(StagingReads(state).project_snapshot(STAGING_ACCOUNT_ID, 'other'))

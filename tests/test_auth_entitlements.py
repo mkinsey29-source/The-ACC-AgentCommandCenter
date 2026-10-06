@@ -300,18 +300,31 @@ class AuthSecurityReviewTests(unittest.TestCase):
             self.login()
 
     def test_repository_returning_another_tenants_records_is_rejected(self):
+        from dataclasses import replace
+
         token = self.login()
-        original = self.repo.entitlements
-        self.repo.entitlements = lambda account_id: original('acct-2')
+        original = self.repo.auth_snapshot
+        snapshot = original(self.auth.repository.session_digests()[0])
+        self.repo.auth_snapshot = lambda _digest: replace(
+            snapshot, entitlements=self.repo.entitlements('acct-2'))
         with self.assertRaises(AuthorizationError):
             self.auth.authenticate(token, account_id='acct-1')
-        self.repo.entitlements = original
-        membership = self.repo.membership
-        self.repo.membership = lambda account_id, user_id: Membership(
-            'acct-2', user_id, permissions=('project.read',))
+        self.repo.auth_snapshot = lambda _digest: replace(
+            snapshot, membership=Membership(
+                'acct-2', snapshot.session.user_id, permissions=('project.read',)))
         with self.assertRaises(AuthorizationError):
             self.auth.authenticate(token)
-        self.repo.membership = membership
+        # Another account's record or another user's record must fail with the same semantics
+        # as a missing one: wrong account is 403, wrong user is 401.
+        self.repo.auth_snapshot = lambda _digest: replace(
+            snapshot, account=self.repo.account('acct-2'))
+        with self.assertRaises(AuthorizationError):
+            self.auth.authenticate(token)
+        self.repo.auth_snapshot = lambda _digest: replace(
+            snapshot, user=UserState('someone-else'))
+        with self.assertRaises(AuthenticationError):
+            self.auth.authenticate(token)
+        self.repo.auth_snapshot = original
 
     def test_invalid_ttl_is_a_request_error_not_an_auth_failure(self):
         for ttl in (59, 86401, True, 3600.0):

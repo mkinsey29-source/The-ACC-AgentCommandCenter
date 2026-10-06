@@ -6,15 +6,32 @@ import time
 from copy import deepcopy
 from typing import Any, Mapping
 
-from .commands import (
-    CommandConflict, CommandRequest, CommandResult, CommandStateConflict,
-    CommandTargetNotFound, IdempotencyConflict, QuotaExceeded,
-)
+from . import command_rules as rules
+from .commands import CommandRequest, CommandResult
 from .events import EventBatch, PlatformEvent
 
 
+class _ProjectState:
+    """``CommandState`` over one in-memory project record."""
+
+    def __init__(self, project):
+        self._project = project
+
+    def mode(self):
+        return self._project['mode']
+
+    def task(self, task_id):
+        return self._project['tasks'].get(task_id)
+
+    def worker_status(self, worker_id):
+        worker = self._project['workers'].get(worker_id)
+        return None if worker is None else worker['status']
+
+
 class InMemoryCommandRepository:
-    """Reference semantics for tests; also a ``PlatformEventSource`` for its own events.
+    """In-memory store for tests; also a ``PlatformEventSource`` for its own events.
+
+    The rules come from ``command_rules``; this class only holds state.
 
     One lock makes each ``execute`` a single serializable transaction. Production storage must
     provide the same atomicity (see ``PlatformCommandRepository``).
@@ -56,98 +73,45 @@ class InMemoryCommandRepository:
             existing = self._claims.get(key)
             if existing is not None:
                 fingerprint, result = existing
-                if fingerprint != command.fingerprint:
-                    raise IdempotencyConflict('Operation ID was already used for another command.')
-                return CommandResult(
-                    result.operation_id, result.status, result.revision,
-                    result.result, replayed=True)
+                return rules.replay(command, fingerprint, result.revision, result.result)
 
             project_key = (command.account_id, command.project_id)
             project = self._projects.get(project_key)
-            if project is None:
-                raise CommandTargetNotFound('project')
-            if project['revision'] != command.expected_revision:
-                raise CommandConflict(project['revision'])
-
-            reservations = command.quotas
-            for quota in reservations:
-                allowed = limits.get(quota.name)
-                used = self._usage.get((command.account_id, quota.name), 0)
-                if type(allowed) is not int or used + quota.amount > allowed:
-                    raise QuotaExceeded('Quota unavailable.')
-
             # Nothing is written until every check and the transition have succeeded.
-            candidate = deepcopy(project)
-            outcome, released = self._apply(candidate, command, reservations)
-            candidate['revision'] += 1
-            new_revision = candidate['revision']
-            result = CommandResult(command.operation_id, 'applied', new_revision, outcome)
+            change = rules.decide(
+                command,
+                revision=None if project is None else project['revision'],
+                state=_ProjectState(project),
+                quota_used=lambda name: self._usage.get((command.account_id, name), 0),
+                limits=limits)
+            result = CommandResult(command.operation_id, 'applied', change.revision, change.result)
             now = self.clock()
+            event = PlatformEvent(
+                self._next_seq, command.account_id, command.project_id, 'command.applied', now,
+                rules.event_data(command, change.revision, change.result))
 
-            for quota in reservations:
-                qkey = (command.account_id, quota.name)
-                self._usage[qkey] = self._usage.get(qkey, 0) + quota.amount
-            for name, amount in released.items():
+            candidate = deepcopy(project)
+            candidate['revision'] = change.revision
+            if change.mode is not None:
+                candidate['mode'] = change.mode
+            if change.task is not None:
+                candidate['tasks'][change.task.task_id] = {
+                    'id': change.task.task_id, 'status': change.task.status,
+                    'reserved': dict(change.task.reserved)}
+            if change.worker is not None:
+                candidate['workers'][change.worker.worker_id]['status'] = change.worker.status
+            for name, amount in change.reserve.items():
                 qkey = (command.account_id, name)
-                self._usage[qkey] = max(0, self._usage.get(qkey, 0) - amount)
+                self._usage[qkey] = self._usage.get(qkey, 0) + amount
+            for name, amount in change.release.items():
+                qkey = (command.account_id, name)
+                self._usage[qkey] = rules.released_usage(self._usage.get(qkey, 0), amount)
             self._projects[project_key] = candidate
             self._claims[key] = (command.fingerprint, result)
-            self._audit.append({
-                'operation_id': command.operation_id, 'account_id': command.account_id,
-                'project_id': command.project_id, 'actor_user_id': command.actor_user_id,
-                'kind': command.kind, 'revision': new_revision, 'at': now,
-            })
-            self._events.append(PlatformEvent(
-                self._next_seq, command.account_id, command.project_id, 'command.applied', now, {
-                    'operation_id': command.operation_id, 'kind': command.kind,
-                    'actor_user_id': command.actor_user_id, 'revision': new_revision,
-                    'result': dict(outcome),
-                }))
+            self._audit.append(rules.audit_record(command, change.revision, now))
+            self._events.append(event)
             self._next_seq += 1
             return result
-
-    @staticmethod
-    def _apply(project, command, reservations):
-        """Apply one validated transition to ``project`` (a private copy).
-
-        Returns ``(result, released_quota)``. Raises before any write to shared state.
-        """
-        payload = command.payload
-        kind = command.kind
-        if kind == 'project.mode':
-            if project['mode'] == payload['mode']:
-                raise CommandStateConflict('project is already in that mode')
-            project['mode'] = payload['mode']
-            return {'mode': payload['mode']}, {}
-        if kind == 'task.create':
-            task_id = payload['task_id']
-            if task_id in project['tasks']:
-                raise CommandStateConflict('task already exists')
-            project['tasks'][task_id] = {
-                'id': task_id, 'status': 'queued',
-                'reserved': {q.name: q.amount for q in reservations},
-            }
-            return {'task_id': task_id, 'status': 'queued'}, {}
-        if kind == 'task.cancel':
-            task = project['tasks'].get(payload['task_id'])
-            if task is None:
-                raise CommandTargetNotFound('task')
-            if task['status'] == 'cancelled':
-                raise CommandStateConflict('task is already cancelled')
-            task['status'] = 'cancelled'
-            released = dict(task.get('reserved', {}))
-            task['reserved'] = {}
-            return {'task_id': task['id'], 'status': 'cancelled'}, released
-        if kind in ('worker.pause', 'worker.resume'):
-            worker = project['workers'].get(payload['worker_id'])
-            if worker is None:
-                raise CommandTargetNotFound('worker')
-            target = 'paused' if kind == 'worker.pause' else 'active'
-            if worker['status'] == target:
-                raise CommandStateConflict('worker is already ' + target)
-            worker['status'] = target
-            return {'worker_id': worker['id'], 'status': target}, {}
-        raise CommandStateConflict('unsupported command')
 
     # --- read helpers -------------------------------------------------------------------------
     def project_revision(self, account_id, project_id):

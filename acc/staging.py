@@ -4,11 +4,14 @@ from __future__ import annotations
 import hmac
 import os
 from copy import deepcopy
+from pathlib import Path
 
 from .auth import (AccountState, AuthService, EntitlementSnapshot, InMemoryAuthRepository,
-                   Membership, UserState, VerifiedIdentity)
-from .platform import AccountProjectView, HostedTransport, OriginPolicy, PlatformApi
+                   Membership, SQLiteAuthRepository, UserState, VerifiedIdentity)
+from .platform import (AccountProjectView, HostedTransport, OriginPolicy, PlatformApi,
+                       ProjectSnapshot)
 from .platform.command_memory import InMemoryCommandRepository
+from .platform.sqlite_repository import SQLiteCommandRepository, SQLitePlatformReadRepository
 
 STAGING_ACCOUNT_ID = 'staging-account'
 STAGING_PROJECT_ID = 'staging-project'
@@ -16,6 +19,12 @@ STAGING_USER_ID = 'staging-user'
 STAGING_ORIGIN_DEFAULT = 'https://acc-staging-console--memph1510.replit.app'
 STAGING_SECRET_HEADER = 'x-acc-staging-secret'
 STAGING_SESSION_SECONDS = 900
+STAGING_PROJECT_NAME = 'ACC Staging'
+# An applied key is never re-applied. A new key only inserts records that are missing; it never
+# changes existing ones, so changing an existing record needs an explicit, reviewed migration.
+STAGING_FIXTURE_KEY = 'acc-m09-staging-fixture-v1'
+STAGING_PERMISSIONS = ('project.read', 'task.read', 'event.read', 'project.write',
+                       'task.write', 'task.cancel', 'worker.control')
 
 # Headers whose repetition is ambiguous; a repeated one is treated as absent (fail closed).
 _SINGLE_VALUE_HEADERS = frozenset(('origin', 'authorization', STAGING_SECRET_HEADER))
@@ -40,14 +49,25 @@ class StagingReads:
         if account_id != STAGING_ACCOUNT_ID:
             return []
         p = self.state.project(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID)
-        return [AccountProjectView(account_id, STAGING_PROJECT_ID, "ACC Staging",
+        return [AccountProjectView(account_id, STAGING_PROJECT_ID, STAGING_PROJECT_NAME,
                                    p['mode'], p['revision'])]
+
+    def project_snapshot(self, account_id, project_id):
+        if (account_id, project_id) != (STAGING_ACCOUNT_ID, STAGING_PROJECT_ID):
+            return None
+        # One locked deep copy, so revision, tasks and workers come from the same state.
+        p = self.state.project(account_id, project_id)
+        return ProjectSnapshot(
+            AccountProjectView(account_id, project_id, STAGING_PROJECT_NAME, p['mode'], p['revision']),
+            tuple(self._public(account_id, project_id, v) for v in p['tasks'].values()),
+            tuple(self._public(account_id, project_id, v) for v in p['workers'].values()),
+            ())
 
     def project(self, account_id, project_id):
         if (account_id, project_id) != (STAGING_ACCOUNT_ID, STAGING_PROJECT_ID):
             return None
         p = self.state.project(account_id, project_id)
-        return AccountProjectView(account_id, project_id, "ACC Staging",
+        return AccountProjectView(account_id, project_id, STAGING_PROJECT_NAME,
                                   p['mode'], p['revision'])
 
     def tasks(self, account_id, project_id):
@@ -103,29 +123,53 @@ class StagingVerifier:
 
 
 class StagingApplication:
-    """ASGI wrapper adding staging-only health and session bootstrap routes."""
-    def __init__(self, *, origin: str, bootstrap_secret: str):
+    """ASGI wrapper adding staging-only health and session bootstrap routes.
+
+    Without ``database`` all state is process memory and a restart resets it. With ``database``
+    (an absolute SQLite file path) auth, sessions, commands, events and project reads are durable
+    in that one file: sessions, revocations, state and event cursors survive restarts. WebSocket
+    tickets stay process-local by design, so run one worker either way.
+    """
+    def __init__(self, *, origin: str, bootstrap_secret: str, database: str | Path | None = None):
         if not isinstance(bootstrap_secret, str) or len(bootstrap_secret) < 24:
             raise ValueError('staging bootstrap secret must contain at least 24 characters')
-        auth_repo = InMemoryAuthRepository()
-        auth_repo.put_user(UserState(STAGING_USER_ID))
-        identity = VerifiedIdentity('staging', 'browser-test')
-        auth_repo.bind_identity(identity, STAGING_USER_ID)
-        auth_repo.put_account(AccountState(STAGING_ACCOUNT_ID))
-        auth_repo.put_membership(Membership(
-            STAGING_ACCOUNT_ID, STAGING_USER_ID, role="owner", permissions=(
-                'project.read','task.read','event.read','project.write',
-                'task.write','task.cancel','worker.control')))
-        auth_repo.put_entitlements(EntitlementSnapshot(
-            STAGING_ACCOUNT_ID, features=('acc.web',), limits={'tasks.active': 25}))
-        self.auth = AuthService(auth_repo, identity_verifiers=(StagingVerifier(bootstrap_secret),),
-                                default_ttl_seconds=STAGING_SESSION_SECONDS)
-        self.state = InMemoryCommandRepository()
-        self.state.put_project(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID)
-        self.state.put_worker(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID, 'worker-1')
-        self.reads = StagingReads(self.state)
-        self.api = PlatformApi(self.auth, self.reads, self.state, self.state)
-        self.transport = HostedTransport(self.api, origins=OriginPolicy(frozenset((origin,))))
+        if database is not None and not Path(database).is_absolute():
+            raise ValueError('staging database must be an absolute file path')
+        # Validate all configuration before storage is opened, so bad settings never create or
+        # provision a database file.
+        origins = OriginPolicy(frozenset((origin,)))
+        verifier = StagingVerifier(bootstrap_secret)
+        self.database = None if database is None else str(database)
+        self._closers = []
+        try:
+            if database is None:
+                auth_repo = InMemoryAuthRepository()
+                self.state = InMemoryCommandRepository()
+                self.state.put_project(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID)
+                self.reads = StagingReads(self.state)
+            else:
+                auth_repo = SQLiteAuthRepository(database)
+                self._closers.append(auth_repo.close)
+                self.state = SQLiteCommandRepository(database)
+                self._closers.append(self.state.close)
+                # Insert-if-missing: a restart never resets the project's revision or state.
+                self.state.put_project(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID,
+                                       name=STAGING_PROJECT_NAME)
+                self.reads = SQLitePlatformReadRepository(self.state)
+            _provision_staging_fixture(auth_repo)
+            self.state.put_worker(STAGING_ACCOUNT_ID, STAGING_PROJECT_ID, 'worker-1')
+            self.auth = AuthService(auth_repo, identity_verifiers=(verifier,),
+                                    default_ttl_seconds=STAGING_SESSION_SECONDS)
+            self.api = PlatformApi(self.auth, self.reads, self.state, self.state)
+            self.transport = HostedTransport(self.api, origins=origins)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Close durable storage connections; a no-op for in-memory staging."""
+        while self._closers:
+            self._closers.pop()()
 
     def __repr__(self) -> str:
         return 'StagingApplication()'
@@ -195,9 +239,25 @@ class StagingApplication:
         await send({'type': 'http.response.body', 'body': b''})
 
 
+def _provision_staging_fixture(auth_repo) -> bool:
+    """Seed the staging tenant once per store; later starts keep whatever state it now holds."""
+    return auth_repo.provision_once(
+        STAGING_FIXTURE_KEY,
+        users=(UserState(STAGING_USER_ID),),
+        accounts=(AccountState(STAGING_ACCOUNT_ID),),
+        identities=((VerifiedIdentity('staging', 'browser-test'), STAGING_USER_ID),),
+        memberships=(Membership(STAGING_ACCOUNT_ID, STAGING_USER_ID, role='owner',
+                                permissions=STAGING_PERMISSIONS),),
+        entitlements=(EntitlementSnapshot(STAGING_ACCOUNT_ID, features=('acc.web',),
+                                          limits={'tasks.active': 25}),),
+    )
+
+
 def build_staging_app():
     origin = os.environ.get('ACC_STAGING_ORIGIN', STAGING_ORIGIN_DEFAULT)
     secret = os.environ.get('ACC_STAGING_BOOTSTRAP_SECRET')
     if not secret:
         raise RuntimeError('ACC_STAGING_BOOTSTRAP_SECRET is required.')
-    return StagingApplication(origin=origin, bootstrap_secret=secret)
+    # Optional: an absolute SQLite path makes staging durable; unset keeps it in memory.
+    database = os.environ.get('ACC_STAGING_DATABASE')
+    return StagingApplication(origin=origin, bootstrap_secret=secret, database=database)
