@@ -1,14 +1,27 @@
-## Second Brain (shared agent memory in Google Drive)
+## Second Brain — repository execution and Drive entry
+Version: 3.2 — 2026-10-03 approved summary roles and orchestrator reporting
 
-At the start of each task, in Marvin's Google Drive:
+### Entry and source of truth
+Read Drive-root [AGENTS.md](https://drive.google.com/file/d/1BPuaOz5tZ3wDrhoGuBmgWEgQ4evGI35U/view) once per session. Read [ACC-Agent Command Center/AGENTS.md](https://drive.google.com/file/d/1DShX5lan_mvZhgMeXVofd21z4RGGNmk0/view?usp=drivesdk). Project folder: https://drive.google.com/drive/folders/1yozjqM3sAt9ySZUPIj77PVZ1cOj3uPIf. Locate the authorized project's existing folder under 50_Projects through live listings and verified IDs; do not create duplicates or assume similarly named repositories share a Drive project. Read the applicable project/parent AGENTS.md, consolidated_summary.md, current handoff.md and relevant lessons.md, then newer session_summary.md and local review evidence to identify progress after the baseline.
+Record role, task/run ID, policy versions, repository/branch/commit and evidence dates. Verify inherited claims against live sources. Relevant older lessons, handoffs and evidence remain accessible; routine rereading of weeks of summaries is unnecessary.
+Git owns code and repository knowledge; Drive holds continuity and review records, with explicit links to authoritative repository sources. Designate the authoritative location of each specification and link its copies. Drive is not assumed mounted or automatically synchronized. If access is unavailable, record the gap and pending writeback, continue independent authorized work, and never claim synchronization or verification succeeded.
 
-1. Read `Agent Instructions/AGENT_INSTRUCTIONS.md` (search the exact title `AGENT_INSTRUCTIONS.md` if you can't browse by path).
-2. Read `60_Review/LESSONS.md` for the lessons that match your task, and check its Open issues table.
-3. For project work, search `50_Projects/` for the project's folder before creating one. If it exists, read its `current-state.md` and recent `session-notes/` first. If the request is too broad, unclear, or conflicts with an earlier decision recorded there, ask for the specific clarification before doing the affected work.
-4. Ignore `.obsidian/`, `PDF_Markdown/`, `PDF Converted Files/` and `Duplicates/`. Read `Journal/` folders only when reviewing that project.
-5. To see what a folder holds, read its `folder-checklist.md` before opening files. When you change a folder's contents, update its checklist in the same session.
+### Execution and ownership
+Use an isolated temporary task branch and checkout/worktree, one writer per branch and shared file. Coordinate dependencies and shared interfaces. Read applicable module policies, manifests and documented validation commands before changes; preserve the repository-specific rules above.
+Validate affected behavior against the exact revision before handoff or merge. Document unavailable checks and deferred device/laptop tests; an unrun test is neither a confirmed defect nor a passed test. For instruction-only edits, verify the exact diff, preserved rules and links rather than running unrelated builds.
+Use PRs. An authorized agent may merge reviewed, validated work without requiring Marvin to personally merge every PR; retain explicit integration, release, deployment, publication and restart gates. This policy update does not authorize application restarts or unrelated merges.
 
-At the end of each task:
+### Three session files and local reviews
+Maintain separate project files:
+- session_summary.md: assignment, intended versus actual work, meaningful results/validation, direction changes and remaining work. Working agents update at milestones, before interruption and at session end, not every minor turn; persist new user requirements promptly.
+- lessons.md: running errors, findings, solved/unresolved problems, attempts, blockers and user decisions, with stable IDs, evidence, status and next action. Distinguish hypotheses from verified findings.
+- handoff.md: executable continuation and review packet. Include exact stopping point, sources/branch/commit/PR, setup and commands, validation and unavailable checks, stable intended/completed checklist, direction changes, next-agent instructions and separate reviewer instructions.
+Carry unresolved IDs, anticipated risks, dependencies and deferred tests until evidenced closure or explicit cancellation/supersession. Update handoff before review, pause or transfer. Preserve session-end snapshots under session-notes/<run-id>/ with session_summary.md, lessons.md and handoff.md; historical records retain their filenames.
+Project issues/reviews belong in that project's 60_Review/; general Drive issues belong in root 60_Review/. Record every encountered issue in lessons.md and make a focused report when review/second opinion is needed. Independent reviews require separately started top-level sessions; the author's spawned subagents do not qualify. Maintain changed-folder inventories.
 
-- Write one `60_Review/` report covering every issue you hit (resolved or not) and add it to `LESSONS.md`. Review your share of unreviewed reports as described in `AGENT_INSTRUCTIONS.md` Rule 5.
-- After every GitHub task, save a dated session note in `50_Projects/<project>/session-notes/` saying what was assigned, what you completed, what you learned, and every issue with its status. Then update that project's `current-state.md`.
+### Scheduled consolidation and reporting
+At 10 a.m. and 10 p.m. Central (America/Chicago), the orchestrator checks every project's consolidated_summary.md. This is a dense, coherent consolidation of session summaries, informed by lessons/handoffs/review evidence, written for incoming agents. It establishes a timestamped project baseline and retains unresolved work, decisions, dependencies and evidence links. If no substantive change occurred, update only Last checked; preserve the narrative, Last substantive change and source observation dates.
+The separate timestamped orchestrator report in /Orchestrator_Reports/ is Marvin's concise Drive-wide overview of today's work, current project positions, blockers, reviews and decisions; retain earlier reports without overwriting. No separate Drive-root summary is required.
+At 10 p.m., the orchestrator reviews repository/module, Drive-root and project AGENTS.md files. Its report records coverage/gaps and proposed changes with affected file, evidence, concrete reason/benefit and tradeoffs. Valid project-specific differences are allowed. Suggestions do not authorize policy changes; user-approved changes may proceed. A documented schedule is not proof that a run occurred.
+
+ACC-specific retained gate: PR #35 production-runtime integration requires Marvin's explicit authorization. Updating this policy does not merge or authorize that application PR.
