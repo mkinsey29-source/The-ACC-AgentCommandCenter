@@ -269,6 +269,11 @@ class ProvisionOnceTests(unittest.TestCase):
             ('identity for a missing user', dict(
                 users=(UserState('user-1'),), accounts=(AccountState('acct-1'),),
                 identities=((VerifiedIdentity('openai', 'subject-x'), 'ghost'),))),
+            ('duplicate identity assigned to different users', dict(
+                users=(UserState('user-1'), UserState('user-2')),
+                accounts=(AccountState('acct-1'),),
+                identities=((VerifiedIdentity('openai', 'subject-x'), 'user-1'),
+                            (VerifiedIdentity('openai', 'subject-x'), 'user-2')))),
             ('membership for a missing account', dict(
                 users=(UserState('user-1'),), memberships=(Membership('ghost-acct', 'user-1'),))),
             ('entitlements for a missing account', dict(
