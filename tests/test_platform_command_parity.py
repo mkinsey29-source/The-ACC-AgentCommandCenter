@@ -18,7 +18,7 @@ SUITE = (
     ('op-2', 'task.create', 1, {'task_id': 't1'}, 'u1', LIMITS),      # duplicate task
     ('op-2', 'task.create', 1, {'task_id': 't2'}, 'u1', LIMITS),
     ('op-3', 'task.create', 2, {'task_id': 't3'}, 'u1', LIMITS),      # quota full
-    ('op-3', 'task.create', 2, {'task_id': 't3'}, 'u1', {}),          # no ceiling
+    ('op-3', 'task.create', 2, {'task_id': 't3'}, 'u1', {'tasks.active': 3}), # higher explicit limit
     ('op-3', 'task.cancel', 2, {'task_id': 'missing'}, 'u1', LIMITS),
     ('op-3', 'task.cancel', 2, {'task_id': 't1'}, 'u1', LIMITS),
     ('op-4', 'task.cancel', 3, {'task_id': 't1'}, 'u1', LIMITS),      # already cancelled
