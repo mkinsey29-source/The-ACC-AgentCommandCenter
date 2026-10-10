@@ -1,13 +1,18 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let token = new URLSearchParams(location.hash.slice(1)).get('token') || sessionStorage.getItem('acc-token') || '';
+const hashParams = new URLSearchParams(location.hash.slice(1));
+const remoteDevice = !['127.0.0.1', 'localhost'].includes(location.hostname);
+// A remote device never holds the local control token; it is recognised by its paired-device cookie.
+let token = remoteDevice ? '' : hashParams.get('token') || sessionStorage.getItem('acc-token') || '';
+const pairSecret = hashParams.get('pair') || '';
 history.replaceState(null, '', location.pathname);
+let remoteInfo = null, remoteTimer = null, pairPoll = null;
 let state = null, selected = null, workView = 'tasks', cursor = 0, refreshTimer = null, streamController = null, eventHistory = new Map();
 const labels = {launching:'Launching', queued:'Queued', running:'Working', stopping:'Stopping', interrupted:'Needs inspection', paused:'Paused', failed:'Failed', completed:'Completed', awaiting_review:'Needs review', accepted:'Accepted', publishing:'Publishing'};
 function error(message) { for (const id of ['error','task-error']) { $(id).textContent = message || ''; $(id).hidden = !message; } }
 async function api(path, body) {
-  const response = await fetch('/api/' + path, {method: body === undefined ? 'GET' : 'POST', headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
+  const response = await fetch('/api/' + path, {method: body === undefined ? 'GET' : 'POST', headers: {...(token ? {Authorization: 'Bearer ' + token} : {}), 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Request failed');
   return data;
@@ -131,7 +136,7 @@ async function stream() {
   const controller = new AbortController(); streamController = controller;
   while (!controller.signal.aborted) {
     try {
-      const response = await fetch('/api/events?after='+cursor, {headers:{Authorization:'Bearer '+token},signal:controller.signal});
+      const response = await fetch('/api/events?after='+cursor, {headers:token?{Authorization:'Bearer '+token}:{},signal:controller.signal});
       if (!response.ok) throw new Error('Activity stream unavailable');
       $('connection').textContent='Live local events';
       await refresh();
@@ -155,8 +160,11 @@ async function stream() {
   }
 }
 async function connect() {
-  try { error('');await refresh();cursor=state.cursor;sessionStorage.setItem('acc-token',token);$('connect-panel').hidden=true;restoreDraft();stream(); }
-  catch(e){$('connect-panel').hidden=false;error(e.message);}
+  try { error('');await refresh();cursor=state.cursor;if(token)sessionStorage.setItem('acc-token',token);$('connect-panel').hidden=true;$('pair-panel').hidden=true;restoreDraft();stream();refreshRemote(); }
+  catch(e){
+    if(remoteDevice){$('connect-panel').hidden=true;$('pair-panel').hidden=false;return;}
+    $('connect-panel').hidden=false;error(e.message);
+  }
 }
 $('tasks').onclick=e=>{const b=e.target.closest('[data-task]');if(b){selected=b.dataset.task;render();renderDetail();}};
 $('view-tasks').onclick=()=>{workView='tasks';render();};
@@ -301,7 +309,8 @@ $('record-voice').onclick=async()=>{
 };
 window.addEventListener('online',()=>flushOutbox());
 setInterval(()=>{if(state)flushOutbox();},5000);
-if(token) connect();
+if(token||(remoteDevice&&!pairSecret)) connect();
+if(remoteDevice&&pairSecret) showPairing(pairSecret);
 
 
 function githubLink(url, label) {
@@ -327,3 +336,63 @@ async function publicationPreview(taskId) {
 }
 $('publish-close').onclick=()=>$('publish-dialog').close();
 $('publish-confirm').onclick=async()=>{if(!publication)return;$('publish-confirm').disabled=true;try{await api(`tasks/${publication.taskId}/publish`,{preview_id:publication.preview_id,request_id:publication.request_id});$('publish-dialog').close();await refresh();}catch(e){$('publish-confirm').disabled=false;error(e.message);}};
+
+// Remote access: pairing on a remote device, and approval of devices at the computer.
+async function publicApi(path, body) {
+  const response = await fetch('/api/' + path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+function showPairing(secret) {
+  $('connect-panel').hidden = true; $('pair-panel').hidden = false;
+  if (secret) { $('pair-secret').value = secret; $('pair-status').textContent = 'Name this device, then request access.'; }
+}
+$('pair-form').onsubmit = async e => {
+  e.preventDefault();
+  const secret = $('pair-secret').value.trim();
+  if (!secret) { $('pair-status').textContent = 'Enter the pairing link code.'; return; }
+  $('pair-submit').disabled = true;
+  try {
+    const claim = await publicApi('pairing/claim', {secret, name: $('pair-name').value.trim() || 'My phone'});
+    $('pair-status').innerHTML = `Match code <strong>${escapeHTML(claim.code)}</strong>. Approve this device at your computer only if it shows the same code.`;
+    clearInterval(pairPoll);
+    pairPoll = setInterval(async () => {
+      try {
+        const result = await publicApi('pairing/poll', {request_id: claim.request_id, claim: claim.claim});
+        if (result.status === 'waiting') return;
+        clearInterval(pairPoll);
+        if (result.status === 'approved') { $('pair-panel').hidden = true; await connect(); return; }
+        $('pair-status').textContent = result.status === 'denied' ? 'The computer declined this device.' : 'This request expired. Create a new pairing link.';
+        $('pair-submit').disabled = false;
+      } catch (err) { clearInterval(pairPoll); $('pair-status').textContent = err.message; $('pair-submit').disabled = false; }
+    }, 2000);
+  } catch (err) { $('pair-status').textContent = err.message; $('pair-submit').disabled = false; }
+};
+async function refreshRemote() {
+  if (remoteDevice) return;
+  try { remoteInfo = await api('remote'); } catch (_) { $('remote-panel').hidden = true; return; }
+  $('remote-panel').hidden = false; renderRemote();
+  if (!remoteTimer) remoteTimer = setInterval(() => { if ($('remote-panel').open) refreshRemote(); }, 3000);
+}
+function renderRemote() {
+  const r = remoteInfo;
+  $('remote-status').textContent = r.enabled ? `Mode: ${r.mode} · ${r.origin || 'accepted hosts: ' + r.hosts.join(', ')}` : 'Remote access is off. Start ACC with --reach tailscale-serve (or another mode); see docs/REMOTE-ACCESS.md.';
+  $('remote-pair').disabled = !r.enabled;
+  $('remote-pending').innerHTML = r.pending.map(p => `<div class="integration-record"><strong>${escapeHTML(p.name)}</strong><small>Match code <b>${escapeHTML(p.code)}</b> · approve only if the device shows the same code</small><div class="actions"><button data-pair-action="approve" data-id="${escapeHTML(p.id)}">Approve</button><button data-pair-action="deny" data-id="${escapeHTML(p.id)}">Deny</button></div></div>`).join('') || '<p class="muted">No devices waiting.</p>';
+  $('remote-devices').innerHTML = r.devices.map(d => `<div class="integration-record"><strong>${escapeHTML(d.name)}</strong><small>${d.last_seen ? 'Last seen ' + new Date(d.last_seen * 1000).toLocaleString() : 'Not used yet'} · expires ${new Date(d.expires * 1000).toLocaleDateString()}</small><div class="actions"><button data-pair-action="revoke" data-id="${escapeHTML(d.id)}">Disconnect</button></div></div>`).join('') || '<p class="muted">No paired devices.</p>';
+}
+$('remote-pair').onclick = async () => {
+  try {
+    const begun = await api('pairing/begin', {});
+    $('remote-link').innerHTML = (begun.url ? `<p>Open this link on the device (one use, valid 5 minutes):</p><code>${escapeHTML(begun.url)}</code>` : '<p class="muted">No remote address is available yet.</p>') + `<p>Or enter this code on the device's pairing page: <b>${escapeHTML(begun.code)}</b></p>`;
+    error(''); await refreshRemote();
+  } catch (e) { error(e.message); }
+};
+$('remote-panel').onclick = async e => {
+  const button = e.target.closest('[data-pair-action]');
+  if (!button) return;
+  const action = button.dataset.pairAction;
+  try { await api('pairing/' + action, action === 'revoke' ? {device_id: button.dataset.id} : {request_id: button.dataset.id}); error(''); await refreshRemote(); }
+  catch (err) { error(err.message); }
+};

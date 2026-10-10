@@ -121,3 +121,17 @@ Publication reserves the workspace against workers and external conversation cla
 Assignment request IDs and publication request IDs support identical retry reconciliation. Other legacy task actions still require the caller to reconcile uncertain responses. Restart recovery cancels pending role changes; inspect the old process tree and explicitly choose the next assignment.
 
 Git built-in text normalization and `core.filemode=false` are handled against the preview-bound expected tree. Assigned clean filters, including Git LFS, require manual publication; ACC rejects them before hashing/staging. The current review snapshot is code-oriented (10,000 files / 100 MiB), not a full asset repository snapshot.
+
+## Remote access (SC-7, SC-8)
+
+See `docs/REMOTE-ACCESS.md`. In `local` mode (the default) none of this is reachable and the rules above are unchanged.
+
+- `GET /api/remote` (owner only): `{mode, enabled, origin, hosts, devices, pending}`.
+- `POST /api/pairing/begin` (owner only): `{token, code, expires, origin, url}`; a one-use link and eight-digit code valid for 5 minutes.
+- `POST /api/pairing/claim` (remote host, no login): `{secret, name}` where `secret` is the link token or the code; returns `{request_id, claim, code}` (the six-digit match code).
+- `POST /api/pairing/poll` (remote host, no login): `{request_id, claim}`; returns `{status}` of `waiting`, `approved`, `denied` or `expired`. On `approved` the response sets the `acc_device` cookie (HttpOnly, SameSite=Strict, Secure when served over HTTPS) once; the credential is never in the body.
+- `POST /api/pairing/approve` and `/deny` (owner only): `{request_id}`.
+- `POST /api/pairing/revoke` (owner only): `{device_id}`; also ends that device's event stream.
+
+"Owner" means a request with a local Host and the local control token. Over a remote host only a paired device's cookie authenticates; the control token is refused. Pairing errors: 403 bad or used link, 404 unknown request, 409 expired or device cap reached, 429 too many attempts.
+
