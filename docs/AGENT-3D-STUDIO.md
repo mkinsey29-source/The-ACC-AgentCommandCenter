@@ -47,7 +47,7 @@ rather than being reported as succeeded.
 ## Running the worker
 
 ```sh
-python3 -m acc.agent3d --token-file /path/to/token --workspace /path/to/managed/project
+python3 -m acc.agent3d --token-file /path/to/state/agent-token --workspace /path/to/managed/project
 ```
 
 `--executable` defaults to `claude`; pass `--extra-args "--model sonnet"` (a single

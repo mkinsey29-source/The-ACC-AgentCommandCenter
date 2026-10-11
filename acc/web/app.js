@@ -4,7 +4,9 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 const hashParams = new URLSearchParams(location.hash.slice(1));
 const remoteDevice = !['127.0.0.1', 'localhost'].includes(location.hostname);
 // A remote device never holds the local control token; it is recognised by its paired-device cookie.
-let token = remoteDevice ? '' : hashParams.get('token') || sessionStorage.getItem('acc-token') || '';
+// The owner token is never in a URL either: the link carries a one-use launch code that is exchanged for it.
+let token = remoteDevice ? '' : sessionStorage.getItem('acc-token') || '';
+const launchCode = remoteDevice ? '' : hashParams.get('launch') || '';
 const pairSecret = hashParams.get('pair') || '';
 history.replaceState(null, '', location.pathname);
 let remoteInfo = null, remoteTimer = null, pairPoll = null;
@@ -161,7 +163,7 @@ async function stream() {
   }
 }
 async function connect() {
-  try { error('');await refresh();cursor=state.cursor;if(token)sessionStorage.setItem('acc-token',token);$('connect-panel').hidden=true;$('pair-panel').hidden=true;restoreDraft();stream();refreshRemote(); }
+  try { error('');await refresh();cursor=state.cursor;if(token)sessionStorage.setItem('acc-token',token);$('connect-panel').hidden=true;$('pair-panel').hidden=true;$('new-window').hidden=remoteDevice;restoreDraft();stream();refreshRemote(); }
   catch(e){
     if(remoteDevice){$('connect-panel').hidden=true;$('pair-panel').hidden=false;return;}
     $('connect-panel').hidden=false;error(e.message);
@@ -178,7 +180,7 @@ $('integration-job-form').onsubmit=async e=>{e.preventDefault();try{const data=O
 $('integration-jobs').onclick=async e=>{const b=e.target.closest('[data-job-action]');if(!b)return;try{await api(`integrations/jobs/${b.dataset.job}/${b.dataset.jobAction}`,{});await refresh();}catch(err){error(err.message);}};
 $('memory-form').onsubmit=async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(e.target));data.tags=data.tags.split(',').map(x=>x.trim()).filter(Boolean);data.source='acc-dashboard';data.request_id=crypto.randomUUID();await api('memory/propose',data);e.target.reset();error('');await refresh();}catch(err){error(err.message);}};
 $('memory-list').onclick=async e=>{const b=e.target.closest('[data-memory-status]');if(!b)return;try{await api(`memory/${b.dataset.memory}/review`,{status:b.dataset.memoryStatus,reviewer:'acc-dashboard'});await refresh();}catch(err){error(err.message);}};
-$('connect-form').onsubmit=e=>{e.preventDefault();token=$('token').value.trim();connect();};
+$('connect-form').onsubmit=e=>{e.preventDefault();const text=$('token').value.trim();redeemLaunch((text.match(/launch=([^&\s]+)/)||[])[1]||text);};
 $('new-task').onclick=()=>{if(!state){error('Connect to the local coordinator first.');return;} $('task-dialog').showModal();};
 $('close-dialog').onclick=()=>$('task-dialog').close();
 $('task-form').onsubmit=async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(e.target));data.argv=data.argv.trim()?JSON.parse(data.argv):[];const t=await api('tasks',data);selected=t.id;$('task-dialog').close();e.target.reset();error('');await refresh();}catch(err){error(err.message);}};
@@ -310,7 +312,8 @@ $('record-voice').onclick=async()=>{
 };
 window.addEventListener('online',()=>flushOutbox());
 setInterval(()=>{if(state)flushOutbox();},5000);
-if(token||(remoteDevice&&!pairSecret)) connect();
+if(launchCode) redeemLaunch(launchCode);
+else if(token||(remoteDevice&&!pairSecret)) connect();
 if(remoteDevice&&pairSecret) showPairing(pairSecret);
 
 
@@ -413,4 +416,16 @@ $('attention-list').onclick = async e => {
     error(result.status === 'failed' ? 'The approved action failed: ' + (result.result?.body?.error || 'see Activity') : '');
     await refresh();
   } catch (err) { error(err.message); await refresh().catch(() => {}); }
+};
+
+// Owner launch: exchange a one-use code for the memory-only owner token, and mint more links.
+async function redeemLaunch(code) {
+  try { const result = await publicApi('launch', {code}); token = result.token; await connect(); }
+  catch (e) { $('connect-panel').hidden = false; error(e.message); }
+}
+$('new-window').onclick = async () => {
+  try {
+    const result = await api('launch/new', {});
+    if (!window.open(result.url, '_blank')) error('Your browser blocked the new window. Open this one-use link instead: ' + result.url);
+  } catch (e) { error(e.message); }
 };

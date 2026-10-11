@@ -6,6 +6,7 @@ import os
 import stat
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -24,16 +25,19 @@ class StartupCase(unittest.TestCase):
         self.project.mkdir()
         self.state = self.root / 'state'
         self.served = []
+        self.servers = []
+        self.out = self.err = None
 
     def run_main(self, *argv, serve=None):
         def fake_serve(srv, *a, **k):
+            self.servers.append(srv)
             self.served.append({'hosts': set(srv.reach.remote_hosts()), 'route': srv.route,
                                 'remote_origin': srv.remote_origin(), 'bind': srv.server_address[0],
                                 'agent_token': srv.agent_token})
             if serve:
                 serve(srv)
             raise KeyboardInterrupt
-        out, err = io.StringIO(), io.StringIO()
+        out, err = self.out, self.err = io.StringIO(), io.StringIO()
         args = ['acc.server', '--project', str(self.project), '--state-dir', str(self.state), *argv]
         code = 0
         with mock.patch.object(sys, 'argv', args), mock.patch.object(server.Server, 'serve_forever', fake_serve), \
@@ -84,7 +88,7 @@ class AgentTokenTests(StartupCase):
     def test_start_creates_a_private_agent_token_different_from_the_owner_token(self):
         code, out, err = self.run_main('--port', '0')
         self.assertEqual(code, 0, err)
-        owner = (self.state / 'token').read_text().strip()
+        owner = self.servers[0].token
         agent = (self.state / 'agent-token').read_text().strip()
         self.assertNotEqual(owner, agent)
         self.assertGreaterEqual(len(agent), 32)
@@ -114,6 +118,77 @@ class AgentTokenTests(StartupCase):
         self.assertFalse(self.state.exists())
 
 
+class OwnerTokenTests(StartupCase):
+    def files_containing(self, secret):
+        return [str(p) for p in self.root.rglob('*') if p.is_file() and secret.encode() in p.read_bytes()]
+
+    def test_the_owner_token_is_never_written_or_printed(self):
+        code, out, err = self.run_main('--port', '0', '--reach', 'custom', '--host', '127.0.0.1',
+                                       '--allow-host', 'acc.test:9000')
+        self.assertEqual(code, 0, err)
+        token = self.servers[0].token
+        self.assertEqual(self.files_containing(token), [], 'the owner token reached the disk')
+        self.assertNotIn(token, out + err)
+        self.assertFalse((self.state / 'token').exists())
+
+    def test_the_owner_token_is_new_at_every_start(self):
+        self.run_main('--port', '0')
+        self.run_main('--port', '0')
+        self.assertNotEqual(self.servers[0].token, self.servers[1].token)
+
+    def test_a_legacy_token_file_is_removed_with_a_notice(self):
+        self.state.mkdir()
+        (self.state / 'token').write_text('old-secret-value')
+        code, out, err = self.run_main('--port', '0')
+        self.assertEqual(code, 0, err)
+        self.assertFalse((self.state / 'token').exists())
+        self.assertIn('Removed the old owner token file', out)
+        self.assertNotIn('old-secret-value', out + err)
+
+    def test_the_printed_link_carries_a_one_use_code_not_the_token(self):
+        seen = {}
+        def check(srv):
+            line = next(l for l in self.out.getvalue().splitlines() if l.startswith('ACC: '))
+            code = line.split('#launch=')[1]
+            seen.update(line=line, code=code, first=srv.launch.redeem(code))
+            try:
+                srv.launch.redeem(code)
+            except Exception as exc:
+                seen['second'] = type(exc).__name__
+        self.run_main('--port', '0', serve=check)
+        self.assertNotIn('#token=', seen['line'])
+        self.assertEqual(seen['first'], self.servers[0].token)
+        self.assertEqual(seen['second'], 'LaunchError')
+
+    def test_the_browser_is_opened_with_its_own_one_use_code(self):
+        opened, done = [], threading.Event()
+        def fake_open(url):
+            opened.append(url)
+            done.set()
+        def check(srv):
+            done.wait(3)
+        with mock.patch('webbrowser.open', side_effect=fake_open):
+            code, out, err = self.run_main('--port', '0', '--open-browser', serve=check)
+        (url,) = opened
+        token = self.servers[0].token
+        self.assertIn('#launch=', url)
+        self.assertNotIn(token, url)
+        self.assertNotIn('#token=', url)
+        printed = next(l for l in out.splitlines() if l.startswith('ACC: ')).split('#launch=')[1]
+        self.assertNotEqual(url.split('#launch=')[1], printed)
+
+    def test_a_custom_agent_token_file_keeps_the_credential_out_of_the_state_folder(self):
+        elsewhere = self.root / 'agent-home' / 'orchestrator-token'
+        code, out, err = self.run_main('--port', '0', '--agent-token-file', str(elsewhere))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.servers[0].agent_token, elsewhere.read_text())
+        self.assertFalse((self.state / 'agent-token').exists())
+        if os.name != 'nt':
+            self.assertEqual(elsewhere.stat().st_mode & 0o777, 0o600)
+        self.assertIn(str(elsewhere), out)
+        self.assertEqual(self.files_containing(self.servers[0].token), [])
+
+
 class LocalAndRemoteStartTests(StartupCase):
     def test_default_start_is_local_only_and_prints_no_remote_line(self):
         code, out, err = self.run_main('--port', '0')
@@ -121,7 +196,7 @@ class LocalAndRemoteStartTests(StartupCase):
         self.assertEqual(self.served[0]['bind'], '127.0.0.1')
         self.assertEqual(self.served[0]['hosts'], set())
         self.assertNotIn('Remote:', out)
-        self.assertTrue((self.state / 'token').exists())
+        self.assertFalse((self.state / 'token').exists())
         self.assertFalse((self.state / 'pairing.json').exists())
 
     def test_custom_mode_binds_and_accepts_the_named_host(self):
@@ -136,8 +211,7 @@ class LocalAndRemoteStartTests(StartupCase):
         code, out, err = self.run_main('--port', '0', '--reach', 'custom', '--host', '127.0.0.1',
                                        '--allow-host', 'acc.test:9000')
         remote_line = next(line for line in out.splitlines() if line.startswith('Remote:'))
-        token = (self.state / 'token').read_text().strip()
-        self.assertNotIn(token, remote_line)
+        self.assertNotIn(self.servers[0].token, remote_line)
 
 
 @unittest.skipIf(os.name == 'nt', 'uses a shell wrapper for the fake tailscale command')

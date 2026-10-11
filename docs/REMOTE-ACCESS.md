@@ -58,12 +58,13 @@ Three kinds of caller reach the API, and only one is trusted without question.
 
 | Caller | Credential | Gated? |
 |---|---|---|
-| The owner, at this computer | `token` in the state folder, sent from `127.0.0.1` or `localhost` | never |
+| The owner, at this computer | the owner token: memory-only, new at every start, held by the owner's browser tab; sent from `127.0.0.1` or `localhost` | never |
 | The remote-driven orchestrator (the MCP bridge) | `agent-token` in the state folder, local hosts only | yes |
 | A paired device | the device cookie, remote hosts only | yes |
 
-ACC creates `agent-token` at first start, a different secret from `token`. `acc/setup.py` now points new bridge
-configurations at it. An existing bridge configuration keeps using `token` (ungated) until you change its
+ACC creates `agent-token` at first start (a private file, different from the owner token). `acc/setup.py` points new
+bridge configurations at it. An older bridge or tool configuration that points at the former `token` file stops
+working, because that file is removed at start and the owner token is no longer saved anywhere: change its
 `--token-file` to `agent-token`.
 
 A gated caller does not get to run these operations. Each becomes an approval request instead:
@@ -95,10 +96,32 @@ bounded by worktrees, snapshots and review; the gates cover what steps outside t
 a task's `permissions` field is still a label that nothing enforces, and an approved command runs with your full
 user rights, so read the summary before you approve.
 
-**The gates are a guardrail, not a sandbox.** They stop a remote-driven agent that uses ACC's API or the bridge.
-An agent that can also read your files can read `token` in the state folder and act as you. Keep the
-orchestrator's file access away from the state folder, or run it as a different operating-system user. Keeping
-the owner token off disk is a follow-up.
+## Keeping the owner token private
+
+The gates only mean something if the orchestrator cannot act as the owner, so ACC never hands it the owner token:
+
+- The owner token is generated at every start and lives only in the server's memory and the owner's browser tab. It
+  is not in the state folder, a URL, a process argument, or the terminal output.
+- The browser receives it through a one-use launch code (valid 10 minutes). A code that leaks is useless after the
+  first use, and a stolen first use shows up as your own link failing. **New window** in ACC mints another link.
+- The old `token` file from earlier versions is deleted at start.
+
+What this stops: an agent that reads files in the state folder, or the command line and output of ACC, finds no
+owner token. It finds only `agent-token`, whose risky actions wait for your approval.
+
+What it does not stop: an agent running as **your** operating-system account can still read your browser's profile
+or a screenshot of your screen, or read ACC's memory, and so can act as you. For a real boundary, run the
+orchestrator under a different account or in a container:
+
+1. Run ACC as you, with the state folder private (`chmod 700`, the default).
+2. Put the orchestrator's credential where only its account can read it:
+   `python -m acc.server ... --agent-token-file /home/orchestrator/acc/agent-token` (owned by that account, mode 0600
+   or group-readable by it), and point the bridge's `--token-file` at the same file.
+3. Run the orchestrator, and the vendor remote session that drives it, as that account. It cannot read your state
+   folder, your browser profile or ACC's memory.
+
+On Windows the same shape needs a separate Windows account or a container; the vendor desktop apps normally run as
+you, so there the launch-code protection is the realistic limit.
 
 ## What protects it
 

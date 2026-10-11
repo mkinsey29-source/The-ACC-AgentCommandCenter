@@ -319,7 +319,11 @@ def main():
     target = urlsplit(args.url)
     if target.scheme != 'http' or target.hostname not in ('127.0.0.1', 'localhost') or target.username:
         parser.error('Bridge connects only to a local HTTP coordinator.')
-    token = Path(args.token_file).read_text().strip()
+    try:
+        token = Path(args.token_file).read_text().strip()
+    except OSError:
+        parser.error(f'Cannot read the token file {args.token_file}. Point --token-file at agent-token in ACC\'s state folder '
+                     '(start ACC once to create it). The owner token is no longer saved to a file.')
     for line in sys.stdin:
         try:
             message = json.loads(line)

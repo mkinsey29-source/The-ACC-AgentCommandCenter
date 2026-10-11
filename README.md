@@ -33,7 +33,7 @@ On Windows PowerShell:
 py -3 -m acc --project "C:\Projects\HearthandHavoc"
 ```
 
-Open the local URL printed in the terminal. Its fragment contains the session token; keep that link private. The app stores the token only in the browser tab's session storage and removes it from the address bar. Runtime state is stored under your home directory's `.acc` folder, separately from the managed project.
+Open the local URL printed in the terminal. It carries a one-use launch code, not the owner token: the page exchanges the code for the token once, keeps the token only in the browser tab's session storage, and removes the code from the address bar. The owner token is never saved to a file and changes at every start; use **New window** in ACC for another link. Runtime state is stored under your home directory's `.acc` folder, separately from the managed project.
 
 Use `--port 8766`, `--state-dir /private/state/path`, or `--agents /private/agents.json` as needed. The service binds to `127.0.0.1`; no tunnel is needed for local use. Stop with Ctrl+C so supervised work can be stopped and recorded.
 
@@ -94,12 +94,12 @@ Run the bridge as an MCP stdio server in your host's configuration:
 ```json
 {
   "command": "python3",
-  "args": ["-m", "acc.bridge", "--url", "http://127.0.0.1:8765", "--token-file", "/absolute/path/to/state/token"],
+  "args": ["-m", "acc.bridge", "--url", "http://127.0.0.1:8765", "--token-file", "/absolute/path/to/state/agent-token"],
   "cwd": "/absolute/path/to/The-ACC-AgentCommandCenter"
 }
 ```
 
-This is the server command description; the outer configuration shape is host-specific. For Windows, use `py` with `-3` before `-m`. The actual state/token path is printed by the coordinator. Start the coordinator before the bridge. Do not commit the token.
+This is the server command description; the outer configuration shape is host-specific. For Windows, use `py` with `-3` before `-m`. The coordinator prints the `agent-token` path. Start the coordinator before the bridge. The bridge's risky actions wait for your approval (see `docs/REMOTE-ACCESS.md`). Do not commit the token.
 
 Conversation tools include `acc_conversation_read`, `acc_conversation_send`, `acc_conversation_claim`, `acc_conversation_renew`, `acc_conversation_complete`, `acc_conversation_release`, `acc_conversation_retry`, and `acc_orchestrator_select`.
 

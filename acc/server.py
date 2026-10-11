@@ -15,6 +15,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 from .core import Coordinator, Conflict
 from .gates import ApprovalError, Approvals, classify
+from .launch import LaunchCodes, LaunchError
 from .pairing import Pairing, PairingError
 from .reach import MIN_TOKEN_LENGTH, MODES, Reach, ReachError, check as check_reach, format_findings, resolve as resolve_reach
 from .tailscale import Tailscale, TailscaleError
@@ -42,6 +43,7 @@ class Server(ThreadingHTTPServer):
             raise ValueError(f'The agent token must be a different secret of at least {MIN_TOKEN_LENGTH} characters.')
         self.coordinator, self.token, self.agent_token = coordinator, token, agent_token
         self.approvals = Approvals(coordinator, lambda parts, payload: run_mutation(parts, payload, coordinator))
+        self.launch = LaunchCodes(token)  # one-use codes that deliver the memory-only owner token to the owner's browser
         super().__init__(address, Handler)
 
     def remote_origin(self):
@@ -204,19 +206,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parts = urlsplit(self.path).path.strip('/').split('/')
-        public = (parts in (['api', 'pairing', 'claim'], ['api', 'pairing', 'poll'])
-                  and self.host_class() == 'remote' and self.server.pairing is not None)
+        public = ((parts in (['api', 'pairing', 'claim'], ['api', 'pairing', 'poll'])
+                   and self.host_class() == 'remote' and self.server.pairing is not None)
+                  or (parts == ['api', 'launch'] and self.host_class() == 'local'))
         self.principal = None
         if not public and not self.authenticate():
             self.close_connection = True
             return self.reply(403, {'error': 'Local session authorization required.' if self.host_class() == 'local'
                                     else 'This device is not paired.'})
         answers_approval = len(parts) == 4 and parts[:2] == ['api', 'approvals'] and parts[3] in ('approve', 'deny')
-        if (parts[:2] in (['api', 'pairing'], ['api', 'remote']) and not public) or answers_approval:
+        owner_route = parts[:2] in (['api', 'pairing'], ['api', 'remote']) and not public
+        if owner_route or answers_approval or parts == ['api', 'launch', 'new']:
             if not self.owner():
                 self.close_connection = True
                 return self.reply(403, {'error': OWNER_ONLY})
-            if self.server.pairing is None and not answers_approval:
+            if owner_route and self.server.pairing is None:
                 return self.reply(404, {'error': 'Remote access is off. Start ACC with --reach to enable it.'})
         try:
             length = int(self.headers.get('Content-Length', '0'))
@@ -230,6 +234,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('JSON object required.')
             c = self.server.coordinator
             pairing = self.server.pairing
+            if parts == ['api', 'launch']:
+                return self.reply(200, {'token': self.server.launch.redeem(payload.get('code'))})
+            if parts == ['api', 'launch', 'new']:
+                minted = self.server.launch.mint()
+                return self.reply(200, {'url': f'http://127.0.0.1:{self.server.server_port}/#launch={minted["code"]}',
+                                        'expires': minted['expires']})
             if parts == ['api', 'pairing', 'claim']:
                 return self.reply(200, pairing.claim(payload.get('secret'), payload.get('name')))
             if parts == ['api', 'pairing', 'poll']:
@@ -267,7 +277,7 @@ class Handler(BaseHTTPRequestHandler):
             if close:
                 self.close_connection = True
             return self.reply(status, body)
-        except (PairingError, ApprovalError) as exc:
+        except (PairingError, ApprovalError, LaunchError) as exc:
             self.reply(exc.status, {'error': str(exc)})
         except KeyError:
             self.reply(404, {'error': 'Task not found.'})
@@ -372,6 +382,16 @@ def run_mutation(parts, payload, coordinator=None):
         return 500, {'error': 'Operation failed. Inspect local state before retrying.'}, False
 
 
+def _write_secret(path, value):
+    """Create a private file without a moment of default permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(handle, 'w') as out:
+        out.write(value)
+    if os.name != 'nt':
+        os.chmod(path, 0o600)
+
+
 def _refuse(message):
     print(f'ACC refused to start: {message}', file=sys.stderr, flush=True)
     sys.exit(2)
@@ -394,16 +414,17 @@ def main():
                         help='Custom mode only: acknowledge the address may be reachable from the internet')
     parser.add_argument('--behind-https', action='store_true',
                         help='A TLS front door serves the page, so the device cookie is marked Secure')
+    parser.add_argument('--agent-token-file', help='Where the orchestrator credential lives (default: agent-token in the state '
+                        'folder). Put it outside the state folder, readable only by the orchestrator\'s account.')
     parser.add_argument('--reach-check', action='store_true',
                         help='Report every reachability setting and whether ACC would start, then exit')
     args = parser.parse_args()
     project = Path(args.project).resolve()
     suffix = hashlib.sha256(str(project).encode()).hexdigest()[:12]
     state = Path(args.state_dir).resolve() if args.state_dir else Path.home() / '.acc' / suffix
-    token_path = state / 'token'
-    new_token = not token_path.exists()
-    token = secrets.token_urlsafe(32) if new_token else token_path.read_text().strip()
-    agent_path = state / 'agent-token'  # the orchestrator bridge's credential: its risky actions wait for approval
+    token = secrets.token_urlsafe(32)  # the owner token: memory only, new at every start, never written anywhere
+    # The orchestrator bridge's credential: its risky actions wait for approval.
+    agent_path = Path(args.agent_token_file).expanduser().resolve() if args.agent_token_file else state / 'agent-token'
     new_agent = not agent_path.exists()
     agent_token = secrets.token_urlsafe(32) if new_agent else agent_path.read_text().strip()
     tailscale = Tailscale()
@@ -418,13 +439,19 @@ def main():
     except ReachError as exc:
         _refuse(exc)
     coordinator = Coordinator(project, state, args.agents)
-    for path, secret, fresh in ((token_path, token, new_token), (agent_path, agent_token, new_agent)):
-        if fresh:
-            path.write_text(secret)
-            if os.name != 'nt':
-                path.chmod(0o600)
+    legacy = state / 'token'
+    if legacy.exists():  # an older ACC kept the owner token here; it no longer works, so do not leave the secret around
+        try:
+            legacy.unlink()
+            print('Removed the old owner token file. The owner token is now memory-only; point any orchestrator '
+                  'bridge or tool at agent-token instead.', flush=True)
+        except OSError:
+            print(f'Warning: could not remove the old owner token file {legacy}; it is no longer valid, delete it.',
+                  file=sys.stderr, flush=True)
     server = route = None
     try:
+        if new_agent:
+            _write_secret(agent_path, agent_token)
         pairing = Pairing(state / 'pairing.json') if reach.remote else None
         server = Server((reach.bind_host, args.port), coordinator, token, reach=reach, pairing=pairing,
                         agent_token=agent_token)
@@ -443,15 +470,18 @@ def main():
             server.server_close()
         coordinator.close()
         _refuse(exc)
-    print(f'ACC: http://127.0.0.1:{server.server_port}/#token={token}', flush=True)
-    print(f'State: {state}\nPoint the orchestrator bridge at agent-token in the state folder: its risky actions '
-          'wait for your approval. The token file is yours alone. Do not share either.', flush=True)
+    print(f"ACC: http://127.0.0.1:{server.server_port}/#launch={server.launch.mint()['code']}", flush=True)
+    print('That link works once, for 10 minutes; use New window in ACC for another. The owner token is never saved.', flush=True)
+    print(f'State: {state}\nPoint the orchestrator bridge at {agent_path}: its risky actions wait for your approval. '
+          'Do not share it.', flush=True)
     if reach.remote:
         print(f"Remote: {server.remote_origin() or 'accepted hosts: ' + ', '.join(sorted(reach.remote_hosts()))}\n"
               'Pair a device: at this computer open ACC, choose Remote access, then Create pairing link.', flush=True)
     if args.open_browser:
         import webbrowser
-        threading.Thread(target=webbrowser.open, args=(f'http://127.0.0.1:{server.server_port}/#token={token}',), daemon=True).start()
+        # A separate one-use code: the URL is a process argument, so it must carry nothing that stays valid.
+        url = f"http://127.0.0.1:{server.server_port}/#launch={server.launch.mint()['code']}"
+        threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
     def terminate(*_):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)

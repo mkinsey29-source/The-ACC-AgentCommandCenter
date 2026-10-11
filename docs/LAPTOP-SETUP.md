@@ -46,7 +46,7 @@ Settings are saved under `~/.acc` (Windows: the user's home `.acc` folder):
 | `launcher.json` | Absolute project, Python, agents and state paths; port and diagnostic endpoint |
 | `agents.json` | Host-only copy of the example adapters, with automatic conversation initially disabled |
 | `hermes-mcp.json` | Exact mergeable MCP configuration with absolute executable, bridge and token-file paths |
-| Project hash directory | Project database, recordings and session token |
+| Project hash directory | Project database, recordings, `agent-token` for the orchestrator bridge and tools (the owner token is never saved) |
 
 Set `ACC_CONFIG_DIR` before setup and every launch to use another host settings folder. Keep this folder outside Git repositories. On Linux newly written JSON files have owner-only permissions. On Windows use a private user-owned folder. Existing adapter files and unknown launcher settings are preserved. Rerunning `init` refreshes the generated MCP fragment; it does not overwrite Hermes settings, remove project state, or change logins. Changing the project chooses a separate project state directory. Use `--state-dir PATH` to reuse an existing ACC state directory explicitly.
 

@@ -78,7 +78,7 @@ The adapter uses a UTF-8 prompt file, not shell interpolation. It forwards Herme
 For an interactive orchestrator profile, generate a configuration fragment:
 
 ```sh
-python3 -m acc.hermes config --url http://127.0.0.1:8765 --token-file /private/acc-state/token --output /private/acc-mcp.json
+python3 -m acc.hermes config --url http://127.0.0.1:8765 --token-file /private/acc-state/agent-token --output /private/acc-mcp.json
 ```
 
 The output is JSON (also valid YAML) with `mcp_servers.acc.command` and `args`. Merge that entry into the interactive profile's Hermes `config.yaml`; do not replace existing settings. The generated paths are absolute, so Hermes may start the bridge from any directory. The fragment refers to the token file without containing the token.

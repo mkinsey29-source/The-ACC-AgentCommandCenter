@@ -1,6 +1,6 @@
 # Local API and event contract — v0.6
 
-All API calls require `Authorization: Bearer <local token>`. Mutations require JSON. The server accepts only localhost/127.0.0.1 Host values for its bound port and rejects foreign browser origins. No cross-origin access is enabled. The token is a local control credential, not an agent-provider key.
+All API calls require `Authorization: Bearer <token>`: the owner token (memory-only, new at every start, obtained once by exchanging a launch code, see "Owner launch" below) or the orchestrator's `agent-token`. Mutations require JSON. The server accepts only localhost/127.0.0.1 Host values for its bound port and rejects foreign browser origins. No cross-origin access is enabled. The token is a local control credential, not an agent-provider key.
 
 | Method/path | Behavior |
 | --- | --- |
@@ -143,4 +143,11 @@ Callers using the orchestrator credential (`agent-token`) or a paired device are
 - `GET /api/state` includes `attention`: the pending approval requests (`id, kind, summary, details, requested_by, status, created, expires`).
 - `GET /api/approvals/{id}` (any authenticated caller): the request's `status` (`pending`, `approved`, `denied`, `expired`, `executed`, `failed`) and, once run, `result: {status, body}`. MCP: `acc_approval_status`.
 - `POST /api/approvals/{id}/approve` and `/deny` (owner only): approving runs the stored request once and returns the resolved request. 403 for any other caller, 404 unknown, 409 already answered or expired, 429 too many waiting.
+
+### Owner launch
+
+The owner token is never written to disk or placed in a URL or process argument. ACC prints (and opens) `http://127.0.0.1:<port>/#launch=<code>`; the page exchanges the one-use code for the token.
+
+- `POST /api/launch` (local host only, no login): `{code}` returns `{token}` once. The code expires after 10 minutes and works one time; a wrong or reused code returns 403, and 30 attempts a minute are allowed (429 beyond that). It is refused on any remote host, and a refusal does not use up the code.
+- `POST /api/launch/new` (owner only): returns `{url, expires}` with a fresh one-use link, for another window.
 
