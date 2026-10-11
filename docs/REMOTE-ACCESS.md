@@ -49,8 +49,56 @@ ACC also refuses to start, with the reason, for an unsafe combination:
 
 Limits: at most 8 paired devices; a device is valid for 180 days; 60 pairing attempts a minute across the
 node; a pending request expires after 5 minutes. Pairing state is the file `pairing.json` in ACC's state
-folder (digests only, owner-readable). A paired device has full control of ACC, like the local page, until
-finer permission gates (SC-9) exist; Disconnect it if the phone is lost.
+folder (digests only, owner-readable). A paired device can do what the local page can, except the gated
+operations below; Disconnect it if the phone is lost.
+
+## Permission gates
+
+Three kinds of caller reach the API, and only one is trusted without question.
+
+| Caller | Credential | Gated? |
+|---|---|---|
+| The owner, at this computer | `token` in the state folder, sent from `127.0.0.1` or `localhost` | never |
+| The remote-driven orchestrator (the MCP bridge) | `agent-token` in the state folder, local hosts only | yes |
+| A paired device | the device cookie, remote hosts only | yes |
+
+ACC creates `agent-token` at first start, a different secret from `token`. `acc/setup.py` now points new bridge
+configurations at it. An existing bridge configuration keeps using `token` (ungated) until you change its
+`--token-file` to `agent-token`.
+
+A gated caller does not get to run these operations. Each becomes an approval request instead:
+
+| Operation | Why it is gated |
+|---|---|
+| Create a task with a local command (`argv`) | it executes any command as you |
+| Export the archive (`archive/export`) | it writes files wherever the caller points |
+| Publish a task (`publish`) | it pushes a branch and opens a pull request |
+| Change GitHub settings (`github/configure`) | it decides where reviewed work is pushed |
+| Recover an interrupted task (`recover`) | it asserts that you inspected the process tree |
+| Accept shared memory (`memory/{id}/review` with `active`) | every agent then treats it as established |
+| Rewrite a vault note's status (`knowledge/transition`), or rebut one (`knowledge/rebuttal`) | it overwrites an existing note and can mark it disproven |
+| Add a vault note already marked `verified` or `active` (`knowledge/note`) | it claims a verification nobody did |
+
+How it works: the call returns `202` with `approval_required` and an approval id, and nothing runs. The request
+appears under **Needs your decision** in ACC at this computer (the `attention` list in `/api/state`), saying who
+asked and exactly what it will do. **Approve** runs that stored request once, as you; **Deny** drops it.
+The caller follows it with `GET /api/approvals/{id}` (the bridge has `acc_approval_status`). A request expires
+after 10 minutes, at most 20 can wait, an identical retry returns the same request, and every step is written to
+the Activity feed. Pending requests are kept in memory, so a restart drops them and the caller asks again.
+
+A gated caller cannot raise its own permissions: approving, denying, pairing and the device list are for the owner
+only, the agent token is refused on remote hosts, and the owner token is refused there too.
+
+Not gated, on purpose: starting and running configured AI workers, creating tasks without a command, conversation,
+project mode, orchestrator selection, rejecting memory, and ordinary knowledge check-ins, which already require evidence. Worker runs are the product and are
+bounded by worktrees, snapshots and review; the gates cover what steps outside that boundary. Two limits to know:
+a task's `permissions` field is still a label that nothing enforces, and an approved command runs with your full
+user rights, so read the summary before you approve.
+
+**The gates are a guardrail, not a sandbox.** They stop a remote-driven agent that uses ACC's API or the bridge.
+An agent that can also read your files can read `token` in the state folder and act as you. Keep the
+orchestrator's file access away from the state folder, or run it as a different operating-system user. Keeping
+the owner token off disk is a follow-up.
 
 ## What protects it
 
@@ -78,8 +126,8 @@ Browse to the address in `--allow-host`, then pair as above. Keep `/state` on a 
 
 ## What is and is not verified
 
-Tested here: every mode's accept and refuse rules, the pairing flow, the HTTP rules above, and the browser
-pairing screen in headless Chromium. The Tailscale route is tested against a fake `tailscale` command that
+Tested here: every mode's accept and refuse rules, the pairing flow, the HTTP rules above, the permission gates, and the browser
+pairing and approval screens in headless Chromium. The Tailscale route is tested against a fake `tailscale` command that
 mimics the output ACC reads; it has **not** been run against real Tailscale. Real Tailscale, a real phone,
 and Docker still need checking on the owner's computer. There is no QR code yet; open the link or type the
 code. The design follows ACC-Workspace's mobile pairing and Tailscale route (both MIT).

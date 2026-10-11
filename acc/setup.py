@@ -102,7 +102,7 @@ def initialize(args, directory=None):
     # Mergeable fragment uses the existing Hermes generator's exact schema.
     write_json(directory / 'hermes-mcp.json', {'mcp_servers': {'acc': {
         'command': saved['python'], 'args': [str(REPO / 'acc' / 'bridge.py'),
-        '--url', 'http://127.0.0.1:' + str(port), '--token-file', str(Path(state) / 'token')]
+        '--url', 'http://127.0.0.1:' + str(port), '--token-file', str(Path(state) / 'agent-token')]
     }}})
     return saved
 

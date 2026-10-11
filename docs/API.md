@@ -135,3 +135,12 @@ See `docs/REMOTE-ACCESS.md`. In `local` mode (the default) none of this is reach
 
 "Owner" means a request with a local Host and the local control token. Over a remote host only a paired device's cookie authenticates; the control token is refused. Pairing errors: 403 bad or used link, 404 unknown request, 409 expired or device cap reached, 429 too many attempts.
 
+### Permission gates (SC-9)
+
+Callers using the orchestrator credential (`agent-token`) or a paired device are gated; the owner is not. See `docs/REMOTE-ACCESS.md`.
+
+- A gated operation (a task with `argv`, `archive/export`, `tasks/{id}/publish`, `github/configure`, `tasks/{id}/recover`, `memory/{id}/review` with `active`, `knowledge/transition`, `knowledge/rebuttal`, `knowledge/note` with status `verified` or `active`) returns `202 {status:"approval_required", approval_id, approval, message}` and does not run.
+- `GET /api/state` includes `attention`: the pending approval requests (`id, kind, summary, details, requested_by, status, created, expires`).
+- `GET /api/approvals/{id}` (any authenticated caller): the request's `status` (`pending`, `approved`, `denied`, `expired`, `executed`, `failed`) and, once run, `result: {status, body}`. MCP: `acc_approval_status`.
+- `POST /api/approvals/{id}/approve` and `/deny` (owner only): approving runs the stored request once and returns the resolved request. 403 for any other caller, 404 unknown, 409 already answered or expired, 429 too many waiting.
+

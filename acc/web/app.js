@@ -28,6 +28,7 @@ async function refresh() {
   render();
 }
 function render() {
+  renderAttention();
   renderConversation();
   renderGitHub();
   renderIntegrations();
@@ -395,4 +396,21 @@ $('remote-panel').onclick = async e => {
   const action = button.dataset.pairAction;
   try { await api('pairing/' + action, action === 'revoke' ? {device_id: button.dataset.id} : {request_id: button.dataset.id}); error(''); await refreshRemote(); }
   catch (err) { error(err.message); }
+};
+
+// Attention: risky requests from remote devices or the orchestrator wait for the owner at this computer.
+function renderAttention() {
+  const items = state.attention || [];
+  $('attention-panel').hidden = !items.length;
+  $('attention-list').innerHTML = items.map(a => `<div class="integration-record"><strong>${escapeHTML(a.summary)}</strong><small>Asked by ${escapeHTML(a.requested_by)} · expires ${new Date(a.expires * 1000).toLocaleTimeString()}</small>${remoteDevice ? '<small>Waiting for the owner to answer at the computer.</small>' : `<div class="actions"><button class="primary" data-approval="approve" data-id="${escapeHTML(a.id)}">Approve</button><button data-approval="deny" data-id="${escapeHTML(a.id)}">Deny</button></div>`}</div>`).join('');
+}
+$('attention-list').onclick = async e => {
+  const button = e.target.closest('[data-approval]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const result = await api(`approvals/${button.dataset.id}/${button.dataset.approval}`, {});
+    error(result.status === 'failed' ? 'The approved action failed: ' + (result.result?.body?.error || 'see Activity') : '');
+    await refresh();
+  } catch (err) { error(err.message); await refresh().catch(() => {}); }
 };

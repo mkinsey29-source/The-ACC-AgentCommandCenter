@@ -28,7 +28,8 @@ class StartupCase(unittest.TestCase):
     def run_main(self, *argv, serve=None):
         def fake_serve(srv, *a, **k):
             self.served.append({'hosts': set(srv.reach.remote_hosts()), 'route': srv.route,
-                                'remote_origin': srv.remote_origin(), 'bind': srv.server_address[0]})
+                                'remote_origin': srv.remote_origin(), 'bind': srv.server_address[0],
+                                'agent_token': srv.agent_token})
             if serve:
                 serve(srv)
             raise KeyboardInterrupt
@@ -77,6 +78,40 @@ class RefusalTests(StartupCase):
         code, out, err = self.run_main('--port', str(sock.getsockname()[1]))
         self.assertEqual(code, 2)
         self.assertIn('ACC refused to start:', err)
+
+
+class AgentTokenTests(StartupCase):
+    def test_start_creates_a_private_agent_token_different_from_the_owner_token(self):
+        code, out, err = self.run_main('--port', '0')
+        self.assertEqual(code, 0, err)
+        owner = (self.state / 'token').read_text().strip()
+        agent = (self.state / 'agent-token').read_text().strip()
+        self.assertNotEqual(owner, agent)
+        self.assertGreaterEqual(len(agent), 32)
+        self.assertEqual(self.served[0]['agent_token'], agent)
+        if os.name != 'nt':
+            self.assertEqual((self.state / 'agent-token').stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(agent, out + err)
+        self.assertIn('agent-token', out)
+
+    def test_a_restart_keeps_the_same_agent_token(self):
+        self.run_main('--port', '0')
+        first = (self.state / 'agent-token').read_text()
+        self.run_main('--port', '0')
+        self.assertEqual((self.state / 'agent-token').read_text(), first)
+        self.assertEqual(self.served[1]['agent_token'], first.strip())
+
+    def test_a_weak_agent_token_file_is_a_clean_refusal(self):
+        self.state.mkdir()
+        (self.state / 'agent-token').write_text('short')
+        code, out, err = self.run_main('--port', '0')
+        self.assertEqual(code, 2)
+        self.assertIn('ACC refused to start:', err)
+        self.assertEqual(self.served, [])
+
+    def test_the_reach_check_creates_no_agent_token(self):
+        self.run_main('--reach-check')
+        self.assertFalse(self.state.exists())
 
 
 class LocalAndRemoteStartTests(StartupCase):

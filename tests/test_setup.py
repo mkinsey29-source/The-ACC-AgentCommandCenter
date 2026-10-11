@@ -49,7 +49,7 @@ class SetupTests(unittest.TestCase):
         fragment = setup.read_json(self.host / 'hermes-mcp.json')['mcp_servers']['acc']
         self.assertTrue(Path(fragment['command']).is_absolute())
         self.assertTrue(Path(fragment['args'][0]).is_absolute())
-        self.assertEqual(fragment['args'][-1], str(Path(settings['state_dir']) / 'token'))
+        self.assertEqual(fragment['args'][-1], str(Path(settings['state_dir']) / 'agent-token'))
         with patch.object(setup.subprocess, 'call', return_value=0) as run:
             self.assertEqual(setup.launch(settings), 0)
         argv = run.call_args.args[0]

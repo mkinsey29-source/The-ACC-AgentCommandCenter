@@ -15,8 +15,10 @@ TOOLS = [
       'implementer': {'type': 'string'}, 'reviewer': {'type': 'string'}, 'coordinator': {'type': 'string'},
       'max_rounds': {'type': 'integer'}, 'mode': {'type': 'string', 'enum': ['online', 'offline']},
       'fallbacks': {'type': 'object', 'properties': {r: {'type': 'string'} for r in ('implementer', 'reviewer', 'coordinator')}, 'additionalProperties': False}}, ['task_id']),
+    ('acc_approval_status', 'Read the status of an approval request the owner has been asked to answer: pending, approved, denied, expired, executed or failed, with the result once executed.',
+     {'approval_id': {'type': 'string'}}, ['approval_id']),
     ('acc_state', 'Read tasks, workers, autonomous-routing profiles, local Git state, and current event cursor.', {}, []),
-    ('acc_create_task', 'Record an instruction and optional explicit local command. Does not start it.',
+    ('acc_create_task', 'Record an instruction and optional explicit local command. Does not start it. A task with a local command (argv) needs the owner\'s approval when called with the orchestrator credential: the call returns approval_required with an approval_id; check it with acc_approval_status.',
      {'title': {'type': 'string'}, 'instruction': {'type': 'string'}, 'agent': {'type': 'string'},
       'argv': {'type': 'array', 'items': {'type': 'string'}}, 'task_area': {'type': 'string'},
       'workstream_id': {'type': 'string'},
@@ -90,7 +92,7 @@ TOOLS.extend([
     ('acc_search_archive', 'Search permanent task history by text, status, agent, or task-number range.',
      {'q': {'type': 'string'}, 'status': {'type': 'string'}, 'agent': {'type': 'string'},
       'number_from': {'type': 'integer'}, 'number_to': {'type': 'integer'}, 'limit': {'type': 'integer'}}, []),
-    ('acc_export_archive', 'Export a Markdown task archive and consistent SQLite backup to an existing absolute local directory.',
+    ('acc_export_archive', "Export a Markdown task archive and consistent SQLite backup to an existing absolute local directory. When called with the orchestrator credential this waits for the owner's approval in ACC's Attention panel: the call returns approval_required with an approval_id; check it with acc_approval_status.",
      {'directory': {'type': 'string'}}, ['directory']),
     ('acc_create_recovery_handoff', 'Create a numbered successor task from known state after an unavailable worker has stopped.',
      {'task_id': {'type': 'string'}, 'agent': {'type': 'string'}, 'reason': {'type': 'string'}}, ['task_id', 'agent', 'reason']),
@@ -99,11 +101,11 @@ TOOLS.extend([
     ('acc_schedule_task', 'Set priority (higher first) and tasks that must be accepted before this task runs. Rejects dependency cycles.',
      {'task_id': {'type': 'string'}, 'priority': {'type': 'integer', 'minimum': 0, 'maximum': 100}, 'depends_on': {'type': 'array', 'items': {'type': 'string'}}}, ['task_id']),
     ('acc_github_refresh', 'Request a remote GitHub refresh. Read acc_state for timestamped cached results.', {}, []),
-    ('acc_github_configure', 'Configure GitHub remote, source branch, base branch, and polling interval.',
+    ('acc_github_configure', "Configure GitHub remote, source branch, base branch, and polling interval. When called with the orchestrator credential this waits for the owner's approval in ACC's Attention panel: the call returns approval_required with an approval_id; check it with acc_approval_status.",
      {'enabled': {'type': 'boolean'}, 'remote': {'type': 'string'}, 'source': {'type': 'string'}, 'base': {'type': 'string'}, 'interval': {'type': 'integer'}}, []),
     ('acc_publish_preview', 'Read the exact publication target and changed paths for accepted, independently reviewed work. Does not publish.',
      {'task_id': {'type': 'string'}}, ['task_id']),
-    ('acc_publish_task', 'Publish a reviewed preview under existing user authorization: commit, non-force push, and create or reuse a PR. Never merges.',
+    ('acc_publish_task', "Publish a reviewed preview under existing user authorization: commit, non-force push, and create or reuse a PR. Never merges. When called with the orchestrator credential this waits for the owner's approval in ACC's Attention panel: the call returns approval_required with an approval_id; check it with acc_approval_status.",
      {'task_id': {'type': 'string'}, 'preview_id': {'type': 'string'}, 'request_id': {'type': 'string'}}, ['task_id', 'preview_id', 'request_id']),
     ('acc_submit_integration_job', 'Durably queue a capability job. Remote jobs wait while offline; a stable idempotency key makes retries safe.',
      {'capability': {'type': 'string'}, 'provider': {'type': 'string'}, 'task_id': {'type': 'string'},
@@ -137,7 +139,7 @@ TOOLS.extend([
       'branch': {'type': 'string'}, 'commit': {'type': 'string'},
       'tags': {'type': 'array', 'items': {'type': 'string'}}, 'request_id': {'type': 'string'}},
      ['title', 'body']),
-    ('acc_memory_review', 'Accept or reject a proposed memory version. Acceptance supersedes the prior active version.',
+    ('acc_memory_review', 'Accept or reject a proposed memory version. Acceptance supersedes the prior active version. Rejecting needs no approval; accepting is the owner\'s decision when called with the orchestrator credential: it returns approval_required with an approval_id; check it with acc_approval_status.',
      {'memory_id': {'type': 'string'}, 'status': {'type': 'string', 'enum': ['active', 'rejected']},
       'reviewer': {'type': 'string'}}, ['memory_id', 'status']),
     ('acc_knowledge_state', 'Read the configured project-scoped Obsidian knowledge-vault status.', {}, []),
@@ -234,6 +236,11 @@ def dispatch(message, url, token):
             raise ValueError('Unknown tool')
         if name == 'acc_state':
             path, data = '/api/state', None
+        elif name == 'acc_approval_status':
+            approval_id = args.get('approval_id')
+            if not isinstance(approval_id, str) or not approval_id.isalnum():
+                raise ValueError('Invalid approval ID')
+            path, data = '/api/approvals/' + approval_id, None
         elif name == 'acc_conversation_read':
             from urllib.parse import urlencode
             after = args.get('after', 0)

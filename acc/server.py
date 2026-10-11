@@ -2,6 +2,7 @@
 import argparse
 from http.cookies import CookieError, SimpleCookie
 import hashlib
+import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -13,8 +14,9 @@ import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
 from .core import Coordinator, Conflict
+from .gates import ApprovalError, Approvals, classify
 from .pairing import Pairing, PairingError
-from .reach import MODES, Reach, ReachError, check as check_reach, format_findings, resolve as resolve_reach
+from .reach import MIN_TOKEN_LENGTH, MODES, Reach, ReachError, check as check_reach, format_findings, resolve as resolve_reach
 from .tailscale import Tailscale, TailscaleError
 
 WEB = Path(__file__).parent / 'web'
@@ -23,14 +25,23 @@ LOOPBACK_CLIENTS = ('127.0.0.1', '::1')
 OWNER_ONLY = 'Only the owner at this computer can manage remote access.'
 
 
+def _same(received, expected):
+    """Constant-time comparison that cannot raise on a non-ASCII header."""
+    return hmac.compare_digest(received.encode('utf-8', 'replace'), expected.encode('utf-8', 'replace'))
+
+
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, coordinator, token, reach=None, pairing=None):
+    def __init__(self, address, coordinator, token, reach=None, pairing=None, agent_token=None):
         self.reach = reach or Reach()
         self.pairing, self.route = pairing, None
         self.reach.validate(token, address[0], pairing is not None)  # refuse an unsafe combination before binding
-        self.coordinator, self.token = coordinator, token
+        if agent_token is not None and (not isinstance(agent_token, str) or len(agent_token) < MIN_TOKEN_LENGTH
+                                        or agent_token == token):
+            raise ValueError(f'The agent token must be a different secret of at least {MIN_TOKEN_LENGTH} characters.')
+        self.coordinator, self.token, self.agent_token = coordinator, token, agent_token
+        self.approvals = Approvals(coordinator, lambda parts, payload: run_mutation(parts, payload, coordinator))
         super().__init__(address, Handler)
 
     def remote_origin(self):
@@ -90,8 +101,11 @@ class Handler(BaseHTTPRequestHandler):
         self.principal = None
         kind = self.host_class()
         if kind == 'local':
-            if secrets.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + self.server.token):
-                self.principal = ('local', None)
+            header = self.headers.get('Authorization', '')
+            if _same(header, 'Bearer ' + self.server.token):
+                self.principal = ('local', None)  # the owner: never gated
+            elif self.server.agent_token and _same(header, 'Bearer ' + self.server.agent_token):
+                self.principal = ('agent', None)  # the remote-driven orchestrator: gated
         elif kind == 'remote' and self.server.pairing is not None:
             device = self.server.pairing.authenticate(self.device_credential())
             if device:
@@ -100,6 +114,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def owner(self):
         return self.principal is not None and self.principal[0] == 'local'
+
+    def principal_identity(self):
+        kind, device = self.principal
+        if kind == 'agent':
+            return 'agent', 'the orchestrator'
+        return 'device:' + device['id'], f"device “{device['name']}”"
 
     def do_GET(self):
         if self.host_class() is None:
@@ -119,7 +139,10 @@ class Handler(BaseHTTPRequestHandler):
                     'devices': server.pairing.devices() if server.pairing else [],
                     'pending': server.pairing.pending() if server.pairing else []})
             if url.path == '/api/state':
-                return self.reply(200, self.server.coordinator.snapshot())
+                return self.reply(200, {**self.server.coordinator.snapshot(), 'attention': self.server.approvals.pending()})
+            if url.path.startswith('/api/approvals/') and url.path.count('/') == 3:
+                found = self.server.approvals.get(url.path.rsplit('/', 1)[1])
+                return self.reply(200, found) if found else self.reply(404, {'error': 'Unknown approval request.'})
             if url.path == '/api/conversation':
                 try:
                     query = parse_qs(url.query)
@@ -188,11 +211,12 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return self.reply(403, {'error': 'Local session authorization required.' if self.host_class() == 'local'
                                     else 'This device is not paired.'})
-        if parts[:2] in (['api', 'pairing'], ['api', 'remote']) and not public:
+        answers_approval = len(parts) == 4 and parts[:2] == ['api', 'approvals'] and parts[3] in ('approve', 'deny')
+        if (parts[:2] in (['api', 'pairing'], ['api', 'remote']) and not public) or answers_approval:
             if not self.owner():
                 self.close_connection = True
                 return self.reply(403, {'error': OWNER_ONLY})
-            if self.server.pairing is None:
+            if self.server.pairing is None and not answers_approval:
                 return self.reply(404, {'error': 'Remote access is off. Start ACC with --reach to enable it.'})
         try:
             length = int(self.headers.get('Content-Length', '0'))
@@ -229,80 +253,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {'denied': True})
             if parts == ['api', 'pairing', 'revoke']:
                 return self.reply(200, {'revoked': pairing.revoke(payload.get('device_id'))})
-            if parts == ['api', 'voice', 'save']:
-                return self.reply(200, c.voice.save(payload))
-            if parts == ['api', 'voice', 'retry']:
-                return self.reply(200, c.voice.retry(payload))
-            if len(parts) == 3 and parts[:2] == ['api', 'conversation']:
-                routes = {'send': c.conversation.append, 'configure': c.conversation.configure,
-                          'claim': c.conversation.claim, 'renew': c.conversation.renew,
-                          'complete': c.conversation.complete, 'release': c.conversation.release,
-                          'retry': lambda _: c.conversation.retry()}
-                if parts[2] not in routes:
-                    return self.reply(404, {'error': 'Unknown conversation operation.'})
-                return self.reply(200, routes[parts[2]](payload))
-            if parts == ['api', 'orchestrators', 'select']:
-                return self.reply(200, c.orchestrators.select(payload))
-            if len(parts) == 3 and parts[:2] == ['api', 'github']:
-                routes = {'configure': c.github.configure, 'refresh': lambda _: c.github.refresh()}
-                if parts[2] not in routes:
-                    return self.reply(404, {'error': 'Unknown GitHub operation.'})
-                return self.reply(200, routes[parts[2]](payload))
-            if parts == ['api', 'project', 'mode']:
-                return self.reply(200, c.controls.set_mode(payload))
-            if parts == ['api', 'archive', 'export']:
-                return self.reply(200, c.archive.export(payload))
-            if parts == ['api', 'integrations', 'jobs']:
-                return self.reply(201, c.integrations.submit(payload))
-            if parts == ['api', 'integrations', 'claim']:
-                return self.reply(200, c.integrations.claim(payload))
-            if len(parts) == 5 and parts[:3] == ['api', 'integrations', 'jobs']:
-                job_id, action = parts[3:]
-                routes = {'renew': lambda: c.integrations.renew(job_id, payload),
-                          'finish': lambda: c.integrations.finish(job_id, payload),
-                          'cancel': lambda: c.integrations.cancel(job_id),
-                          'request-cancel': lambda: c.integrations.request_cancel(job_id),
-                          'retry': lambda: c.integrations.retry(job_id)}
-                if action not in routes:
-                    return self.reply(404, {'error': 'Unknown integration job operation.'})
-                return self.reply(200, routes[action]())
-            if parts == ['api', 'memory', 'propose']:
-                return self.reply(201, c.integrations.propose_memory(payload))
-            if len(parts) == 4 and parts[:2] == ['api', 'memory'] and parts[3] == 'review':
-                return self.reply(200, c.integrations.review_memory(parts[2], payload))
-            if len(parts) == 3 and parts[:2] == ['api', 'knowledge']:
-                routes = {
-                    'search': c.knowledge.search, 'checkout': c.knowledge.checkout,
-                    'checkin': c.knowledge.checkin, 'note': c.knowledge.create_note,
-                    'review': c.knowledge.review, 'transition': c.knowledge.transition,
-                    'rebuttal': c.knowledge.rebuttal,
-                }
-                if parts[2] not in routes:
-                    return self.reply(404, {'error': 'Unknown knowledge operation.'})
-                return self.reply(200, routes[parts[2]](payload))
-            if parts == ['api', 'tasks']:
-                return self.reply(201, c.create(payload))
-            if len(parts) != 4 or parts[:2] != ['api', 'tasks']:
-                return self.reply(404, {'error': 'Unknown endpoint.'})
-            task, action = parts[2:]
-            routes = {
-                'switch': lambda: c.controls.switch(task, payload),
-                'schedule': lambda: c.controls.schedule(task, payload),
-                'publish-preview': lambda: c.github.preview(task),
-                'publish': lambda: c.github.publish(task, payload),
-                'start': lambda: c.start(task), 'stop': lambda: c.stop(task),
-                'assign': lambda: c.assign(task, payload.get('agent')),
-                'instructions': lambda: c.revise(task, payload.get('instruction')),
-                'report': lambda: c.report(task, payload), 'review': lambda: c.review(task, payload),
-                'workflow': lambda: c.workflows.configure(task, payload),
-                'recover': lambda: c.recover(task) if payload.get('process_tree_inspected') is True else
-                           (_ for _ in ()).throw(ValueError('Explicit process-tree inspection acknowledgement required.')),
-                'recovery-handoff': lambda: c.controls.recovery_handoff(task, payload),
-            }
-            if action not in routes:
-                return self.reply(404, {'error': 'Unknown action.'})
-            return self.reply(200, routes[action]())
-        except PairingError as exc:
+            if answers_approval:
+                return self.reply(200, self.server.approvals.resolve(parts[2], parts[3] == 'approve'))
+            if self.principal is not None and self.principal[0] in ('device', 'agent'):
+                gate = classify(c, parts, payload)
+                if gate:
+                    key, label = self.principal_identity()
+                    asked = self.server.approvals.request(key, label, gate, parts, payload)
+                    return self.reply(202, {'status': 'approval_required', 'approval_id': asked['id'], 'approval': asked,
+                                            'message': 'The owner must approve this at the computer, in Attention. '
+                                                       f"Check GET /api/approvals/{asked['id']}."})
+            status, body, close = run_mutation(parts, payload, c)
+            if close:
+                self.close_connection = True
+            return self.reply(status, body)
+        except (PairingError, ApprovalError) as exc:
             self.reply(exc.status, {'error': str(exc)})
         except KeyError:
             self.reply(404, {'error': 'Task not found.'})
@@ -313,6 +278,98 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(400, {'error': str(exc)})
         except Exception:
             self.reply(500, {'error': 'Operation failed. Inspect local state before retrying.'})
+
+
+def mutate(c, parts, payload):
+    """Run one mutating API call and return (status, body). Shared by direct calls and approved requests."""
+    if parts == ['api', 'voice', 'save']:
+        return (200, c.voice.save(payload))
+    if parts == ['api', 'voice', 'retry']:
+        return (200, c.voice.retry(payload))
+    if len(parts) == 3 and parts[:2] == ['api', 'conversation']:
+        routes = {'send': c.conversation.append, 'configure': c.conversation.configure,
+                  'claim': c.conversation.claim, 'renew': c.conversation.renew,
+                  'complete': c.conversation.complete, 'release': c.conversation.release,
+                  'retry': lambda _: c.conversation.retry()}
+        if parts[2] not in routes:
+            return (404, {'error': 'Unknown conversation operation.'})
+        return (200, routes[parts[2]](payload))
+    if parts == ['api', 'orchestrators', 'select']:
+        return (200, c.orchestrators.select(payload))
+    if len(parts) == 3 and parts[:2] == ['api', 'github']:
+        routes = {'configure': c.github.configure, 'refresh': lambda _: c.github.refresh()}
+        if parts[2] not in routes:
+            return (404, {'error': 'Unknown GitHub operation.'})
+        return (200, routes[parts[2]](payload))
+    if parts == ['api', 'project', 'mode']:
+        return (200, c.controls.set_mode(payload))
+    if parts == ['api', 'archive', 'export']:
+        return (200, c.archive.export(payload))
+    if parts == ['api', 'integrations', 'jobs']:
+        return (201, c.integrations.submit(payload))
+    if parts == ['api', 'integrations', 'claim']:
+        return (200, c.integrations.claim(payload))
+    if len(parts) == 5 and parts[:3] == ['api', 'integrations', 'jobs']:
+        job_id, action = parts[3:]
+        routes = {'renew': lambda: c.integrations.renew(job_id, payload),
+                  'finish': lambda: c.integrations.finish(job_id, payload),
+                  'cancel': lambda: c.integrations.cancel(job_id),
+                  'request-cancel': lambda: c.integrations.request_cancel(job_id),
+                  'retry': lambda: c.integrations.retry(job_id)}
+        if action not in routes:
+            return (404, {'error': 'Unknown integration job operation.'})
+        return (200, routes[action]())
+    if parts == ['api', 'memory', 'propose']:
+        return (201, c.integrations.propose_memory(payload))
+    if len(parts) == 4 and parts[:2] == ['api', 'memory'] and parts[3] == 'review':
+        return (200, c.integrations.review_memory(parts[2], payload))
+    if len(parts) == 3 and parts[:2] == ['api', 'knowledge']:
+        routes = {
+            'search': c.knowledge.search, 'checkout': c.knowledge.checkout,
+            'checkin': c.knowledge.checkin, 'note': c.knowledge.create_note,
+            'review': c.knowledge.review, 'transition': c.knowledge.transition,
+            'rebuttal': c.knowledge.rebuttal,
+        }
+        if parts[2] not in routes:
+            return (404, {'error': 'Unknown knowledge operation.'})
+        return (200, routes[parts[2]](payload))
+    if parts == ['api', 'tasks']:
+        return (201, c.create(payload))
+    if len(parts) != 4 or parts[:2] != ['api', 'tasks']:
+        return (404, {'error': 'Unknown endpoint.'})
+    task, action = parts[2:]
+    routes = {
+        'switch': lambda: c.controls.switch(task, payload),
+        'schedule': lambda: c.controls.schedule(task, payload),
+        'publish-preview': lambda: c.github.preview(task),
+        'publish': lambda: c.github.publish(task, payload),
+        'start': lambda: c.start(task), 'stop': lambda: c.stop(task),
+        'assign': lambda: c.assign(task, payload.get('agent')),
+        'instructions': lambda: c.revise(task, payload.get('instruction')),
+        'report': lambda: c.report(task, payload), 'review': lambda: c.review(task, payload),
+        'workflow': lambda: c.workflows.configure(task, payload),
+        'recover': lambda: c.recover(task) if payload.get('process_tree_inspected') is True else
+                   (_ for _ in ()).throw(ValueError('Explicit process-tree inspection acknowledgement required.')),
+        'recovery-handoff': lambda: c.controls.recovery_handoff(task, payload),
+    }
+    if action not in routes:
+        return (404, {'error': 'Unknown action.'})
+    return (200, routes[action]())
+
+
+def run_mutation(parts, payload, coordinator=None):
+    """mutate() with errors mapped to HTTP statuses: returns (status, body, close_connection)."""
+    try:
+        status, body = mutate(coordinator, parts, payload)
+        return status, body, False
+    except KeyError:
+        return 404, {'error': 'Task not found.'}, False
+    except Conflict as exc:
+        return 409, {'error': str(exc)}, False
+    except (ValueError, TypeError, AttributeError) as exc:
+        return 400, {'error': str(exc)}, True
+    except Exception:
+        return 500, {'error': 'Operation failed. Inspect local state before retrying.'}, False
 
 
 def _refuse(message):
@@ -346,6 +403,9 @@ def main():
     token_path = state / 'token'
     new_token = not token_path.exists()
     token = secrets.token_urlsafe(32) if new_token else token_path.read_text().strip()
+    agent_path = state / 'agent-token'  # the orchestrator bridge's credential: its risky actions wait for approval
+    new_agent = not agent_path.exists()
+    agent_token = secrets.token_urlsafe(32) if new_agent else agent_path.read_text().strip()
     tailscale = Tailscale()
     options = dict(port=args.port, host=args.host, allow_hosts=args.allow_host, public_ack=args.public_ack,
                    behind_https=args.behind_https, route=tailscale if args.reach == 'tailscale-serve' else None)
@@ -358,14 +418,16 @@ def main():
     except ReachError as exc:
         _refuse(exc)
     coordinator = Coordinator(project, state, args.agents)
-    if new_token:
-        token_path.write_text(token)
-        if os.name != 'nt':
-            token_path.chmod(0o600)
+    for path, secret, fresh in ((token_path, token, new_token), (agent_path, agent_token, new_agent)):
+        if fresh:
+            path.write_text(secret)
+            if os.name != 'nt':
+                path.chmod(0o600)
     server = route = None
     try:
         pairing = Pairing(state / 'pairing.json') if reach.remote else None
-        server = Server((reach.bind_host, args.port), coordinator, token, reach=reach, pairing=pairing)
+        server = Server((reach.bind_host, args.port), coordinator, token, reach=reach, pairing=pairing,
+                        agent_token=agent_token)
         if reach.mode == 'tailscale-serve':
             record = state / 'reach.json'
             try:
@@ -376,13 +438,14 @@ def main():
             record.write_text(json.dumps({'route': {k: route[k] for k in ('port', 'hostname', 'target')}}))
             reach.set_remote_hosts([route['host']])
             server.route = route
-    except (ReachError, PairingError, TailscaleError, OSError) as exc:
+    except (ReachError, PairingError, TailscaleError, OSError, ValueError) as exc:
         if server is not None:
             server.server_close()
         coordinator.close()
         _refuse(exc)
     print(f'ACC: http://127.0.0.1:{server.server_port}/#token={token}', flush=True)
-    print(f'State: {state}\nUse the token file for the orchestrator bridge. Do not share it.', flush=True)
+    print(f'State: {state}\nPoint the orchestrator bridge at agent-token in the state folder: its risky actions '
+          'wait for your approval. The token file is yours alone. Do not share either.', flush=True)
     if reach.remote:
         print(f"Remote: {server.remote_origin() or 'accepted hosts: ' + ', '.join(sorted(reach.remote_hosts()))}\n"
               'Pair a device: at this computer open ACC, choose Remote access, then Create pairing link.', flush=True)
