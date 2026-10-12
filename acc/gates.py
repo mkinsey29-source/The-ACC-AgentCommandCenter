@@ -51,6 +51,24 @@ def _task_title(coordinator, task_id) -> str:
         return str(task_id)
 
 
+def _items(payload) -> list[dict]:
+    items = payload.get('completed_knowledge')
+    return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+
+def _checkin_promotes(payload: dict) -> bool:
+    """A check-in can mark itself verified/active, or carry completed knowledge that is already verified."""
+    return payload.get('status') in ('verified', 'active') or any(i.get('status') == 'verified' for i in _items(payload))
+
+
+def _publish_target(coordinator) -> dict:
+    try:
+        settings = coordinator.github.settings
+        return {key: _clip(settings.get(key, ''), 200) for key in ('remote', 'source', 'base')}
+    except Exception:
+        return {}
+
+
 def classify(coordinator, parts: list[str], payload: dict) -> Gate | None:
     """Return the gate a gated caller must pass for this mutating call, or None if it needs none."""
     n = len(parts)
@@ -59,7 +77,8 @@ def classify(coordinator, parts: list[str], payload: dict) -> Gate | None:
         if isinstance(argv, list) and argv:
             command = ' '.join(str(a) for a in argv)
             return Gate('command.create', f'Create a task that runs this local command: {_clip(command)}',
-                        {'title': _clip(payload.get('title', ''), 200), 'argv': [_clip(a, 200) for a in argv[:20]]})
+                        {'title': _clip(payload.get('title', ''), 200), 'argv': [str(a) for a in argv],
+                         'full_command': command})
     elif parts == ['api', 'archive', 'export']:
         return Gate('files.export', f"Write a task archive and database backup into {_clip(payload.get('directory', ''))}",
                     {'directory': _clip(payload.get('directory', ''))})
@@ -70,7 +89,18 @@ def classify(coordinator, parts: list[str], payload: dict) -> Gate | None:
     elif n == 4 and parts[:2] == ['api', 'tasks'] and parts[3] == 'publish':
         title = _task_title(coordinator, parts[2])
         return Gate('github.publish', f'Push the branch for task “{_clip(title, 120)}” to GitHub and create or reuse its pull request',
-                    {'task': parts[2], 'title': _clip(title, 200)})
+                    {'task': parts[2], 'title': _clip(title, 200), **_publish_target(coordinator)})
+    elif n == 4 and parts[:2] == ['api', 'tasks'] and parts[3] == 'start':
+        try:
+            task = coordinator.store.get(parts[2])
+        except Exception:
+            return None  # an unknown task fails in the normal path
+        if task.get('agent') == 'local-command':
+            argv = [str(a) for a in task.get('argv') or []]
+            command = ' '.join(argv)
+            return Gate('command.start', f'Run this local command now (task “{_clip(task.get("title", ""), 120)}”): {_clip(command)}',
+                        {'task': parts[2], 'title': _clip(task.get('title', ''), 200), 'revision': task.get('revision'),
+                         'argv': argv, 'full_command': command})
     elif n == 4 and parts[:2] == ['api', 'tasks'] and parts[3] == 'recover':
         title = _task_title(coordinator, parts[2])
         return Gate('task.recover', f'Confirm the previous worker’s process tree for task “{_clip(title, 120)}” was inspected, and release it',
@@ -82,6 +112,10 @@ def classify(coordinator, parts: list[str], payload: dict) -> Gate | None:
         return Gate('knowledge.rebuttal', f"Mark vault note {_clip(payload.get('original_path', ''), 150)} as "
                     f"{_clip(payload.get('original_status', 'disproven'), 40)} and add a verified correction",
                     {'path': _clip(payload.get('original_path', ''), 200), 'title': _clip(payload.get('title', ''), 200)})
+    elif parts == ['api', 'knowledge', 'checkin'] and _checkin_promotes(payload):
+        return Gate('knowledge.checkin', f"Record a check-in that marks knowledge verified or active: {_clip(payload.get('title', ''), 150)}",
+                    {'title': _clip(payload.get('title', ''), 200), 'status': _clip(payload.get('status', ''), 40),
+                     'verified_items': [_clip(i.get('title', ''), 200) for i in _items(payload) if i.get('status') == 'verified']})
     elif parts == ['api', 'knowledge', 'note'] and payload.get('status') in ('verified', 'active'):
         return Gate('knowledge.note', f"Add a vault note already marked {payload['status']}: {_clip(payload.get('title', ''), 150)}",
                     {'title': _clip(payload.get('title', ''), 200), 'status': payload['status']})

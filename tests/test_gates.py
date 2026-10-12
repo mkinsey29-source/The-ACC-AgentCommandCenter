@@ -98,8 +98,9 @@ class ClassifyTests(unittest.TestCase):
 
     def test_long_values_are_clipped(self):
         gate = classify(self.c, ['api', 'tasks'], {'title': 't', 'argv': ['x' * 5000]})
-        self.assertLess(len(gate.summary), 400)
-        self.assertLess(len(gate.details['argv'][0]), 250)
+        self.assertLess(len(gate.summary), 400)  # the summary is clipped for scanning
+        self.assertEqual(gate.details['argv'], ['x' * 5000])  # but the owner sees the whole command
+        self.assertEqual(gate.details['full_command'], 'x' * 5000)
 
 
 class ApprovalTests(unittest.TestCase):

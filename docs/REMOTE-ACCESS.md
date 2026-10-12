@@ -12,7 +12,7 @@ Start ACC with `--reach <mode>` (`python -m acc.server --project <folder> --reac
 | `local` (default) | `127.0.0.1` | this computer only | normal use; no remote access |
 | `tailscale-serve` | `127.0.0.1` | a private Tailscale HTTPS route (`https://<device>.ts.net:8443`-`8446`) | your own phone or laptop on your tailnet; ACC itself stays on loopback |
 | `private` | one explicit private address, `--host 192.168.1.20` (a `100.x` Tailscale address also qualifies) | `http://<that address>:<port>` | a home or office network |
-| `docker` | `0.0.0.0` inside a container | the address the container publishes, set with `--allow-host` | running ACC in a container |
+| `docker` | not available yet | | refused until the owner's entry from the host is built and tested (see Docker below) |
 | `custom` | `--host`, plus `--allow-host` for every accepted host | your own reverse proxy or tunnel | anything else; a public address also needs `--public-ack` |
 
 Options: `--host`, `--allow-host <host[:port]>` (repeatable, exactly as the browser sends it),
@@ -21,10 +21,18 @@ marked Secure), `--reach-check`.
 
 Sign-in is separate from reachability: the mode decides where ACC listens, pairing decides who may use it.
 
+**The owner's door.** When ACC listens on a non-loopback address (`private`, `custom`), it also opens a second,
+loopback-only listener for the owner at this computer, on a port it chooses and prints in the launch link. The
+network-facing listener never answers as the owner, even for a request that claims a loopback Host, and the owner
+listener never answers remote hosts. Both share the same approvals and pairings. `tailscale-serve` keeps ACC on
+loopback, so one listener serves both and the Host header tells them apart.
+
 ## Check before you start
 
 `python -m acc.server --project <folder> --reach <mode> [options] --reach-check` prints every setting and
-whether ACC would start, then exits (status 2 if it would refuse). It creates no files.
+whether ACC would start, then exits (status 2 if it would refuse). It creates no files. For `tailscale-serve` it
+also reads the Serve configuration, read-only, and fails if no port among 8443-8446 is free or the port is shared
+publicly, exactly as startup would.
 
 ACC also refuses to start, with the reason, for an unsafe combination:
 
@@ -32,7 +40,8 @@ ACC also refuses to start, with the reason, for an unsafe combination:
 - a non-loopback bind in `local` mode, or a non-loopback bind in `tailscale-serve` mode;
 - `private` with a wildcard, public or hostname address;
 - a wildcard bind with no accepted hosts;
-- `docker` outside a container (set `ACC_IN_DOCKER=1` if detection fails), or without `--allow-host`;
+- `docker` (not available yet);
+- `custom` bound to loopback that also accepts a loopback name, since the owner and a device would look the same;
 - `custom` on a public address without `--public-ack`;
 - `tailscale-serve` when Tailscale is not running, has no HTTPS device name, has no free port among
   8443-8446, or reports the port as publicly shared (Funnel).
@@ -71,18 +80,18 @@ A gated caller does not get to run these operations. Each becomes an approval re
 
 | Operation | Why it is gated |
 |---|---|
-| Create a task with a local command (`argv`) | it executes any command as you |
+| Create a task with a local command (`argv`), or start an existing one (`tasks/{id}/start` when its worker is the local command) | it executes any command as you |
 | Export the archive (`archive/export`) | it writes files wherever the caller points |
 | Publish a task (`publish`) | it pushes a branch and opens a pull request |
 | Change GitHub settings (`github/configure`) | it decides where reviewed work is pushed |
 | Recover an interrupted task (`recover`) | it asserts that you inspected the process tree |
 | Accept shared memory (`memory/{id}/review` with `active`) | every agent then treats it as established |
 | Rewrite a vault note's status (`knowledge/transition`), or rebut one (`knowledge/rebuttal`) | it overwrites an existing note and can mark it disproven |
-| Add a vault note already marked `verified` or `active` (`knowledge/note`) | it claims a verification nobody did |
+| Add a vault note already marked `verified` or `active` (`knowledge/note`), or a check-in whose own status is `verified`/`active` or that carries `completed_knowledge` marked `verified` (`knowledge/checkin`) | it claims a verification nobody did |
 
 How it works: the call returns `202` with `approval_required` and an approval id, and nothing runs. The request
 appears under **Needs your decision** in ACC at this computer (the `attention` list in `/api/state`), saying who
-asked and exactly what it will do. **Approve** runs that stored request once, as you; **Deny** drops it.
+asked and what it will do, with the complete command or push target shown below the (shortened) summary. **Approve** runs that stored request once, as you; **Deny** drops it.
 The caller follows it with `GET /api/approvals/{id}` (the bridge has `acc_approval_status`). A request expires
 after 10 minutes, at most 20 can wait, an identical retry returns the same request, and every step is written to
 the Activity feed. Pending requests are kept in memory, so a restart drops them and the caller asks again.
@@ -91,7 +100,7 @@ A gated caller cannot raise its own permissions: approving, denying, pairing and
 only, the agent token is refused on remote hosts, and the owner token is refused there too.
 
 Not gated, on purpose: starting and running configured AI workers, creating tasks without a command, conversation,
-project mode, orchestrator selection, rejecting memory, and ordinary knowledge check-ins, which already require evidence. Worker runs are the product and are
+project mode, orchestrator selection, rejecting memory, and ordinary knowledge check-ins (a check-in that does not claim `verified`/`active` status, whose completed knowledge is `supported`). Evidence on a check-in is only text the caller supplied, so it never replaces approval for a verified claim. Worker runs are the product and are
 bounded by worktrees, snapshots and review; the gates cover what steps outside that boundary. Two limits to know:
 a task's `permissions` field is still a label that nothing enforces, and an approved command runs with your full
 user rights, so read the summary before you approve.
@@ -102,7 +111,10 @@ The gates only mean something if the orchestrator cannot act as the owner, so AC
 
 - The owner token is generated at every start and lives only in the server's memory and the owner's browser tab. It
   is not in the state folder, a URL, a process argument, or the terminal output.
-- The browser receives it through a one-use launch code (valid 10 minutes). A code that leaks is useless after the
+- The browser receives it through a one-use launch code (valid 10 minutes), exchanged only on this computer: a paired
+  device or the agent token on a remote host is refused, and the refusal does not use up the code. The page keeps the
+  token in the tab's memory only, never in browser storage, so reloading the tab needs a new link.
+  A code that leaks is useless after the
   first use, and a stolen first use shows up as your own link failing. **New window** in ACC mints another link.
 - The old `token` file from earlier versions is deleted at start.
 
@@ -131,21 +143,19 @@ you, so there the launch-code protection is the realistic limit.
   management (create, approve, deny, disconnect, the device list) is for the owner at this computer only; a
   paired device cannot pair others or approve itself.
 - Cross-site and foreign-origin requests are refused; a remote Origin must match its own Host.
-- `tailscale-serve` keeps ACC on loopback. It never resets or replaces anyone else's Tailscale Serve setup,
-  refuses a publicly shared port, and checks the route is exactly its own before turning remote access on.
-  On clean shutdown it removes its route.
+- `tailscale-serve` keeps ACC on loopback. It never runs Tailscale's reset, picks only a port that is free in the
+  Serve configuration it has just read (read twice, right before it changes anything), refuses a publicly shared
+  port, and afterwards checks that the route is exactly its own and that no other Serve setting changed. Tailscale
+  offers no atomic compare-and-set, so a different tool changing the same port in the instant between ACC's last
+  read and its command cannot be excluded; ACC reports it if it notices and does not claim more. On clean shutdown
+  it removes its route.
 
 ## Docker
 
-ACC does not ship an image yet. A container needs these settings:
-
-```
-python -m acc.server --project /work --state-dir /state --port 8765 \
-  --reach docker --allow-host localhost:8765
-```
-
-and the container's port published to the address you will browse (for example `-p 127.0.0.1:8765:8765`).
-Browse to the address in `--allow-host`, then pair as above. Keep `/state` on a volume.
+`--reach docker` is refused for now. A container's owner needs a loopback-only port published to the host and a way
+to tell that apart from the published device port; that entry has not been built or tested, and starting a mode
+where the owner cannot sign in safely is worse than not starting. Run ACC on the host, or use `tailscale-serve` or
+`private`. Docker will return once its owner entry is built and tested on a real container.
 
 ## What is and is not verified
 

@@ -2,10 +2,11 @@
 const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const hashParams = new URLSearchParams(location.hash.slice(1));
-const remoteDevice = !['127.0.0.1', 'localhost'].includes(location.hostname);
+const remoteDevice = !['127.0.0.1', 'localhost'].includes(location.hostname)
+  || document.querySelector('meta[name="acc-role"]')?.content === 'device';
 // A remote device never holds the local control token; it is recognised by its paired-device cookie.
 // The owner token is never in a URL either: the link carries a one-use launch code that is exchanged for it.
-let token = remoteDevice ? '' : sessionStorage.getItem('acc-token') || '';
+let token = '';  // memory only: never stored; a reload needs a new launch link
 const launchCode = remoteDevice ? '' : hashParams.get('launch') || '';
 const pairSecret = hashParams.get('pair') || '';
 history.replaceState(null, '', location.pathname);
@@ -163,7 +164,7 @@ async function stream() {
   }
 }
 async function connect() {
-  try { error('');await refresh();cursor=state.cursor;if(token)sessionStorage.setItem('acc-token',token);$('connect-panel').hidden=true;$('pair-panel').hidden=true;$('new-window').hidden=remoteDevice;restoreDraft();stream();refreshRemote(); }
+  try { error('');await refresh();cursor=state.cursor;$('connect-panel').hidden=true;$('pair-panel').hidden=true;$('new-window').hidden=remoteDevice;restoreDraft();stream();refreshRemote(); }
   catch(e){
     if(remoteDevice){$('connect-panel').hidden=true;$('pair-panel').hidden=false;return;}
     $('connect-panel').hidden=false;error(e.message);
@@ -402,10 +403,20 @@ $('remote-panel').onclick = async e => {
 };
 
 // Attention: risky requests from remote devices or the orchestrator wait for the owner at this computer.
+// The summary is clipped for scanning; the full request the owner is approving is always shown below it.
+function approvalDetails(a) {
+  const d = a.details || {};
+  const lines = [];
+  if (d.full_command) lines.push('Full command:\n' + d.full_command);
+  else if (Array.isArray(d.argv) && d.argv.length) lines.push('Full command:\n' + d.argv.join(' '));
+  if (d.remote || d.source || d.base) lines.push(`Push target: remote ${d.remote || '?'}, branch ${d.source || '?'} into ${d.base || '?'}`);
+  if (d.directory) lines.push('Folder:\n' + d.directory);
+  return lines.length ? `<pre class="approval-details">${escapeHTML(lines.join('\n\n'))}</pre>` : '';
+}
 function renderAttention() {
   const items = state.attention || [];
   $('attention-panel').hidden = !items.length;
-  $('attention-list').innerHTML = items.map(a => `<div class="integration-record"><strong>${escapeHTML(a.summary)}</strong><small>Asked by ${escapeHTML(a.requested_by)} · expires ${new Date(a.expires * 1000).toLocaleTimeString()}</small>${remoteDevice ? '<small>Waiting for the owner to answer at the computer.</small>' : `<div class="actions"><button class="primary" data-approval="approve" data-id="${escapeHTML(a.id)}">Approve</button><button data-approval="deny" data-id="${escapeHTML(a.id)}">Deny</button></div>`}</div>`).join('');
+  $('attention-list').innerHTML = items.map(a => `<div class="integration-record"><strong>${escapeHTML(a.summary)}</strong><small>Asked by ${escapeHTML(a.requested_by)} · expires ${new Date(a.expires * 1000).toLocaleTimeString()}</small>${approvalDetails(a)}${remoteDevice ? '<small>Waiting for the owner to answer at the computer.</small>' : `<div class="actions"><button class="primary" data-approval="approve" data-id="${escapeHTML(a.id)}">Approve</button><button data-approval="deny" data-id="${escapeHTML(a.id)}">Deny</button></div>`}</div>`).join('');
 }
 $('attention-list').onclick = async e => {
   const button = e.target.closest('[data-approval]');

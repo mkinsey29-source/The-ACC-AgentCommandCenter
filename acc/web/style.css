@@ -19,3 +19,4 @@
 @media(max-width:1000px){.integration-grid{grid-template-columns:1fr}}
 @media(max-width:760px){.conversation-panel{margin:1rem;padding:1rem}.message{max-width:100%}#routing-fields{grid-template-columns:1fr}}
 .attention{padding:14px 26px;background:var(--warn);border-bottom:1px solid var(--line)}.attention .integration-record{background:var(--panel)}
+.approval-details{margin:6px 0 0;padding:6px;max-height:160px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,monospace;border:1px solid var(--line);border-radius:5px}

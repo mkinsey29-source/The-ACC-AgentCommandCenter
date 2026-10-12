@@ -140,21 +140,18 @@ def resolve(mode: str, *, port: int, token: str, host: str | None = None,
             raise ReachError('Private mode needs a fixed --port or an explicit --allow-host.')
         return Reach('private', host.strip(), allow or [f'{host.strip()}:{port}'], secure_cookie=behind_https)
     if mode == 'docker':
-        inside = in_container() if container is None else container
-        if not inside:
-            raise ReachError('Docker mode runs only inside a container (set ACC_IN_DOCKER=1 if detection fails).')
-        bind = (host or '0.0.0.0').strip()
-        if address_class(bind) not in ('wildcard', 'private'):
-            raise ReachError('Docker mode binds 0.0.0.0 or a private address inside the container.')
-        if not allow:
-            raise ReachError('Docker mode needs --allow-host for the address the host publishes (for example localhost:8765).')
-        return Reach('docker', bind, allow, secure_cookie=behind_https)
+        # A container's owner entry needs a loopback port published to the host, which has not been tested. Until it
+        # is, refuse rather than start a mode where the owner cannot sign in safely.
+        raise ReachError('Docker mode is not available yet: the owner entry from the host (a loopback-only published '
+                         'port) has not been built and tested. Use tailscale-serve or private mode, or run ACC on the host.')
     # custom
     if not host:
         raise ReachError('Custom mode needs --host.')
     kind = address_class(host)
     if not allow:
         raise ReachError('Custom mode needs at least one --allow-host.')
+    if kind == 'loopback' and any(address_class(h.rsplit(':', 1)[0] if ':' in h.rsplit(']', 1)[-1] else h) == 'loopback' for h in allow):
+        raise ReachError('A loopback-bound server cannot also publish a loopback name: the owner and a device would look the same.')
     if kind in ('public', 'name') and not public_ack:
         raise ReachError('This address may be reachable from the internet. Add --public-ack only behind your own TLS front door.')
     return Reach('custom', host.strip(), allow, secure_cookie=behind_https)
@@ -162,7 +159,7 @@ def resolve(mode: str, *, port: int, token: str, host: str | None = None,
 
 def check(mode: str, *, port: int, token: str | None, host: str | None = None,
             allow_hosts: Iterable[str] = (), public_ack: bool = False, behind_https: bool = False,
-            container: bool | None = None, route=None) -> tuple[list[Finding], Reach | None]:
+            container: bool | None = None, route=None, previous_route=None) -> tuple[list[Finding], Reach | None]:
     """The mode-aware check: report every setting, and whether ACC would start."""
     findings: list[Finding] = [Finding('mode', 'ok', mode)]
     try:
@@ -171,10 +168,19 @@ def check(mode: str, *, port: int, token: str | None, host: str | None = None,
     except ReachError as exc:
         findings.append(Finding('start', 'fail', str(exc)))
         return findings, None
+    if mode == 'tailscale-serve' and route is not None and hasattr(route, 'plan'):
+        try:  # the same read-only checks startup makes: free port, ownership and Funnel
+            hostname, port, _config = route.plan(previous_route)
+        except Exception as exc:  # TailscaleError, or the command failing
+            findings.append(Finding('start', 'fail', str(exc)))
+            return findings, None
+        findings.append(Finding('tailscale route', 'ok', f'{hostname}:{port} is free for a private route'))
     kind = address_class(reach.bind_host)
     findings.append(Finding('bind address', 'ok' if kind in ('loopback', 'private') else 'warn',
                             f'{reach.bind_host} ({kind})'))
     if reach.remote:
+        if kind != 'loopback':
+            findings.append(Finding('owner entry', 'ok', 'a separate loopback-only listener on this computer; the network-facing one never accepts the owner'))
         findings.append(Finding('control token', 'ok', 'present and long enough; never accepted from a remote host'))
         findings.append(Finding('device pairing', 'ok', 'required for every remote request'))
         hosts = ', '.join(sorted(reach.remote_hosts())) or 'derived from Tailscale when the route starts'

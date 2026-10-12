@@ -1,8 +1,9 @@
 """A private Tailscale Serve route to ACC's loopback server, with safeguards.
 
 ACC stays bound to loopback; ``tailscale serve`` carries tailnet traffic to it over HTTPS. This module
-never resets or replaces anyone else's Serve configuration, refuses a port that is shared publicly
-(Funnel), and verifies the route before reporting it. The command line mirrors what ACC-Workspace
+never resets Serve, chooses only a port that was free when it last read the configuration, refuses a port that
+is shared publicly (Funnel), and verifies the route and that nothing else changed before reporting it. Tailscale
+has no atomic compare-and-set, so a different tool writing the same port in that instant cannot be excluded. The command line mirrors what ACC-Workspace
 (MIT) does; it has been exercised against a fake ``tailscale`` command, not yet against a real one.
 """
 from __future__ import annotations
@@ -95,8 +96,8 @@ class Tailscale:
         proxy = (handlers.get('/') or {}).get('Proxy')
         return len(handlers) == 1 and proxy is not None and _normalize_target(proxy) == _normalize_target(saved['target'])
 
-    def enable(self, target: str, previous: dict | None = None) -> dict:
-        """Create (or keep) a private HTTPS route to ``target`` and return it; raise rather than risk exposure."""
+    def plan(self, previous: dict | None = None) -> tuple[str, int, dict]:
+        """Read-only: the hostname and port a route would use, or raise exactly as ``enable`` would. Nothing is changed."""
         status = self.probe()
         if not status['ready']:
             raise TailscaleError(status['message'] or 'Tailscale is not ready.')
@@ -113,6 +114,26 @@ class Tailscale:
             raise TailscaleError(f'Tailscale HTTPS ports {PORTS[0]}-{PORTS[-1]} are already in use. Free one and try again.')
         if self._funnel(config, hostname, port):
             raise TailscaleError('This Tailscale port is publicly shared. Turn off Funnel for it before connecting ACC.')
+        return hostname, port, config
+
+    @staticmethod
+    def _others(config: dict, port: int) -> dict:
+        """Everything in the Serve configuration except the entries for ``port``, for before/after comparison."""
+        def keep(table):
+            return {k: v for k, v in (table or {}).items() if str(k).rsplit(':', 1)[-1] != str(port)}
+        return {'Web': keep(config.get('Web')), 'TCP': keep(config.get('TCP')), 'AllowFunnel': config.get('AllowFunnel') or {}}
+
+    def enable(self, target: str, previous: dict | None = None) -> dict:
+        """Create (or keep) a private HTTPS route to ``target`` and return it; raise rather than risk exposure.
+
+        Tailscale offers no atomic compare-and-set for Serve, so another tool changing the same port in the instant
+        between the final read and the ``serve`` command cannot be excluded. ACC narrows that window by re-reading the
+        configuration immediately before changing it, and afterwards verifies that nothing else was altered.
+        """
+        hostname, port, _planned = self.plan(previous)
+        before = self.config()
+        if (hostname, port) != self.plan(previous)[:2]:
+            raise TailscaleError('The Tailscale Serve configuration changed while ACC was preparing. Try again.')
         try:
             self.command('serve', '--bg', '--yes', f'--https={port}', target)
         except TailscaleError as exc:
@@ -122,6 +143,9 @@ class Tailscale:
         verified = self.config()
         if not self.owns(verified, saved) or self._funnel(verified, hostname, port):
             raise TailscaleError('The private Tailscale route could not be verified, so remote access stays off.')
+        if self._others(verified, port) != self._others(before, port):
+            raise TailscaleError('Another Tailscale Serve setting changed while ACC created its route. '
+                                 'Check Tailscale Serve (tailscale serve status); remote access stays off.')
         return {**saved, 'host': f'{hostname}:{port}', 'origin': f'https://{hostname}:{port}'}
 
     def disable(self, saved: dict | None) -> bool:

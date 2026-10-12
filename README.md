@@ -33,7 +33,7 @@ On Windows PowerShell:
 py -3 -m acc --project "C:\Projects\HearthandHavoc"
 ```
 
-Open the local URL printed in the terminal. It carries a one-use launch code, not the owner token: the page exchanges the code for the token once, keeps the token only in the browser tab's session storage, and removes the code from the address bar. The owner token is never saved to a file and changes at every start; use **New window** in ACC for another link. Runtime state is stored under your home directory's `.acc` folder, separately from the managed project.
+Open the local URL printed in the terminal. It carries a one-use launch code, not the owner token: the page exchanges the code for the token once, keeps the token only in that tab's memory (never in browser storage), and removes the code from the address bar. Reloading or closing the tab ends the session; open a fresh link with **New window** in another ACC tab, or restart ACC for a new printed link. The owner token is never saved to a file and changes at every start; use **New window** in ACC for another link. Runtime state is stored under your home directory's `.acc` folder, separately from the managed project.
 
 Use `--port 8766`, `--state-dir /private/state/path`, or `--agents /private/agents.json` as needed. The service binds to `127.0.0.1`; no tunnel is needed for local use. Stop with Ctrl+C so supervised work can be stopped and recorded.
 

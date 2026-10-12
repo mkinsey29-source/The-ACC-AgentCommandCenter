@@ -75,7 +75,6 @@ class ResolveTests(unittest.TestCase):
         for token in ('', None, 'short', 'x' * 31):
             for mode, extra in (('tailscale-serve', {'route': FakeRoute()}),
                                 ('private', {'host': '192.168.1.20'}),
-                                ('docker', {'allow_hosts': ['localhost:8765'], 'container': True}),
                                 ('custom', {'host': '192.168.1.20', 'allow_hosts': ['a.example.com']})):
                 with self.subTest(mode=mode, token=token), self.assertRaises(ReachError):
                     resolve(mode, port=8765, token=token, **extra)
@@ -104,15 +103,15 @@ class ResolveTests(unittest.TestCase):
             with self.subTest(host=host), self.assertRaises(ReachError):
                 resolve('private', **self.kwargs(host=host))
 
-    def test_docker_only_inside_a_container_and_with_a_published_host(self):
-        r = resolve('docker', **self.kwargs(allow_hosts=['localhost:8765'], container=True))
-        self.assertEqual((r.bind_host, r.remote_hosts()), ('0.0.0.0', frozenset({'localhost:8765'})))
-        with self.assertRaisesRegex(ReachError, 'inside a container'):
-            resolve('docker', **self.kwargs(allow_hosts=['localhost:8765'], container=False))
-        with self.assertRaisesRegex(ReachError, 'allow-host'):
-            resolve('docker', **self.kwargs(container=True))
-        with self.assertRaises(ReachError):
-            resolve('docker', **self.kwargs(allow_hosts=['localhost:8765'], container=True, host='8.8.8.8'))
+    def test_docker_mode_is_refused_until_its_owner_entry_exists(self):
+        for container in (True, False):
+            with self.subTest(container=container), self.assertRaisesRegex(ReachError, 'not available yet'):
+                resolve('docker', **self.kwargs(allow_hosts=['localhost:8765'], container=container))
+
+    def test_a_loopback_bind_cannot_also_publish_a_loopback_name(self):
+        for name in ('localhost:8765', '127.0.0.1:8765', 'localhost'):
+            with self.subTest(name=name), self.assertRaisesRegex(ReachError, 'cannot also publish'):
+                resolve('custom', **self.kwargs(host='127.0.0.1', allow_hosts=[name]))
 
     def test_custom_needs_a_host_and_accepted_hosts(self):
         with self.assertRaises(ReachError):
@@ -184,7 +183,7 @@ class CheckTests(unittest.TestCase):
     def test_remote_report_lists_token_pairing_hosts_and_cookie(self):
         findings, r = check('private', port=8765, token=TOKEN, host='192.168.1.20')
         names = {f.setting: f for f in findings}
-        self.assertEqual(set(names), {'mode', 'bind address', 'control token', 'device pairing', 'accepted hosts', 'cookie'})
+        self.assertEqual(set(names), {'mode', 'bind address', 'owner entry', 'control token', 'device pairing', 'accepted hosts', 'cookie'})
         self.assertEqual(names['cookie'].status, 'warn')
         self.assertIn('192.168.1.20:8765', names['accepted hosts'].detail)
 
@@ -194,10 +193,10 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(names['cookie'].status, 'ok')
         self.assertIn('Tailscale', names['accepted hosts'].detail)
 
-    def test_docker_detection_can_be_forced(self):
+    def test_the_check_fails_when_docker_mode_cannot_start(self):
         findings, r = check('docker', port=8765, token=TOKEN, allow_hosts=['localhost:8765'], container=True)
-        self.assertIsNotNone(r)
-        self.assertEqual(r.bind_host, '0.0.0.0')
+        self.assertIsNone(r)
+        self.assertEqual(findings[-1].status, 'fail')
 
 
 if __name__ == '__main__':

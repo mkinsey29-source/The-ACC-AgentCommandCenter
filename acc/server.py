@@ -17,7 +17,7 @@ from .core import Coordinator, Conflict
 from .gates import ApprovalError, Approvals, classify
 from .launch import LaunchCodes, LaunchError
 from .pairing import Pairing, PairingError
-from .reach import MIN_TOKEN_LENGTH, MODES, Reach, ReachError, check as check_reach, format_findings, resolve as resolve_reach
+from .reach import MIN_TOKEN_LENGTH, MODES, Reach, address_class, ReachError, check as check_reach, format_findings, resolve as resolve_reach
 from .tailscale import Tailscale, TailscaleError
 
 WEB = Path(__file__).parent / 'web'
@@ -32,18 +32,26 @@ def _same(received, expected):
 
 
 class Server(ThreadingHTTPServer):
+    """One listener. ``role`` is 'both' (loopback: this computer and proxied remote hosts), 'public' (a non-loopback
+    bind: remote hosts only, never the owner) or 'owner' (loopback only, this computer only). A non-loopback bind is
+    always paired with an owner listener that shares its state, so the owner never signs in over the network."""
     daemon_threads = True
 
-    def __init__(self, address, coordinator, token, reach=None, pairing=None, agent_token=None):
+    def __init__(self, address, coordinator, token, reach=None, pairing=None, agent_token=None, role='both', shared=None):
         self.reach = reach or Reach()
+        self.role = role
         self.pairing, self.route = pairing, None
-        self.reach.validate(token, address[0], pairing is not None)  # refuse an unsafe combination before binding
+        if role != 'owner':
+            self.reach.validate(token, address[0], pairing is not None)  # refuse an unsafe combination before binding
         if agent_token is not None and (not isinstance(agent_token, str) or len(agent_token) < MIN_TOKEN_LENGTH
                                         or agent_token == token):
             raise ValueError(f'The agent token must be a different secret of at least {MIN_TOKEN_LENGTH} characters.')
         self.coordinator, self.token, self.agent_token = coordinator, token, agent_token
-        self.approvals = Approvals(coordinator, lambda parts, payload: run_mutation(parts, payload, coordinator))
-        self.launch = LaunchCodes(token)  # one-use codes that deliver the memory-only owner token to the owner's browser
+        if shared is not None:  # the owner listener answers for the same approvals, codes and pairings
+            self.approvals, self.launch, self.pairing = shared.approvals, shared.launch, shared.pairing
+        else:
+            self.approvals = Approvals(coordinator, lambda parts, payload: run_mutation(parts, payload, coordinator))
+            self.launch = LaunchCodes(token)  # one-use codes that deliver the memory-only owner token to the owner's browser
         super().__init__(address, Handler)
 
     def remote_origin(self):
@@ -82,6 +90,11 @@ class Handler(BaseHTTPRequestHandler):
         """
         host = self.headers.get('Host', '').strip().lower()
         kind = self.server.reach.classify(host, self.server.server_port)
+        role = self.server.role
+        if role == 'public' and host in self.server.reach.remote_hosts():
+            kind = 'remote'  # on a network-facing listener an accepted name is a device even if it looks like loopback
+        if (role == 'public' and kind == 'local') or (role == 'owner' and kind != 'local'):
+            return None  # a network-facing listener never answers as the owner; the owner listener never answers remote hosts
         if kind == 'local' and self.client_address[0] not in LOOPBACK_CLIENTS:
             return None
         origin = self.headers.get('Origin')
@@ -202,7 +215,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path not in names:
             return self.reply(404, {'error': 'Not found.'})
         name, mime = names[url.path]
-        self.reply(200, (WEB / name).read_bytes(), mime)
+        body = (WEB / name).read_bytes()
+        if name == 'index.html':  # tell the page which listener it came from: a published loopback name must not look like the owner
+            body = body.replace(b'<head>', b'<head><meta name="acc-role" content="' + (b'device' if self.server.role == 'public' else b'owner') + b'">', 1)
+        self.reply(200, body, mime)
 
     def do_POST(self):
         parts = urlsplit(self.path).path.strip('/').split('/')
@@ -210,6 +226,10 @@ class Handler(BaseHTTPRequestHandler):
                    and self.host_class() == 'remote' and self.server.pairing is not None)
                   or (parts == ['api', 'launch'] and self.host_class() == 'local'))
         self.principal = None
+        if parts[:2] == ['api', 'launch'] and self.host_class() != 'local':
+            # The owner credential is handed out on this computer only, whatever else the caller is authorized for.
+            self.close_connection = True
+            return self.reply(403, {'error': 'Owner launch links work only on this computer.'})
         if not public and not self.authenticate():
             self.close_connection = True
             return self.reply(403, {'error': 'Local session authorization required.' if self.host_class() == 'local'
@@ -431,7 +451,11 @@ def main():
     options = dict(port=args.port, host=args.host, allow_hosts=args.allow_host, public_ack=args.public_ack,
                    behind_https=args.behind_https, route=tailscale if args.reach == 'tailscale-serve' else None)
     if args.reach_check:
-        findings, reach = check_reach(args.reach, token=token, **options)
+        try:
+            saved_route = json.loads((state / 'reach.json').read_text()).get('route')
+        except (OSError, ValueError, AttributeError):
+            saved_route = None
+        findings, reach = check_reach(args.reach, token=token, previous_route=saved_route, **options)
         print(format_findings(findings))
         sys.exit(0 if reach else 2)
     try:  # refuse before any side effect: no state directory, token file or database is created
@@ -448,13 +472,17 @@ def main():
         except OSError:
             print(f'Warning: could not remove the old owner token file {legacy}; it is no longer valid, delete it.',
                   file=sys.stderr, flush=True)
-    server = route = None
+    server = owner_server = route = None
     try:
         if new_agent:
             _write_secret(agent_path, agent_token)
         pairing = Pairing(state / 'pairing.json') if reach.remote else None
         server = Server((reach.bind_host, args.port), coordinator, token, reach=reach, pairing=pairing,
-                        agent_token=agent_token)
+                        agent_token=agent_token, role='public' if address_class(reach.bind_host) != 'loopback' else 'both')
+        owner_server = server
+        if server.role == 'public':  # the owner's own door: this computer only, same state, never reachable from the network
+            owner_server = Server(('127.0.0.1', 0), coordinator, token, reach=reach, pairing=pairing,
+                                  agent_token=agent_token, role='owner', shared=server)
         if reach.mode == 'tailscale-serve':
             record = state / 'reach.json'
             try:
@@ -466,11 +494,14 @@ def main():
             reach.set_remote_hosts([route['host']])
             server.route = route
     except (ReachError, PairingError, TailscaleError, OSError, ValueError) as exc:
+        if owner_server is not None and owner_server is not server:
+            owner_server.server_close()
         if server is not None:
             server.server_close()
         coordinator.close()
         _refuse(exc)
-    print(f"ACC: http://127.0.0.1:{server.server_port}/#launch={server.launch.mint()['code']}", flush=True)
+    owner_port = owner_server.server_port
+    print(f"ACC: http://127.0.0.1:{owner_port}/#launch={server.launch.mint()['code']}", flush=True)
     print('That link works once, for 10 minutes; use New window in ACC for another. The owner token is never saved.', flush=True)
     print(f'State: {state}\nPoint the orchestrator bridge at {agent_path}: its risky actions wait for your approval. '
           'Do not share it.', flush=True)
@@ -480,16 +511,21 @@ def main():
     if args.open_browser:
         import webbrowser
         # A separate one-use code: the URL is a process argument, so it must carry nothing that stays valid.
-        url = f"http://127.0.0.1:{server.server_port}/#launch={server.launch.mint()['code']}"
+        url = f"http://127.0.0.1:{owner_port}/#launch={server.launch.mint()['code']}"
         threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
     def terminate(*_):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)
+    if owner_server is not server:
+        threading.Thread(target=owner_server.serve_forever, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        if owner_server is not server:
+            owner_server.shutdown()
+            owner_server.server_close()
         if route:
             try:
                 tailscale.disable(route)

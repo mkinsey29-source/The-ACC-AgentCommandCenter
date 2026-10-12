@@ -80,7 +80,7 @@ A coordinator may request review, request changes following review, accept an ap
 
 ## State and privacy
 
-Runtime files: `acc.sqlite3`, `token`, lock files, and `runs/{run_id}/task.json`, `output.log`, `handoff.json`. Task and event changes commit together. Manual-task handoff packets contain current instructions, history, run/evidence metadata, and a local Git snapshot; **they are not full backups of edited files**. Existing files remain in place. Managed workflows additionally save a hash-verified review copy and manifest; scope and limits are in HERMES-CONNECTOR.md. Role changes can be requested for the end of the current step; automatic mid-step takeover remains disabled.
+Runtime files: `acc.sqlite3`, `agent-token` (the orchestrator credential, unless `--agent-token-file` places it elsewhere), `pairing.json` and `reach.json` when remote access is on, lock files, and `runs/{run_id}/task.json`, `output.log`, `handoff.json`. Task and event changes commit together. Manual-task handoff packets contain current instructions, history, run/evidence metadata, and a local Git snapshot; **they are not full backups of edited files**. Existing files remain in place. Managed workflows additionally save a hash-verified review copy and manifest; scope and limits are in HERMES-CONNECTOR.md. Role changes can be requested for the end of the current step; automatic mid-step takeover remains disabled.
 
 Output is streamed as reported chunks, not inferred model thinking. Avoid secrets in prompts/output. Full process output is stored locally. Log rotation, output quotas, richer structured model events, and automatic secret filtering are not yet implemented.
 
