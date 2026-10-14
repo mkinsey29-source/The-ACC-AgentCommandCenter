@@ -97,7 +97,9 @@ class Tailscale:
         return len(handlers) == 1 and proxy is not None and _normalize_target(proxy) == _normalize_target(saved['target'])
 
     def plan(self, previous: dict | None = None) -> tuple[str, int, dict]:
-        """Read-only: the hostname and port a route would use, or raise exactly as ``enable`` would. Nothing is changed."""
+        """Read-only: the hostname and port a route would use, or raise for the readiness, port and exposure problems
+        that ``enable`` also checks. Nothing is changed, so this does not prove ``enable`` will succeed: permission to
+        change Serve, HTTPS certificates and changes by other tools are only found when ``serve`` runs."""
         status = self.probe()
         if not status['ready']:
             raise TailscaleError(status['message'] or 'Tailscale is not ready.')

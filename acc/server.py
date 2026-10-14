@@ -15,6 +15,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 from .core import Coordinator, Conflict
 from .gates import ApprovalError, Approvals, classify
+from .knowledge import OwnerApprovalRequired
 from .launch import LaunchCodes, LaunchError
 from .pairing import Pairing, PairingError
 from .reach import MIN_TOKEN_LENGTH, MODES, Reach, address_class, ReachError, check as check_reach, format_findings, resolve as resolve_reach
@@ -293,7 +294,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(202, {'status': 'approval_required', 'approval_id': asked['id'], 'approval': asked,
                                             'message': 'The owner must approve this at the computer, in Attention. '
                                                        f"Check GET /api/approvals/{asked['id']}."})
-            status, body, close = run_mutation(parts, payload, c)
+            gated = self.principal is not None and self.principal[0] in ('device', 'agent')
+            status, body, close = run_mutation(parts, payload, c, 'gated' if gated else 'owner')
             if close:
                 self.close_connection = True
             return self.reply(status, body)
@@ -310,8 +312,12 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(500, {'error': 'Operation failed. Inspect local state before retrying.'})
 
 
-def mutate(c, parts, payload):
-    """Run one mutating API call and return (status, body). Shared by direct calls and approved requests."""
+def mutate(c, parts, payload, authority='owner'):
+    """Run one mutating API call and return (status, body). Shared by direct calls and approved requests.
+
+    ``authority`` is 'owner' for the owner and for a request the owner approved, 'gated' for an agent credential or a
+    paired device. The knowledge writers re-check it themselves, so a path the URL classifier misses still cannot
+    establish knowledge for a gated caller."""
     if parts == ['api', 'voice', 'save']:
         return (200, c.voice.save(payload))
     if parts == ['api', 'voice', 'retry']:
@@ -352,13 +358,17 @@ def mutate(c, parts, payload):
     if parts == ['api', 'memory', 'propose']:
         return (201, c.integrations.propose_memory(payload))
     if len(parts) == 4 and parts[:2] == ['api', 'memory'] and parts[3] == 'review':
+        if authority == 'gated' and payload.get('status') == 'active':
+            raise OwnerApprovalRequired('Accepting shared memory needs the owner\'s approval.')
         return (200, c.integrations.review_memory(parts[2], payload))
     if len(parts) == 3 and parts[:2] == ['api', 'knowledge']:
         routes = {
             'search': c.knowledge.search, 'checkout': c.knowledge.checkout,
-            'checkin': c.knowledge.checkin, 'note': c.knowledge.create_note,
-            'review': c.knowledge.review, 'transition': c.knowledge.transition,
-            'rebuttal': c.knowledge.rebuttal,
+            'checkin': lambda p: c.knowledge.checkin(p, authority),
+            'note': lambda p: c.knowledge.create_note(p, authority),
+            'review': c.knowledge.review,
+            'transition': lambda p: c.knowledge.transition(p, authority),
+            'rebuttal': lambda p: c.knowledge.rebuttal(p, authority),
         }
         if parts[2] not in routes:
             return (404, {'error': 'Unknown knowledge operation.'})
@@ -387,10 +397,10 @@ def mutate(c, parts, payload):
     return (200, routes[action]())
 
 
-def run_mutation(parts, payload, coordinator=None):
+def run_mutation(parts, payload, coordinator=None, authority='owner'):
     """mutate() with errors mapped to HTTP statuses: returns (status, body, close_connection)."""
     try:
-        status, body = mutate(coordinator, parts, payload)
+        status, body = mutate(coordinator, parts, payload, authority)
         return status, body, False
     except KeyError:
         return 404, {'error': 'Task not found.'}, False
@@ -410,6 +420,17 @@ def _write_secret(path, value):
         out.write(value)
     if os.name != 'nt':
         os.chmod(path, 0o600)
+
+
+ENDPOINT_FILE = 'endpoint.json'
+
+
+def _write_endpoint(path, port):
+    """Tell the local orchestrator bridge where the loopback listener is. Holds no credential, only a port."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps({'url': f'http://127.0.0.1:{port}', 'pid': os.getpid()}))
+    os.replace(temporary, path)
 
 
 def _refuse(message):
@@ -436,8 +457,14 @@ def main():
                         help='A TLS front door serves the page, so the device cookie is marked Secure')
     parser.add_argument('--agent-token-file', help='Where the orchestrator credential lives (default: agent-token in the state '
                         'folder). Put it outside the state folder, readable only by the orchestrator\'s account.')
+    parser.add_argument('--owner-port', type=int, default=0,
+                        help='Loopback port for the owner and the orchestrator bridge when ACC listens on a network address '
+                             '(default: any free port, announced in the endpoint file). Ignored when ACC listens on loopback.')
     parser.add_argument('--reach-check', action='store_true',
-                        help='Report every reachability setting and whether ACC would start, then exit')
+                        help='Validate the reachability settings and read-only readiness (for Tailscale: sign-in, a free port, '
+                             'no public sharing), then exit with status 2 if they are unusable. It changes nothing, so it cannot '
+                             'prove startup will succeed: permission to change Tailscale Serve, HTTPS certificates, binding the '
+                             'port and changes made by other tools are only found when ACC starts.')
     args = parser.parse_args()
     project = Path(args.project).resolve()
     suffix = hashlib.sha256(str(project).encode()).hexdigest()[:12]
@@ -481,7 +508,7 @@ def main():
                         agent_token=agent_token, role='public' if address_class(reach.bind_host) != 'loopback' else 'both')
         owner_server = server
         if server.role == 'public':  # the owner's own door: this computer only, same state, never reachable from the network
-            owner_server = Server(('127.0.0.1', 0), coordinator, token, reach=reach, pairing=pairing,
+            owner_server = Server(('127.0.0.1', args.owner_port), coordinator, token, reach=reach, pairing=pairing,
                                   agent_token=agent_token, role='owner', shared=server)
         if reach.mode == 'tailscale-serve':
             record = state / 'reach.json'
@@ -501,6 +528,8 @@ def main():
         coordinator.close()
         _refuse(exc)
     owner_port = owner_server.server_port
+    endpoint = state / ENDPOINT_FILE
+    _write_endpoint(endpoint, owner_port)
     print(f"ACC: http://127.0.0.1:{owner_port}/#launch={server.launch.mint()['code']}", flush=True)
     print('That link works once, for 10 minutes; use New window in ACC for another. The owner token is never saved.', flush=True)
     print(f'State: {state}\nPoint the orchestrator bridge at {agent_path}: its risky actions wait for your approval. '
@@ -526,6 +555,10 @@ def main():
         if owner_server is not server:
             owner_server.shutdown()
             owner_server.server_close()
+        try:
+            endpoint.unlink()
+        except OSError:
+            pass
         if route:
             try:
                 tailscale.disable(route)

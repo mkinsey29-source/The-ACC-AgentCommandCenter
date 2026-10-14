@@ -153,7 +153,7 @@ TOOLS.extend([
       'task_id': {'type': 'string'}, 'run_id': {'type': 'string'}, 'stage': {'type': 'string'},
       'limit': {'type': 'integer'},
       'scopes': {'type': 'array', 'items': {'type': 'string'}}}, ['title', 'instruction', 'worker']),
-    ('acc_knowledge_checkin', 'Create a factual task check-in and route issues, solved problems, loops, proposed corrections, and unvalidated claims into a separate pending review note.',
+    ('acc_knowledge_checkin', 'Create a factual task check-in and route issues, solved problems, loops, proposed corrections, and unvalidated claims into a separate pending review note. Pass status "supported" for a routine check-in: an omitted status is "active" and, like "verified", waits for the owner\'s approval.',
      {'title': {'type': 'string'}, 'summary': {'type': 'string'}, 'worker': {'type': 'string'},
       'task_id': {'type': 'string'}, 'run_id': {'type': 'string'}, 'stage': {'type': 'string'},
       'checkout_path': {'type': 'string'}, 'status': {'type': 'string'},
@@ -311,13 +311,32 @@ def dispatch(message, url, token):
         return result({'content': [{'type': 'text', 'text': str(exc)}], 'isError': True})
 
 
+def is_local(url):
+    target = urlsplit(url)
+    return target.scheme == 'http' and target.hostname in ('127.0.0.1', 'localhost') and not target.username
+
+
+def resolve_endpoint(endpoint_file, fallback):
+    """The coordinator's loopback address. ACC writes it (no credential, only a port) each time it starts, so a
+    restart on another port is followed without editing this bridge's configuration. Falls back to ``--url``."""
+    if endpoint_file:
+        try:
+            url = json.loads(Path(endpoint_file).read_text()).get('url')
+            if isinstance(url, str) and is_local(url):
+                return url
+        except (OSError, ValueError, AttributeError):
+            pass
+    return fallback
+
+
 def main():
     parser = argparse.ArgumentParser(description='ACC stdio MCP bridge')
-    parser.add_argument('--url', default='http://127.0.0.1:8765')
+    parser.add_argument('--url', default='http://127.0.0.1:8765',
+                        help='Loopback address of ACC for the orchestrator credential (the fallback when no endpoint file is readable)')
+    parser.add_argument('--endpoint-file', help='endpoint.json in ACC\'s state folder: the current loopback address, rewritten at every start')
     parser.add_argument('--token-file', required=True)
     args = parser.parse_args()
-    target = urlsplit(args.url)
-    if target.scheme != 'http' or target.hostname not in ('127.0.0.1', 'localhost') or target.username:
+    if not is_local(args.url):
         parser.error('Bridge connects only to a local HTTP coordinator.')
     try:
         token = Path(args.token_file).read_text().strip()
@@ -327,7 +346,7 @@ def main():
     for line in sys.stdin:
         try:
             message = json.loads(line)
-            response = dispatch(message, args.url.rstrip('/'), token)
+            response = dispatch(message, resolve_endpoint(args.endpoint_file, args.url).rstrip('/'), token)
         except (ValueError, TypeError, AttributeError):
             response = {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'Invalid JSON-RPC message'}}
         if response is not None:

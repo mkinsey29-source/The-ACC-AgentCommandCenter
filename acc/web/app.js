@@ -407,9 +407,13 @@ $('remote-panel').onclick = async e => {
 function approvalDetails(a) {
   const d = a.details || {};
   const lines = [];
-  if (d.full_command) lines.push('Full command:\n' + d.full_command);
-  else if (Array.isArray(d.argv) && d.argv.length) lines.push('Full command:\n' + d.argv.join(' '));
-  if (d.remote || d.source || d.base) lines.push(`Push target: remote ${d.remote || '?'}, branch ${d.source || '?'} into ${d.base || '?'}`);
+  // argv_json is built by the server: every argument boundary is quoted and invisible/bidi characters are written as \uXXXX.
+  if (d.argv_json) lines.push('Exact arguments (JSON):\n' + d.argv_json);
+  if (d.repository || d.branch) {
+    lines.push(`Repository: ${d.repository || '?'}\nTask branch: ${d.branch || '?'}  →  base: ${d.base || '?'}\nPush destination: ${d.push_destination || '?'}\nPreview: ${d.preview_id || '?'} at ${d.head || '?'}`
+      + (d.outgoing_commits !== undefined ? `\nCommits to push: ${d.outgoing_commits}` : '')
+      + (Array.isArray(d.changed_paths) && d.changed_paths.length ? '\nChanged files:\n  ' + d.changed_paths.join('\n  ') : ''));
+  } else if (d.preview) lines.push(d.preview);
   if (d.directory) lines.push('Folder:\n' + d.directory);
   return lines.length ? `<pre class="approval-details">${escapeHTML(lines.join('\n\n'))}</pre>` : '';
 }

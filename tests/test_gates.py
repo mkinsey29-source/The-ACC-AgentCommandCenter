@@ -73,7 +73,7 @@ class ClassifyTests(unittest.TestCase):
             (['api', 'orchestrators', 'select'], {'selected': 'auto'}),
             (['api', 'knowledge', 'note'], {}),
             (['api', 'knowledge', 'note'], {'title': 't', 'body': 'b', 'status': 'hypothesis'}),
-            (['api', 'knowledge', 'checkin'], {'title': 't', 'summary': 's', 'worker': 'w'}),
+            (['api', 'knowledge', 'checkin'], {'title': 't', 'summary': 's', 'worker': 'w', 'status': 'supported'}),
             (['api', 'knowledge', 'checkout'], {}),
             (['api', 'knowledge', 'review'], {}),
             (['api', 'knowledge', 'search'], {'query': 'q'}),
@@ -85,7 +85,7 @@ class ClassifyTests(unittest.TestCase):
 
     def test_summaries_say_what_will_happen(self):
         gate = classify(self.c, ['api', 'tasks'], {'title': 'Cleanup', 'argv': ['rm', '-rf', 'build']})
-        self.assertIn('rm -rf build', gate.summary)
+        self.assertIn('["rm", "-rf", "build"]', gate.summary)  # exact arguments, not a joined string
         self.assertEqual(gate.details['argv'], ['rm', '-rf', 'build'])
         self.assertIn('/tmp/out', classify(self.c, ['api', 'archive', 'export'], {'directory': '/tmp/out'}).summary)
         self.assertIn('Fix the parser', classify(self.c, ['api', 'tasks', 'known', 'publish'], {}).summary)
@@ -100,7 +100,7 @@ class ClassifyTests(unittest.TestCase):
         gate = classify(self.c, ['api', 'tasks'], {'title': 't', 'argv': ['x' * 5000]})
         self.assertLess(len(gate.summary), 400)  # the summary is clipped for scanning
         self.assertEqual(gate.details['argv'], ['x' * 5000])  # but the owner sees the whole command
-        self.assertEqual(gate.details['full_command'], 'x' * 5000)
+        self.assertEqual(gate.details['argv_json'], '["' + 'x' * 5000 + '"]')
 
 
 class ApprovalTests(unittest.TestCase):

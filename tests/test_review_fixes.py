@@ -131,14 +131,15 @@ class GatedCheckin(GatedFixture):
 
     def test_supported_knowledge_is_not_gated(self):
         from acc.gates import classify
-        payload = {**self.VERIFIED, 'completed_knowledge': [{**self.VERIFIED['completed_knowledge'][0], 'status': 'supported'}]}
+        payload = {**self.VERIFIED, 'status': 'supported',
+                   'completed_knowledge': [{**self.VERIFIED['completed_knowledge'][0], 'status': 'supported'}]}
         self.assertIsNone(classify(self.c, ['api', 'knowledge', 'checkin'], payload))
 
     def test_malformed_completed_knowledge_does_not_crash_the_gate(self):
         from acc.gates import classify
         for bad in ('x', [1, None, 'y'], {'a': 1}):
             with self.subTest(bad=bad):
-                self.assertIsNone(classify(self.c, ['api', 'knowledge', 'checkin'], {'completed_knowledge': bad}))
+                self.assertIsNone(classify(self.c, ['api', 'knowledge', 'checkin'], {'status': 'supported', 'completed_knowledge': bad}))
 
 
 class OwnerListener(unittest.TestCase):

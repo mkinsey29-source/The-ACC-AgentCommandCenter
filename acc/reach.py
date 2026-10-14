@@ -160,7 +160,11 @@ def resolve(mode: str, *, port: int, token: str, host: str | None = None,
 def check(mode: str, *, port: int, token: str | None, host: str | None = None,
             allow_hosts: Iterable[str] = (), public_ack: bool = False, behind_https: bool = False,
             container: bool | None = None, route=None, previous_route=None) -> tuple[list[Finding], Reach | None]:
-    """The mode-aware check: report every setting, and whether ACC would start."""
+    """The mode-aware check: report every setting and the read-only readiness ACC can see without changing anything.
+
+    This is configuration validation, not a promise that startup succeeds. It cannot find out whether the user may
+    change Tailscale Serve, whether HTTPS certificates can be issued, whether the port can be bound, or whether
+    another tool changes Serve between this check and startup; the ``not checked`` finding says so."""
     findings: list[Finding] = [Finding('mode', 'ok', mode)]
     try:
         reach = resolve(mode, port=port, token=token or '', host=host, allow_hosts=allow_hosts,
@@ -174,7 +178,7 @@ def check(mode: str, *, port: int, token: str | None, host: str | None = None,
         except Exception as exc:  # TailscaleError, or the command failing
             findings.append(Finding('start', 'fail', str(exc)))
             return findings, None
-        findings.append(Finding('tailscale route', 'ok', f'{hostname}:{port} is free for a private route'))
+        findings.append(Finding('tailscale route', 'ok', f'{hostname}:{port} is free, and not publicly shared, as of this read'))
     kind = address_class(reach.bind_host)
     findings.append(Finding('bind address', 'ok' if kind in ('loopback', 'private') else 'warn',
                             f'{reach.bind_host} ({kind})'))
@@ -190,6 +194,10 @@ def check(mode: str, *, port: int, token: str | None, host: str | None = None,
                                 'not marked Secure; use --behind-https only if a TLS front door serves the page'))
     else:
         findings.append(Finding('remote access', 'ok', 'off; loopback and local token only'))
+    if reach.remote:
+        not_checked = 'binding the port, ' + ('permission to change Tailscale Serve, HTTPS certificate issuance, '
+                                              if mode == 'tailscale-serve' else '') + 'and anything another tool changes before startup'
+        findings.append(Finding('not checked', 'warn', 'read-only check only; found out when ACC starts: ' + not_checked))
     return findings, reach
 
 

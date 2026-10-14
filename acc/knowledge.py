@@ -27,6 +27,9 @@ STATUSES = {
     'hypothesis', 'supported', 'verified', 'disproven', 'superseded', 'obsolete',
     'active', 'pending-review',
 }
+# Statuses that tell every later agent "rely on this". Callers other than the owner may not establish them: a gated
+# caller's attempt is refused before any write, and a worker's own claim is kept as 'supported' until the owner promotes it.
+ESTABLISHED_STATUSES = ('verified', 'active')
 INACTIVE_STATUSES = {'disproven', 'superseded', 'obsolete'}
 NON_RECOMMENDED_STATUSES = INACTIVE_STATUSES | {'pending-review'}
 REVIEW_VERDICTS = {'unreviewed', 'supports', 'challenges', 'mixed', 'needs-evidence'}
@@ -38,6 +41,26 @@ NOTE_TYPES = {
     'task-checkout', 'task-checkin', 'handoff', 'summary', 'decision', 'procedure',
     'problem-solution', 'hypothesis', 'correction', 'finding', 'lesson', 'reference', 'review',
 }
+
+
+class OwnerApprovalRequired(ValueError):
+    """The change would establish knowledge, which only the owner may do."""
+
+
+def effective_checkin_status(payload) -> object:
+    """The status a check-in note is written with. Classification and the write must agree, so both use this."""
+    return payload.get('status', 'active')
+
+
+def checkin_promotes(payload) -> bool:
+    """True when a check-in would establish knowledge: its own status is verified/active (the default is active),
+    or any completed-knowledge item claims verified."""
+    items = payload.get('completed_knowledge')
+    items = items if isinstance(items, list) else []
+    return (effective_checkin_status(payload) in ESTABLISHED_STATUSES
+            or any(isinstance(item, dict) and item.get('status') == 'verified' for item in items))
+
+
 TOKEN = re.compile(r"[a-z0-9][a-z0-9_.-]+", re.IGNORECASE)
 FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 STATUS_BANNER = re.compile(
@@ -454,8 +477,10 @@ class KnowledgeVaults:
         matching = next((line for line in lines if _terms(line) & query_terms), None)
         return (matching or (lines[0] if lines else ''))[:500]
 
-    def create_note(self, payload):
+    def create_note(self, payload, authority='owner'):
         self._require()
+        if authority == 'gated' and payload.get('status') in ESTABLISHED_STATUSES:
+            raise OwnerApprovalRequired('Adding a note marked ' + str(payload.get('status')) + ' needs the owner\'s approval.')
         title = payload.get('title')
         body = payload.get('body')
         note_type = payload.get('type', 'finding')
@@ -693,13 +718,22 @@ class KnowledgeVaults:
                 'review_values': review_values, 'structured_reviews': structured_reviews,
                 'completed_items': completed_items, 'checkout_path': checkout_path}
 
-    def checkin(self, payload):
-        """Publish a complete public/MCP check-in atomically."""
-        with self.lock, self.adapter.transaction():
-            return self._checkin(payload)
+    def checkin(self, payload, authority='owner'):
+        """Publish a complete public/MCP check-in atomically.
 
-    def _checkin(self, payload):
+        ``authority`` is 'owner' (the owner, or a request the owner approved) or 'gated' (an agent credential or a paired
+        device). A gated check-in that would establish knowledge is refused before anything is written.
+        """
+        with self.lock, self.adapter.transaction():
+            return self._checkin(payload, authority)
+
+    def _checkin(self, payload, authority='owner'):
+        """``authority`` 'worker' is a configured worker's own result: its claims are untrusted, so nothing it writes
+        is established. A claimed 'verified' is kept as 'supported' with the claim recorded for the owner to promote."""
         self._require()
+        if authority == 'gated' and checkin_promotes(payload):
+            raise OwnerApprovalRequired('A check-in that marks knowledge verified or active (the default is active) '
+                                        'needs the owner\'s approval; use status "supported" for a routine check-in.')
         prepared = self._prepare_checkin(payload)
         title, summary, worker = (prepared[key] for key in ('title', 'summary', 'worker'))
         scopes = prepared['scopes']
@@ -723,7 +757,8 @@ class KnowledgeVaults:
             body += ['## Checkout', '', f"- [[{checkout_path[:-3]}]]", '']
         note = self.create_note({
             'title': 'Check-in — ' + title, 'body': '\n'.join(body), 'type': 'task-checkin',
-            'status': payload.get('status', 'active'), 'task_id': payload.get('task_id'),
+            'status': 'supported' if authority == 'worker' else effective_checkin_status(payload),
+            'task_id': payload.get('task_id'),
             'run_id': payload.get('run_id'), 'worker': worker, 'stage': payload.get('stage'),
             'source_notes': [checkout_path] if checkout_path else [],
             'tags': ['acc/checkin', 'project/' + _slug(self.c.project.name)],
@@ -766,9 +801,20 @@ class KnowledgeVaults:
         for item in completed_items:
             item_body = item['body'].strip() + '\n\n## Evidence\n\n' + '\n'.join(
                 '- ' + value for value in item['evidence'])
+            status = item['status']
+            if authority == 'worker' and status in ESTABLISHED_STATUSES:
+                status = 'supported'
+                item_body += ('\n\n> [!warning] Promotion requested\n> The worker marked this note ' + item['status']
+                              + '. ACC keeps it as supported until the owner promotes it (knowledge/transition).\n')
+                try:
+                    self.c.store.event('knowledge_promotion_requested', {
+                        'message': 'A worker result claimed verified knowledge; kept as supported: ' + item['title'],
+                        'worker': worker, 'task_id': payload.get('task_id')})
+                except Exception:
+                    pass  # an audit-event failure must not decide the write
             knowledge_notes.append(self.create_note({
                 'title': item['title'], 'body': item_body, 'type': item['type'],
-                'status': item['status'], 'folder': item['scope'], 'worker': worker,
+                'status': status, 'folder': item['scope'], 'worker': worker,
                 'task_id': payload.get('task_id'), 'run_id': payload.get('run_id'),
                 'stage': payload.get('stage'),
                 'source_notes': [note['path']] + ([checkout_path] if checkout_path else []),
@@ -956,7 +1002,7 @@ class KnowledgeVaults:
                 checkout_text = self._complete_review_acknowledgements(
                     checkout, knowledge, checkout_text)
                 self.adapter.write(checkout['path'], checkout_text, replace=True)
-            note = self._checkin(checkin_payload)
+            note = self._checkin(checkin_payload, authority='worker')
         task.setdefault('knowledge', {})['last_checkin'] = note
         if note.get('reviews'):
             task['knowledge']['last_reviews'] = note['reviews']
@@ -1028,7 +1074,9 @@ class KnowledgeVaults:
         knowledge_state['last_review'] = review
         return review
 
-    def transition(self, payload):
+    def transition(self, payload, authority='owner'):
+        if authority == 'gated':
+            raise OwnerApprovalRequired('Rewriting a note\'s status needs the owner\'s approval.')
         with self.lock:
             return self._transition(payload)
 
@@ -1072,7 +1120,9 @@ class KnowledgeVaults:
         self.adapter.write(relative, '---\n' + header + '\n---\n\n' + body.rstrip() + '\n', replace=True)
         return {'path': relative, 'status': status, 'corrected_by': corrected_by, 'evidence': evidence}
 
-    def rebuttal(self, payload):
+    def rebuttal(self, payload, authority='owner'):
+        if authority == 'gated':
+            raise OwnerApprovalRequired('Rebutting a note needs the owner\'s approval.')
         self._require()
         original = payload.get('original_path')
         self.adapter.resolve(original, must_exist=True)

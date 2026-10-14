@@ -27,12 +27,25 @@ network-facing listener never answers as the owner, even for a request that clai
 listener never answers remote hosts. Both share the same approvals and pairings. `tailscale-serve` keeps ACC on
 loopback, so one listener serves both and the Host header tells them apart.
 
+**The orchestrator bridge uses the loopback listener, never the network one.** The agent credential is accepted only on
+local hosts, so on a network-facing mode the bridge must reach the owner's door. The port is free by default
+(`--owner-port N` fixes it). Either way ACC writes `endpoint.json` in its state folder at every start (the loopback
+address and the process id, no credential; removed at shutdown), and the bridge reads it before each request, so a restart
+on another port is followed with no configuration change. `acc/setup.py` generates the bridge arguments
+`--endpoint-file <state>/endpoint.json --token-file <state>/agent-token`; `--url` stays as the fallback when the file is
+missing or does not name a loopback address. The network-facing listener still refuses the agent credential.
+
 ## Check before you start
 
-`python -m acc.server --project <folder> --reach <mode> [options] --reach-check` prints every setting and
-whether ACC would start, then exits (status 2 if it would refuse). It creates no files. For `tailscale-serve` it
-also reads the Serve configuration, read-only, and fails if no port among 8443-8446 is free or the port is shared
-publicly, exactly as startup would.
+`python -m acc.server --project <folder> --reach <mode> [options] --reach-check` validates the settings and reads what it
+can without changing anything, prints each finding, then exits (status 2 if the settings are unusable). It creates no
+files. For `tailscale-serve` the read-only part covers: Tailscale is running and has an HTTPS name, a port among
+8443-8446 is free as of this read, and that port is not publicly shared (Funnel).
+
+It **does not prove that startup will succeed**. These are found only when ACC starts, and the report lists them under
+`not checked`: permission to change Tailscale Serve (for example "serve not permitted for this user"), HTTPS certificate
+issuance, binding the port, and anything another tool changes in between. No read-only command reports Serve
+permission, and the check never changes Serve to find out.
 
 ACC also refuses to start, with the reason, for an unsafe combination:
 
@@ -80,14 +93,14 @@ A gated caller does not get to run these operations. Each becomes an approval re
 
 | Operation | Why it is gated |
 |---|---|
-| Create a task with a local command (`argv`), or start an existing one (`tasks/{id}/start` when its worker is the local command) | it executes any command as you |
+| Create a task with a local command (`argv`), or start an existing one (`tasks/{id}/start` when its worker is the local command) | it executes any command as you; a start approval is bound to the task revision, worker and exact `argv`, and goes stale if any change |
 | Export the archive (`archive/export`) | it writes files wherever the caller points |
 | Publish a task (`publish`) | it pushes a branch and opens a pull request |
 | Change GitHub settings (`github/configure`) | it decides where reviewed work is pushed |
 | Recover an interrupted task (`recover`) | it asserts that you inspected the process tree |
 | Accept shared memory (`memory/{id}/review` with `active`) | every agent then treats it as established |
 | Rewrite a vault note's status (`knowledge/transition`), or rebut one (`knowledge/rebuttal`) | it overwrites an existing note and can mark it disproven |
-| Add a vault note already marked `verified` or `active` (`knowledge/note`), or a check-in whose own status is `verified`/`active` or that carries `completed_knowledge` marked `verified` (`knowledge/checkin`) | it claims a verification nobody did |
+| Add a vault note already marked `verified` or `active` (`knowledge/note`), or a check-in that establishes knowledge (`knowledge/checkin`: its status is `verified` or `active`, **including when omitted, because the default is `active`**, or it carries `completed_knowledge` marked `verified`) | it claims a verification nobody did |
 
 How it works: the call returns `202` with `approval_required` and an approval id, and nothing runs. The request
 appears under **Needs your decision** in ACC at this computer (the `attention` list in `/api/state`), saying who
@@ -100,10 +113,21 @@ A gated caller cannot raise its own permissions: approving, denying, pairing and
 only, the agent token is refused on remote hosts, and the owner token is refused there too.
 
 Not gated, on purpose: starting and running configured AI workers, creating tasks without a command, conversation,
-project mode, orchestrator selection, rejecting memory, and ordinary knowledge check-ins (a check-in that does not claim `verified`/`active` status, whose completed knowledge is `supported`). Evidence on a check-in is only text the caller supplied, so it never replaces approval for a verified claim. Worker runs are the product and are
-bounded by worktrees, snapshots and review; the gates cover what steps outside that boundary. Two limits to know:
-a task's `permissions` field is still a label that nothing enforces, and an approved command runs with your full
-user rights, so read the summary before you approve.
+project mode, orchestrator selection, rejecting memory, and a routine knowledge check-in that says `"status": "supported"`
+with `supported` completed knowledge. Worker runs are the product and are bounded by worktrees, snapshots and review; the
+gates cover what steps outside that boundary.
+
+What the code and tests establish about knowledge: a gated caller cannot make `verified` or `active` knowledge, by any
+route, without the owner (the write refuses it before touching the vault), and a configured worker's result cannot either:
+its `verified` items are saved as `supported`, marked "Promotion requested", and the owner promotes them with
+`knowledge/transition`. Evidence on a check-in is only text the caller supplied, so it never replaces approval.
+
+What an approval shows is exact: a command as a JSON array with every argument boundary quoted and invisible or bidi
+characters written as `\uXXXX`; a publish as the preview's repository, task branch, base, push destination (credentials
+removed) and head. An approval is bound to those facts. If the task, its worker, its argument list or the preview changed
+after the request, approving does nothing and the request becomes `stale`; the caller asks again. Two limits to know:
+a task's `permissions` field is still a label that nothing enforces, and an approved command runs with your full user
+rights, so read it before you approve.
 
 ## Keeping the owner token private
 

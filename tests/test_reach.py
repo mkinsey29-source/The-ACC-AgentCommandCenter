@@ -183,7 +183,7 @@ class CheckTests(unittest.TestCase):
     def test_remote_report_lists_token_pairing_hosts_and_cookie(self):
         findings, r = check('private', port=8765, token=TOKEN, host='192.168.1.20')
         names = {f.setting: f for f in findings}
-        self.assertEqual(set(names), {'mode', 'bind address', 'owner entry', 'control token', 'device pairing', 'accepted hosts', 'cookie'})
+        self.assertEqual(set(names), {'mode', 'bind address', 'owner entry', 'control token', 'device pairing', 'accepted hosts', 'cookie', 'not checked'})
         self.assertEqual(names['cookie'].status, 'warn')
         self.assertIn('192.168.1.20:8765', names['accepted hosts'].detail)
 
