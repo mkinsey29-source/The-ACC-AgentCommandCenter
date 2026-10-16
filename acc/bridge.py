@@ -312,18 +312,50 @@ def dispatch(message, url, token):
 
 
 def is_local(url):
-    target = urlsplit(url)
-    return target.scheme == 'http' and target.hostname in ('127.0.0.1', 'localhost') and not target.username
+    """A plain loopback HTTP origin: no credentials (even an empty user), an explicit port, no path, query or fragment."""
+    try:
+        target = urlsplit(url)
+        port = target.port
+    except ValueError:
+        return False
+    return (target.scheme == 'http' and target.hostname in ('127.0.0.1', 'localhost') and port is not None
+            and target.username is None and target.password is None and '@' not in target.netloc
+            and target.path in ('', '/') and not target.query and not target.fragment)
+
+
+def _alive(pid):
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name == 'nt':
+        return True  # no portable cheap check; the pid is advisory there
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # exists, owned by someone else
+    return True
 
 
 def resolve_endpoint(endpoint_file, fallback):
     """The coordinator's loopback address. ACC writes it (no credential, only a port) each time it starts, so a
-    restart on another port is followed without editing this bridge's configuration. Falls back to ``--url``."""
+    restart on another port is followed without editing this bridge's configuration. Falls back to ``--url``.
+
+    The file is routing information, not proof that ACC is behind the port: anyone who can write it, or who listens on a
+    stale port, would receive the agent credential. So a file that is a link, that group or others can write, whose
+    process is gone, or that names anything but a plain loopback origin is ignored. Keep its folder writable only by the
+    account that runs ACC."""
     if endpoint_file:
         try:
-            url = json.loads(Path(endpoint_file).read_text()).get('url')
-            if isinstance(url, str) and is_local(url):
-                return url
+            path = Path(endpoint_file)
+            if path.is_symlink():
+                return fallback
+            if os.name != 'nt' and path.stat().st_mode & 0o022:
+                return fallback
+            data = json.loads(path.read_text())
+            url = data.get('url')
+            if isinstance(url, str) and is_local(url) and _alive(data.get('pid')):
+                return url.rstrip('/')
         except (OSError, ValueError, AttributeError):
             pass
     return fallback

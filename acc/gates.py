@@ -12,6 +12,7 @@ bounded by worktrees, snapshots and review. See docs/REMOTE-ACCESS.md.
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import json
@@ -29,6 +30,7 @@ TTL_SECONDS = 600
 KEEP_SECONDS = 3600
 MAX_PENDING = 20
 SUMMARY_LIMIT = 300
+PATH_LISTING_LIMIT = 200
 
 
 class ApprovalError(Exception):
@@ -55,30 +57,52 @@ class Gate:
     atomic: bool = False
 
 
+# Characters that draw nothing but are not in the Unicode "format" categories: they must be written out too.
+INVISIBLE_EXTRA = frozenset([0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180E, 0x2800, 0x3164, 0xFFA0,
+                             *range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0)])
+
+
+def _unit(code: int) -> str:
+    """One code point as JSON-valid \\uXXXX escapes (a surrogate pair above U+FFFF)."""
+    if code > 0xFFFF:
+        code -= 0x10000
+        return f'\\u{0xD800 + (code >> 10):04x}\\u{0xDC00 + (code & 0x3FF):04x}'
+    return f'\\u{code:04x}'
+
+
 def visible(text) -> str:
-    """Escape what a reader cannot see (controls, bidi and other format characters, odd spaces) as \\uXXXX."""
+    """Write out what a reader cannot see (controls, bidi and other format characters, odd spaces, blank glyphs,
+    variation selectors) as JSON-valid \\uXXXX escapes. Readable text is kept as is. Used for summaries and labels;
+    where the exact value matters, use ``exact``."""
     out = []
     for ch in str(text):
         category = unicodedata.category(ch)
-        if category in ('Cc', 'Cf', 'Zl', 'Zp', 'Cs', 'Co', 'Cn') or (category == 'Zs' and ch != ' '):
-            out.append(f'\\u{ord(ch):04x}' if ord(ch) <= 0xFFFF else f'\\U{ord(ch):08x}')
+        if (category in ('Cc', 'Cf', 'Zl', 'Zp', 'Cs', 'Co', 'Cn') or (category == 'Zs' and ch != ' ')
+                or ord(ch) in INVISIBLE_EXTRA):
+            out.append(_unit(ord(ch)))
         else:
             out.append(ch)
     return ''.join(out)
 
 
+def exact(value) -> str:
+    """A value as JSON with every non-ASCII character written as \\uXXXX: unambiguous, lossless, valid JSON, and nothing
+    can hide in it. The cost is that accented or non-Latin text appears escaped."""
+    return json.dumps(value, ensure_ascii=True)
+
+
 def argv_display(argv) -> str:
-    """The exact argument list as a JSON array: every boundary and quote is visible, invisible characters are escaped."""
-    return visible(json.dumps([str(a) for a in argv], ensure_ascii=False))
+    """The exact argument list as an ASCII JSON array: every boundary and quote is visible."""
+    return exact([str(a) for a in argv])
 
 
 def redact_url(url) -> str:
-    """A push destination without any credentials embedded in it."""
-    return re.sub(r'(?<=//)[^/@\s]*@', '', str(url))
+    """A push destination without any credentials embedded in it (everything before the last @ of the authority)."""
+    return re.sub(r'(?<=//)[^/\s]*@', '', str(url))
 
 
 def _clip(value, limit=SUMMARY_LIMIT) -> str:
-    text = str(value)
+    text = visible(value)
     return text if len(text) <= limit else text[:limit - 1] + '…'
 
 
@@ -99,13 +123,17 @@ def effective_status(payload: dict):
     return effective_checkin_status(payload)
 
 
-def _command_fingerprint(coordinator, task_id) -> str:
-    """Everything that decides what a start would execute: the task revision, its worker, its argv and that worker's config."""
-    task = coordinator.store.get(task_id)
-    agent = task.get('agent')
-    material = {'task': task_id, 'revision': task.get('revision'), 'agent': agent, 'argv': task.get('argv'),
-                'timeout': task.get('timeout_seconds'), 'config': getattr(coordinator, 'agents', {}).get(agent)}
+def _command_fingerprint(task: dict, config) -> str:
+    """Everything that decides what a start would execute: the task revision, its worker, its argv and that worker's
+    configuration. Computed from one task record and one configuration, never from separate reads."""
+    material = {'task': task.get('id'), 'revision': task.get('revision'), 'agent': task.get('agent'), 'argv': task.get('argv'),
+                'timeout': task.get('timeout_seconds'), 'config': config}
     return hashlib.sha256(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _live_fingerprint(coordinator, task_id) -> str:
+    task = coordinator.store.get(task_id)
+    return _command_fingerprint(task, getattr(coordinator, 'agents', {}).get(task.get('agent')))
 
 
 PREVIEW_FIELDS = ('id', 'head', 'snapshot_id', 'revision', 'repository', 'branch', 'base', 'remote', 'push_url', 'expected_tree')
@@ -129,10 +157,14 @@ def _publish_gate(coordinator, task_id, payload) -> Gate:
                     bind={'task': task_id, 'preview_id': preview_id if isinstance(preview_id, str) else None, 'matched': False},
                     check=lambda c, tid=task_id, pid=preview_id: _check_preview(c, tid, pid, None))
     bound = {k: saved.get(k) for k in PREVIEW_FIELDS}
-    shown = {'task': task_id, 'title': _clip(title, 200), 'preview_id': saved['id'], 'repository': _clip(saved.get('repository'), 200),
-             'branch': _clip(saved.get('branch'), 200), 'base': _clip(saved.get('base'), 200), 'remote': _clip(saved.get('remote'), 100),
-             'push_destination': _clip(redact_url(saved.get('push_url', '')), 300), 'head': _clip(saved.get('head'), 80),
-             'outgoing_commits': len(saved.get('outgoing_commits') or []), 'changed_paths': [_clip(x, 200) for x in (saved.get('changed_paths') or [])[:50]]}
+    paths = [str(x) for x in (saved.get('changed_paths') or [])]
+    shown = {'task': task_id, 'title': _clip(title, 200), 'preview_id': saved['id'],
+             'repository': exact(str(saved.get('repository'))), 'branch': exact(str(saved.get('branch'))),
+             'base': exact(str(saved.get('base'))), 'remote': exact(str(saved.get('remote'))),
+             'push_destination': exact(redact_url(saved.get('push_url', ''))), 'head': _clip(saved.get('head'), 80),
+             'outgoing_commits': len(saved.get('outgoing_commits') or []),
+             'changed_paths': [exact(x) for x in paths[:PATH_LISTING_LIMIT]], 'changed_paths_total': len(paths),
+             'changed_paths_truncated': max(0, len(paths) - PATH_LISTING_LIMIT)}
     return Gate('github.publish', f'Push branch {_clip(saved.get("branch"), 80)} of task “{_clip(title, 100)}” to '
                 f'{_clip(saved.get("repository"), 100)} (base {_clip(saved.get("base"), 60)}) and create or reuse its pull request',
                 shown, bind={'task': task_id, **bound, 'matched': True},
@@ -147,18 +179,22 @@ def _check_preview(coordinator, task_id, preview_id, bound):
 
 
 def _start_gate(coordinator, task_id) -> Gate | None:
-    try:
-        task = coordinator.store.get(task_id)
-    except Exception:
-        return None  # an unknown task fails in the normal path
+    # One immutable snapshot taken under the coordinator lock: what is displayed, what is bound and what is later
+    # compared are all derived from this single record, so the task cannot change between "shown" and "bound".
+    with getattr(coordinator, 'lock', None) or contextlib.nullcontext():  # real coordinators always have a lock
+        try:
+            task = copy.deepcopy(coordinator.store.get(task_id))
+        except Exception:
+            return None  # an unknown task fails in the normal path
+        config = copy.deepcopy(getattr(coordinator, 'agents', {}).get(task.get('agent')))
     if task.get('agent') != 'local-command':
         return None
     argv = [str(a) for a in task.get('argv') or []]
     shown = argv_display(argv)
-    fingerprint = _command_fingerprint(coordinator, task_id)
+    fingerprint = _command_fingerprint(task, config)
 
     def check(c, tid=task_id, expected=fingerprint):
-        if _command_fingerprint(c, tid) != expected:
+        if _live_fingerprint(c, tid) != expected:
             raise StaleApproval('This task’s command, worker or revision changed after the request was made. Ask again.')
     return Gate('command.start', f'Run this local command now (task “{_clip(task.get("title", ""), 120)}”): {_clip(shown)}',
                 {'task': task_id, 'title': _clip(task.get('title', ''), 200), 'revision': task.get('revision'),
@@ -179,7 +215,7 @@ def classify(coordinator, parts: list[str], payload: dict) -> Gate | None:
                          'argv_json': shown, 'full_command': shown})
     elif parts == ['api', 'archive', 'export']:
         return Gate('files.export', f"Write a task archive and database backup into {_clip(payload.get('directory', ''))}",
-                    {'directory': _clip(payload.get('directory', ''))})
+                    {'directory': _clip(payload.get('directory', '')), 'directory_json': exact(str(payload.get('directory', '')))})
     elif parts == ['api', 'github', 'configure']:
         shown = {k: _clip(v, 100) for k, v in payload.items() if k in ('remote', 'source', 'base', 'enabled', 'interval')}
         return Gate('github.configure', 'Change GitHub settings, which decide where reviewed work is pushed: '

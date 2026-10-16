@@ -403,18 +403,20 @@ $('remote-panel').onclick = async e => {
 };
 
 // Attention: risky requests from remote devices or the orchestrator wait for the owner at this computer.
-// The summary is clipped for scanning; the full request the owner is approving is always shown below it.
+// The summary is shortened and made readable for scanning. The block below it carries the exact values the owner is
+// approving, as ASCII JSON from the server (every non-ASCII or invisible character is written as \uXXXX). Long path
+// lists are capped; the page says how many are not shown.
 function approvalDetails(a) {
   const d = a.details || {};
   const lines = [];
-  // argv_json is built by the server: every argument boundary is quoted and invisible/bidi characters are written as \uXXXX.
   if (d.argv_json) lines.push('Exact arguments (JSON):\n' + d.argv_json);
   if (d.repository || d.branch) {
     lines.push(`Repository: ${d.repository || '?'}\nTask branch: ${d.branch || '?'}  →  base: ${d.base || '?'}\nPush destination: ${d.push_destination || '?'}\nPreview: ${d.preview_id || '?'} at ${d.head || '?'}`
       + (d.outgoing_commits !== undefined ? `\nCommits to push: ${d.outgoing_commits}` : '')
-      + (Array.isArray(d.changed_paths) && d.changed_paths.length ? '\nChanged files:\n  ' + d.changed_paths.join('\n  ') : ''));
+      + (Array.isArray(d.changed_paths) && d.changed_paths.length ? '\nChanged files:\n  ' + d.changed_paths.join('\n  ') : '')
+      + (d.changed_paths_truncated ? `\n  … ${d.changed_paths_truncated} more of ${d.changed_paths_total} not shown` : ''));
   } else if (d.preview) lines.push(d.preview);
-  if (d.directory) lines.push('Folder:\n' + d.directory);
+  if (d.directory_json) lines.push('Folder (JSON):\n' + d.directory_json);
   return lines.length ? `<pre class="approval-details">${escapeHTML(lines.join('\n\n'))}</pre>` : '';
 }
 function renderAttention() {

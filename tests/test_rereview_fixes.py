@@ -331,7 +331,7 @@ class CommandDisplay(unittest.TestCase):
         self.assertIn('d.argv_json', app)
 
     def test_visible_handles_astral_and_surrogate_input(self):
-        self.assertEqual(visible('a\U000e0001b'), 'a\\U000e0001b')
+        self.assertEqual(visible('a\U000e0001b'), 'a\\udb40\\udc01b')
         self.assertEqual(argv_display(['a', 'b']), '["a", "b"]')
 
 
@@ -357,11 +357,12 @@ class PublishConsent(GatedFixture):
         status, body = self.agent('POST', f'/api/tasks/{task_id}/publish', {'preview_id': 'prev-1', 'request_id': 'req-1'})
         self.assertEqual(status, 202, body)
         details = body['approval']['details']
-        self.assertEqual((details['repository'], details['branch'], details['base']), ('octo/widgets', 'acc/task-7-fix', 'release'))
-        self.assertEqual(details['push_destination'], 'https://github.com/octo/widgets.git')
+        self.assertEqual((json.loads(details['repository']), json.loads(details['branch']), json.loads(details['base'])),
+                         ('octo/widgets', 'acc/task-7-fix', 'release'))
+        self.assertEqual(json.loads(details['push_destination']), 'https://github.com/octo/widgets.git')
         self.assertNotIn('s3cretvalue', json.dumps(body))
         self.assertIn('acc/task-7-fix', body['approval']['summary'])
-        self.assertNotEqual(details['branch'], self.c.github.settings['source'], 'the configured source branch is not what is pushed')
+        self.assertNotEqual(json.loads(details['branch']), self.c.github.settings['source'], 'the configured source branch is not what is pushed')
 
     def test_a_replaced_preview_makes_the_approval_stale(self):
         task_id = self.make_task()
@@ -465,7 +466,7 @@ class BridgeEndpoint(unittest.TestCase):
             with self.subTest(bad=bad):
                 path.write_text(bad)
                 self.assertEqual(resolve_endpoint(str(path), 'http://127.0.0.1:1'), 'http://127.0.0.1:1')
-        path.write_text(json.dumps({'url': 'http://127.0.0.1:4242'}))
+        path.write_text(json.dumps({'url': 'http://127.0.0.1:4242', 'pid': os.getpid()}))
         self.assertEqual(resolve_endpoint(str(path), 'http://127.0.0.1:1'), 'http://127.0.0.1:4242')
 
     def test_the_public_listener_still_refuses_the_agent_credential_and_the_endpoint_file_is_the_only_new_surface(self):

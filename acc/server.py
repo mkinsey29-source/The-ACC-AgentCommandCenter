@@ -11,6 +11,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 from urllib.parse import parse_qs, urlsplit
 from .core import Coordinator, Conflict
@@ -363,7 +364,7 @@ def mutate(c, parts, payload, authority='owner'):
         return (200, c.integrations.review_memory(parts[2], payload))
     if len(parts) == 3 and parts[:2] == ['api', 'knowledge']:
         routes = {
-            'search': c.knowledge.search, 'checkout': c.knowledge.checkout,
+            'search': c.knowledge.search, 'checkout': lambda p: c.knowledge.checkout(p, authority),
             'checkin': lambda p: c.knowledge.checkin(p, authority),
             'note': lambda p: c.knowledge.create_note(p, authority),
             'review': c.knowledge.review,
@@ -426,11 +427,24 @@ ENDPOINT_FILE = 'endpoint.json'
 
 
 def _write_endpoint(path, port):
-    """Tell the local orchestrator bridge where the loopback listener is. Holds no credential, only a port."""
+    """Tell the local orchestrator bridge where the loopback listener is. Holds no credential, only a port.
+
+    The temporary file is created exclusively with a random name (it never follows a link someone planted), then
+    atomically replaces the target, replacing a link at the target rather than writing through it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps({'url': f'http://127.0.0.1:{port}', 'pid': os.getpid()}))
-    os.replace(temporary, path)
+    handle, name = tempfile.mkstemp(prefix='endpoint.', suffix='.tmp', dir=path.parent)
+    try:
+        with os.fdopen(handle, 'w') as out:
+            out.write(json.dumps({'url': f'http://127.0.0.1:{port}', 'pid': os.getpid()}))
+        if os.name != 'nt':
+            os.chmod(name, 0o644)  # a port number: readable by the orchestrator's account, writable only by ACC's
+        os.replace(name, path)
+    except BaseException:
+        try:
+            os.unlink(name)
+        except OSError:
+            pass
+        raise
 
 
 def _refuse(message):
@@ -457,6 +471,9 @@ def main():
                         help='A TLS front door serves the page, so the device cookie is marked Secure')
     parser.add_argument('--agent-token-file', help='Where the orchestrator credential lives (default: agent-token in the state '
                         'folder). Put it outside the state folder, readable only by the orchestrator\'s account.')
+    parser.add_argument('--endpoint-file', help='Where ACC announces its loopback address to the orchestrator bridge '
+                        '(default: endpoint.json in the state folder). Put it where the orchestrator\'s account can read it, '
+                        'together with --agent-token-file, and keep that folder writable only by you.')
     parser.add_argument('--owner-port', type=int, default=0,
                         help='Loopback port for the owner and the orchestrator bridge when ACC listens on a network address '
                              '(default: any free port, announced in the endpoint file). Ignored when ACC listens on loopback.')
@@ -499,6 +516,7 @@ def main():
         except OSError:
             print(f'Warning: could not remove the old owner token file {legacy}; it is no longer valid, delete it.',
                   file=sys.stderr, flush=True)
+    endpoint = Path(os.path.abspath(os.path.expanduser(args.endpoint_file))) if args.endpoint_file else state / ENDPOINT_FILE  # not resolve(): never follow a link at the target
     server = owner_server = route = None
     try:
         if new_agent:
@@ -520,7 +538,14 @@ def main():
             record.write_text(json.dumps({'route': {k: route[k] for k in ('port', 'hostname', 'target')}}))
             reach.set_remote_hosts([route['host']])
             server.route = route
+        _write_endpoint(endpoint, owner_server.server_port)  # inside the guarded block: a failure here cleans up too
     except (ReachError, PairingError, TailscaleError, OSError, ValueError) as exc:
+        if route:  # remove only the Serve route ACC itself created
+            try:
+                tailscale.disable(route)
+                (state / 'reach.json').write_text(json.dumps({'route': None}))
+            except (TailscaleError, OSError, subprocess.SubprocessError):
+                pass
         if owner_server is not None and owner_server is not server:
             owner_server.server_close()
         if server is not None:
@@ -528,8 +553,6 @@ def main():
         coordinator.close()
         _refuse(exc)
     owner_port = owner_server.server_port
-    endpoint = state / ENDPOINT_FILE
-    _write_endpoint(endpoint, owner_port)
     print(f"ACC: http://127.0.0.1:{owner_port}/#launch={server.launch.mint()['code']}", flush=True)
     print('That link works once, for 10 minutes; use New window in ACC for another. The owner token is never saved.', flush=True)
     print(f'State: {state}\nPoint the orchestrator bridge at {agent_path}: its risky actions wait for your approval. '

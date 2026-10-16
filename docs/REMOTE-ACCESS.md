@@ -35,6 +35,15 @@ on another port is followed with no configuration change. `acc/setup.py` generat
 `--endpoint-file <state>/endpoint.json --token-file <state>/agent-token`; `--url` stays as the fallback when the file is
 missing or does not name a loopback address. The network-facing listener still refuses the agent credential.
 
+Trust in that file: the bridge sends the agent credential to whatever answers at the address it names, so the file is routing
+information, not proof that ACC is behind the port. The bridge ignores it when it is a link, when group or others can write it,
+when the process id it names is gone (a stale file after a crash), or when it names anything but a plain loopback address. ACC
+writes it with a random temporary name and replaces any link at the target rather than writing through it. A port left by a
+crashed ACC can still be taken by another local process before the next start, and a local process that can write the folder
+can redirect the bridge, so keep the state folder writable only by the account that runs ACC. If the orchestrator runs as a
+different account, put the file and the token where it can read them and others cannot write them: `--endpoint-file` and
+`--agent-token-file`; the file holds only a port and a process id.
+
 ## Check before you start
 
 `python -m acc.server --project <folder> --reach <mode> [options] --reach-check` validates the settings and reads what it
@@ -117,17 +126,23 @@ project mode, orchestrator selection, rejecting memory, and a routine knowledge 
 with `supported` completed knowledge. Worker runs are the product and are bounded by worktrees, snapshots and review; the
 gates cover what steps outside that boundary.
 
-What the code and tests establish about knowledge: a gated caller cannot make `verified` or `active` knowledge, by any
-route, without the owner (the write refuses it before touching the vault), and a configured worker's result cannot either:
-its `verified` items are saved as `supported`, marked "Promotion requested", and the owner promotes them with
-`knowledge/transition`. Evidence on a check-in is only text the caller supplied, so it never replaces approval.
+What the code and tests establish about knowledge: a gated caller cannot make `verified` or `active` knowledge with a check-in,
+a note, a status change or a rebuttal, nor activate shared memory, without the owner (the write refuses it before touching
+the vault). A gated caller's checkout is saved as `supported` rather than refused, since it is an operational record. A
+configured worker's result cannot establish knowledge either: its `verified` items are saved as `supported`, marked
+"Promotion requested", and the owner promotes them with `knowledge/transition`. Evidence on a check-in is only text the caller
+supplied, so it never replaces approval. This is the list the tests cover, not a claim about every possible route; a new
+writer has to be added to the tests (one test counts the note writers). The Activity record of a promotion request is best
+effort. Configured workers can still change project files; these gates are not an operating-system sandbox.
 
-What an approval shows is exact: a command as a JSON array with every argument boundary quoted and invisible or bidi
-characters written as `\uXXXX`; a publish as the preview's repository, task branch, base, push destination (credentials
-removed) and head. An approval is bound to those facts. If the task, its worker, its argument list or the preview changed
-after the request, approving does nothing and the request becomes `stale`; the caller asks again. Two limits to know:
-a task's `permissions` field is still a label that nothing enforces, and an approved command runs with your full user
-rights, so read it before you approve.
+What an approval shows is exact where it matters: a command is an ASCII JSON array with every argument boundary quoted and every
+non-ASCII or invisible character written as `\uXXXX` (so accented or non-Latin text appears escaped); the export folder and the
+publish target are shown the same way. A publish shows the preview's repository, task branch, base and push destination
+(credentials removed) and at most 200 changed paths; if there are more, the page says how many are not shown. For a start,
+what is shown, what is bound and what is later compared come from one snapshot taken under the coordinator lock. If the task, its
+worker, its arguments, its configuration or the preview changed after the request, approving does nothing and the request
+becomes `stale`; the caller asks again. Two limits to know: a task's `permissions` field is still a label that nothing enforces,
+and an approved command runs with your full user rights, so read it before you approve.
 
 ## Keeping the owner token private
 

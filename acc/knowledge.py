@@ -532,7 +532,9 @@ class KnowledgeVaults:
             'correction': 'Corrections', 'review': 'Reviews',
         }.get(note_type, 'Knowledge')
 
-    def checkout(self, payload):
+    def checkout(self, payload, authority='owner'):
+        """Open a task's knowledge checkout. It is an operational record whose text the caller supplies, so a gated
+        caller's checkout is saved as 'supported', never as established 'active' guidance."""
         self._require()
         title = str(payload.get('title', '')).strip()
         instruction = str(payload.get('instruction', '')).strip()
@@ -586,7 +588,7 @@ class KnowledgeVaults:
         ]
         note = self.create_note({
             'title': 'Checkout — ' + title, 'body': '\n'.join(body), 'type': 'task-checkout',
-            'status': 'active', 'task_id': payload.get('task_id'), 'run_id': payload.get('run_id'),
+            'status': 'supported' if authority == 'gated' else 'active', 'task_id': payload.get('task_id'), 'run_id': payload.get('run_id'),
             'worker': worker, 'stage': payload.get('stage'), 'source_notes': sources,
             'tags': ['acc/checkout', 'project/' + _slug(self.c.project.name)], 'scopes': scopes,
         })
