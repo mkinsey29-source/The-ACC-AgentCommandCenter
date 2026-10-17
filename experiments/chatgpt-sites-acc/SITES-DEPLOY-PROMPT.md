@@ -1,0 +1,7 @@
+# Prompt for the actual ChatGPT Sites runtime test
+
+Use this from ChatGPT Work or Codex desktop with the repository/project open on branch `temporary/chatgpt-sites-acc-feasibility`.
+
+> @Sites Deploy the existing project in `experiments/chatgpt-sites-acc/` as an owner-only private Site for an ACC Web feasibility test. Do not redesign it into a generic dashboard and do not remove the dense command-center layout. First inspect the existing source and run its local `npm run check` and `npm run build` commands. Preserve Master Control on the left, the workspace center, Attention/active workers on the right, and Orchestrator Chat + Play-by-Play on the bottom. The Site must support all nine workspace tabs, demo event streaming, and the 2,000-event stress test. Do not add D1 or R2 yet; this test is specifically for frontend hosting and browser runtime behavior. Do not embed secrets in source. Save a version first and report any compatibility changes Sites proposes before deploying. After I approve the saved version, deploy it owner-only and give me the production URL. Then test desktop, tablet, and mobile layouts and run the in-app stress test. Record whether HTTP/HTTPS and WebSocket APIs are available to this Site runtime, but do not connect to any private/local ACC backend. Do not make the Site public.
+
+For a later live-backend pass, use a public ACC staging endpoint created by M09 and M08 auth. Do not tunnel the user's local ACC control token to a public Site.
