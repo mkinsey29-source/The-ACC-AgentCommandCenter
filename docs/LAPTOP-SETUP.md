@@ -60,6 +60,19 @@ Set `ACC_CONFIG_DIR` before setup and every launch to use another host settings 
 4. In ACC's orchestrator settings, select the intended agents and enable automatic handling only after those profiles are ready. Fresh setup keeps handling disabled, so merely launching ACC does not trigger paid inference. If adopting an existing agents configuration or state database, its existing routing and enabled state remain in effect.
 5. For an external desktop orchestrator, merge the generated `hermes-mcp.json` fragment into the supported MCP configuration of the host. It uses `mcp_servers.acc` exactly as ACC's Hermes connector generator does. Start ACC before connecting, because the server creates the referenced token file on first launch. Other desktop clients may require a different outer configuration key; retain the generated command and argument array when adapting it. ACC does not install a connector into ChatGPT or configure a phone connection.
 
+### Verify ChatGPT Remote once
+
+After the native client discovers ACC's tools, complete one harmless discussion turn in this order:
+
+1. select `chatgpt-remote` with `acc_orchestrator_select`;
+2. claim the conversation with `acc_conversation_claim`;
+3. save the exact test message with `acc_conversation_send`;
+4. refresh the captured batch with `acc_conversation_renew`;
+5. finish it as `discussion` with no actions using `acc_conversation_complete`;
+6. read the resulting transcript with `acc_conversation_read`.
+
+The Conversation panel advances the check from 0/6 to verified. Run `doctor` again; `chatgpt_remote` changes to `OK`. The durable bridge record contains only the MCP client name/version, timestamps, and successful tool names. It does not contain tool arguments, message text, lease tokens, or credentials. A configured fragment alone remains unverified.
+
 The default diagnostic endpoint is `http://127.0.0.1:11434/v1/models`. Change it with `init --yes --local-endpoint http://127.0.0.1:8080/v1/models` to the actual read-only model-list endpoint of your runtime. This only changes the diagnostic check, not Hermes provider routing. Only loopback HTTP URLs without credentials are accepted; diagnostics disable redirects and proxies.
 
 ## Optional CPU voice preparation
@@ -96,7 +109,7 @@ After installing, run `doctor`, launch ACC, allow microphone access, and record 
 
 ## Diagnose and verify
 
-Use `doctor`, its alias `status`, or `doctor --json`. Checks report Python, Git and project status, GitHub CLI and its separate authentication status, Hermes executable availability, local endpoint reachability, configuration, and optional voice package/model files. Provider credentials are never printed. Exit code 1 means a base startup requirement failed; optional integrations may show TODO with exit code 0.
+Use `doctor`, its alias `status`, or `doctor --json`. Checks report Python, Git and project status, GitHub CLI and its separate authentication status, Hermes executable availability, local endpoint reachability, configuration, the persisted ChatGPT Remote acceptance result, and optional voice package/model files. Provider credentials are never printed. Exit code 1 means a base startup requirement failed; optional integrations may show TODO with exit code 0.
 
 Automated setup tests cover idempotence, configuration/token preservation, separate project state, argument-safe paths with spaces and shell characters, subprocess timeouts, missing authentication and voice capability, and a real Bash launch from another working directory. Native PowerShell, real Hermes profile authentication, model quality, and browser microphone capture still require host verification. Setup and diagnostics do not launch inference.
 

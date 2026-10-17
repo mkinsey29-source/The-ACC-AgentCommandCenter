@@ -254,6 +254,14 @@ function renderConversation(){
   const owner=c.owner?.owner;
   const switchNote=sessions.pending?` Switch to ${sessions.sessions.find(s=>s.id===sessions.pending)?.name||sessions.pending} queued after this decision.`:'';
   $('orchestrator-status').textContent=(c.held ? 'Needs attention: '+c.held : owner ? `${name(owner)} is handling your messages.` : c.pending ? `${c.pending} saved message(s) waiting for an orchestrator.` : 'Ready for your next message. Ideas remain discussion; requested work appears in the work plan.')+switchNote;
+  const bridge=state.bridge||{},client=[bridge.client?.name,bridge.client?.version].filter(Boolean).join(' ');
+  $('bridge-status').textContent=bridge.conversation_verified_at
+    ? `ChatGPT Remote bridge verified${client?' with '+client:''} · ${new Date(bridge.conversation_verified_at*1000).toLocaleString()}`
+    : bridge.tools_discovered
+      ? `Remote bridge seen${client?' through '+client:''}; conversation check ${bridge.conversation_steps?.length||0}/6.`
+      : bridge.connected
+        ? `Remote bridge seen${client?' through '+client:''}; waiting for tool discovery.`
+        : 'ChatGPT Remote has not been verified on this computer.';
   const box=$('messages'), nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
   for(const m of c.messages)messageHistory.set(m.id,m);
   const html=[...messageHistory.values()].sort((a,b)=>a.seq-b.seq).map(m=>`<article class="message ${m.role}"><small>${m.role==='user'?'You':escapeHTML(name(m.source))} · ${new Date(m.at*1000).toLocaleTimeString()}${m.status==='pending'?' · saved, waiting':''}</small><div>${escapeHTML(m.text)}</div>${m.data?.task_ids?.length?`<small>Linked tasks: ${m.data.task_ids.map(id=>{const task=state.tasks.find(t=>t.id===id);return `<button class="task-link" data-task="${escapeHTML(id)}">${task?escapeHTML(taskLabel(task)+': '+task.title):escapeHTML(id)}</button>`;}).join(' ')}</small>`:''}</article>`).join('');

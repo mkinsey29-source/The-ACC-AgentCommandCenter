@@ -14,6 +14,7 @@ All API calls require `Authorization: Bearer <local token>`. Mutations require J
 | POST `/api/tasks/{id}/report` | `{message, reference?}`; attributed report, not independently verified evidence. |
 | POST `/api/tasks/{id}/review` | `{message, reference, revision, run_id}`; only accept the current review-ready run. Reference identifies the externally reviewed snapshot. |
 | POST `/api/tasks/{id}/recover` | `{process_tree_inspected:true}`; explicit operator acknowledgement after external inspection. Reject if the recorded parent PID still exists. |
+| POST `/api/bridge/observe` | Internal authenticated bridge telemetry: client metadata, discovery, or a successful tool name. Never accepts tool arguments, prompts, or credentials. |
 
 Every user-visible task also has a permanent positive `task_number`. The human label is `Task N`; the UUID `id` remains the API key. Existing databases assign numbers once in original row order, internal conversation/transcription runs receive no number, and the next number is never reduced or reused.
 
@@ -100,7 +101,7 @@ All routes use the existing loopback bearer-token/origin checks.
 - `POST /api/voice/save`: `{id, mime, audio}` with base64-encoded audio. Maximum 15 MiB request / 10 MiB decoded audio. Requires host transcription configuration. Saves before scheduling; same ID/content is idempotent.
 - `POST /api/voice/retry`: `{task_id}`; retries a paused transcription.
 
-`GET /api/state` adds `conversation`: recent messages, pending count, current owner (without lease token), routing settings, held reason, internal active/interrupted runs, and recording status. Internal planner/transcription tasks are omitted from the ordinary work plan.
+`GET /api/state` adds `conversation`: recent messages, pending count, current owner (without lease token), routing settings, held reason, internal active/interrupted runs, and recording status. It also adds `bridge`: the last MCP client name/version, discovery time, successful tool-name milestones, and the last completed ChatGPT Remote acceptance time. Internal planner/transcription tasks are omitted from the ordinary work plan. Bridge state never contains tool arguments, message text, lease tokens, or credentials.
 
 Conversation leases last 120 seconds for external sessions. The supervised local turn remains owned until its runner ends or is recovered. Stale ownership and revision conflicts return HTTP 409. The complete flow, model contracts, and offline behavior are documented in `CONVERSATION-WORKFLOW.md`.
 
