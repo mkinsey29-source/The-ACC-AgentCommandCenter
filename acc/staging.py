@@ -143,6 +143,7 @@ class StagingApplication:
         verifier = StagingVerifier(bootstrap_secret)
         self.database = None if database is None else str(database)
         self._closers = []
+        self._shut_down = False
         try:
             if database is None:
                 auth_repo = InMemoryAuthRepository()
@@ -172,20 +173,56 @@ class StagingApplication:
             raise
 
     def close(self) -> None:
-        """Close durable storage connections; a no-op for in-memory staging."""
+        """Close durable storage connections; a no-op for in-memory staging. Safe to call more than once.
+
+        Every closer runs even if an earlier one fails, and the first failure is then raised. A durable application
+        that has been closed cannot serve again; build a new one."""
         first_error = None
         while self._closers:  # every closer runs, even if an earlier one fails; the first failure is then raised
             try:
                 self._closers.pop()()
             except BaseException as error:  # KeyboardInterrupt or SystemExit must not strand the remaining closers
                 first_error = first_error or error
+        if self.database is not None:
+            self._shut_down = True
         if first_error is not None:
             raise first_error
 
     def __repr__(self) -> str:
         return 'StagingApplication()'
 
+    async def _lifespan(self, receive, send):
+        """ASGI lifespan. The hosted transport only acknowledges it, so this application owns the stores' cleanup.
+
+        On ``lifespan.shutdown`` the stores are closed *before* success is reported. If cleanup fails, the server is
+        told ``lifespan.shutdown.failed`` (with the error's class name only: no path, secret or underlying text), never
+        ``complete``. Cancellation and interrupts (``CancelledError``, ``KeyboardInterrupt``, ``SystemExit``) are not
+        caught: they propagate to the server after ``close()`` has still given every store its chance to close. A
+        durable application cannot restart after it has shut down, so a later ``lifespan.startup`` is refused instead of
+        serving from closed stores. In-memory staging has nothing to close and may cycle lifespans freely."""
+        while True:
+            message = await receive()
+            kind = message.get('type')
+            if kind == 'lifespan.startup':
+                if self._shut_down:
+                    await send({'type': 'lifespan.startup.failed',
+                                'message': 'This staging application has shut down; start a new instance.'})
+                    return
+                await send({'type': 'lifespan.startup.complete'})
+            elif kind == 'lifespan.shutdown':
+                try:
+                    self.close()
+                except Exception as error:
+                    await send({'type': 'lifespan.shutdown.failed',
+                                'message': f'Staging storage cleanup failed ({type(error).__name__}).'})
+                    return
+                await send({'type': 'lifespan.shutdown.complete'})
+                return
+
     async def __call__(self, scope, receive, send):
+        if scope.get('type') == 'lifespan':
+            await self._lifespan(receive, send)
+            return
         # /health is deliberately public (hosting health checks send no Origin) and returns only
         # fixed, non-secret identifiers.
         if scope.get('type') == 'http' and scope.get('path') == '/health':
