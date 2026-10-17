@@ -102,7 +102,7 @@ A gated caller does not get to run these operations. Each becomes an approval re
 
 | Operation | Why it is gated |
 |---|---|
-| Create a task with a local command (`argv`), or start an existing one (`tasks/{id}/start` when its worker is the local command) | it executes any command as you; a start approval is bound to the task revision, worker and exact `argv`, and goes stale if any change |
+| Create a task with a local command (`argv`), or start an existing one (`tasks/{id}/start` when its worker is the local command) | it executes any command as you; a start approval is bound to the task revision, worker and exact `argv`, and goes stale if any change. For a gated caller the decision "does this start need approval?" and the start itself happen under one hold of the coordinator lock, so reassigning the task to the local command at the same moment cannot skip the gate |
 | Export the archive (`archive/export`) | it writes files wherever the caller points |
 | Publish a task (`publish`) | it pushes a branch and opens a pull request |
 | Change GitHub settings (`github/configure`) | it decides where reviewed work is pushed |

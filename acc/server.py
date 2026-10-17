@@ -4,6 +4,7 @@ from http.cookies import CookieError, SimpleCookie
 import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -287,16 +288,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {'revoked': pairing.revoke(payload.get('device_id'))})
             if answers_approval:
                 return self.reply(200, self.server.approvals.resolve(parts[2], parts[3] == 'approve'))
-            if self.principal is not None and self.principal[0] in ('device', 'agent'):
-                gate = classify(c, parts, payload)
-                if gate:
-                    key, label = self.principal_identity()
-                    asked = self.server.approvals.request(key, label, gate, parts, payload)
-                    return self.reply(202, {'status': 'approval_required', 'approval_id': asked['id'], 'approval': asked,
-                                            'message': 'The owner must approve this at the computer, in Attention. '
-                                                       f"Check GET /api/approvals/{asked['id']}."})
             gated = self.principal is not None and self.principal[0] in ('device', 'agent')
-            status, body, close = run_mutation(parts, payload, c, 'gated' if gated else 'owner')
+            # For a gated caller the decision and the action share one hold of the coordinator lock, so a worker
+            # reassignment cannot land between "no approval needed" and the start.
+            with (c.lock if gated and parts[-1:] in (['start'], ['assign']) else contextlib.nullcontext()):
+                if gated:
+                    gate = classify(c, parts, payload)
+                    if gate:
+                        key, label = self.principal_identity()
+                        asked = self.server.approvals.request(key, label, gate, parts, payload)
+                        return self.reply(202, {'status': 'approval_required', 'approval_id': asked['id'], 'approval': asked,
+                                                'message': 'The owner must approve this at the computer, in Attention. '
+                                                           f"Check GET /api/approvals/{asked['id']}."})
+                status, body, close = run_mutation(parts, payload, c, 'gated' if gated else 'owner')
             if close:
                 self.close_connection = True
             return self.reply(status, body)
