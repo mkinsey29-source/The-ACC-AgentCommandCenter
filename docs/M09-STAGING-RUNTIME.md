@@ -137,6 +137,16 @@ Other methods return 404.
   SQLite file, using the online backup API or a copy while stopped, never a raw copy of a live WAL
   database. Durable mode is wiring, not a production deployment: no deployment is authorized for
   storage-only work.
+- **Shutdown cleanup (durable mode):** on the ASGI `lifespan.shutdown` message the application closes both
+  SQLite connections (auth, and commands and reads) and only then reports `lifespan.shutdown.complete`. If a
+  store fails to close, every other store is still closed and the server is told
+  `lifespan.shutdown.failed` with the error's class name, never `complete`; cancellation and interrupts propagate.
+  A durable application cannot restart after it has shut down: a later `lifespan.startup` on the same object is
+  refused (`lifespan.startup.failed`), so build a new instance, as a new process does. Closing the last
+  connection checkpoints and removes the write-ahead log. This matters to hosts that outlive the application
+  object (test hosts, reloaders, embedding applications); when a whole process exits, the interpreter finalizes
+  the connections itself. A host that never sends `lifespan.shutdown` (a killed process, or a server run with
+  lifespan off) gets no cleanup from this. In-memory mode has nothing to close and may cycle lifespans freely.
 - **Blocking calls:** M09 API calls are synchronous, and in durable mode they include SQLite
   `synchronous=FULL` commits on the event loop. That is acceptable for this single-tester staging
   service; the production runtime must move them off the event loop.
