@@ -1,4 +1,6 @@
-"""Isolated in-memory staging composition for end-to-end M09 browser tests."""
+"""Isolated staging composition for end-to-end M09 browser tests.
+
+In-memory by default; backed by the SQLite stores when ``ACC_STAGING_DATABASE`` is set."""
 from __future__ import annotations
 
 import hmac
@@ -163,7 +165,10 @@ class StagingApplication:
             self.api = PlatformApi(self.auth, self.reads, self.state, self.state)
             self.transport = HostedTransport(self.api, origins=origins)
         except BaseException:
-            self.close()
+            try:
+                self.close()
+            except BaseException:
+                pass  # the startup error below is the one the caller must see, not a cleanup failure
             raise
 
     def close(self) -> None:
@@ -172,7 +177,7 @@ class StagingApplication:
         while self._closers:  # every closer runs, even if an earlier one fails; the first failure is then raised
             try:
                 self._closers.pop()()
-            except Exception as error:
+            except BaseException as error:  # KeyboardInterrupt or SystemExit must not strand the remaining closers
                 first_error = first_error or error
         if first_error is not None:
             raise first_error

@@ -37,7 +37,9 @@ class MCPInteropTests(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(getattr(configured, 'is_error', getattr(configured, 'isError', True)))
                     for _ in range(200):
                         state = await session.call_tool('acc_state', {})
-                        result = json.loads(state.content[0].text)['tasks'][0]
+                        # The workflow also creates child tasks (Implement/Coordinate/Review ...), and the state
+                        # lists them in storage order, so select the task this test created by its id.
+                        result = next(t for t in json.loads(state.content[0].text)['tasks'] if t['id'] == task['id'])
                         if result['status']=='accepted': break
                         await asyncio.sleep(.05)
                     self.assertEqual(result['status'],'accepted')

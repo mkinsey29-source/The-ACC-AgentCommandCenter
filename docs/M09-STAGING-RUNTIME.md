@@ -107,8 +107,8 @@ After bootstrap, the browser uses the ordinary accepted M09 contract:
 6. disconnect/reconnect using the durable cursor and verify replay semantics.
 
 The command repository is also the event source and the read projection reads from that same
-in-memory state, preventing the staging composition from accidentally testing three unrelated
-mocks.
+state (in memory, or the SQLite file when `ACC_STAGING_DATABASE` is set), preventing the staging
+composition from accidentally testing three unrelated mocks.
 
 ## Health
 

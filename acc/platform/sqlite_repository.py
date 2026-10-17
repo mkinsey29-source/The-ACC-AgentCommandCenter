@@ -536,8 +536,9 @@ def _rollback_if_open(db) -> None:
     """Roll back a transaction that is still open.
 
     SQLite rolls some failed commits back by itself (a full disk or an I/O error), and then there is nothing to
-    roll back: ROLLBACK would raise "no transaction is active" although the connection is sound. A connection whose
-    state cannot be read is treated as open, so the rollback is attempted."""
+    roll back: ROLLBACK would raise "no transaction is active" although the connection is sound. A connection
+    object without an ``in_transaction`` attribute is treated as open, so the rollback is attempted. If reading the
+    state raises any other error, the caller treats the connection as unusable and closes it."""
     if getattr(db, 'in_transaction', True):
         db.execute('ROLLBACK')
 

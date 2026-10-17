@@ -1,4 +1,4 @@
-"""Regression tests for the fresh independent readiness review of PR #35 (2026-10-17).
+"""Regression tests for the fresh independent readiness review of PR #35 (2026-10-17) and its re-review (2026-10-18).
 
 Stable IDs follow the reviewer's report: ACC-PR35-20261017-01, -03, -04, -05, -06. Each test fails on 4bf4ebc.
 """
@@ -169,6 +169,26 @@ class AuthConstructorCleanup(unittest.TestCase):
                 connections[0].execute('SELECT 1')
 
 
+class AuthConstructorInterrupt(unittest.TestCase):
+    """ACC-PR35R-20261018-04: the constructor cleanup must also run for KeyboardInterrupt (a BaseException)."""
+
+    def test_an_interrupt_during_schema_creation_closes_the_connection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            connections = []
+            real_connect = sqlite3.connect
+
+            def recording_connect(*args, **kwargs):
+                connections.append(real_connect(*args, **kwargs))
+                return connections[-1]
+            with mock.patch('acc.auth.sqlite_repository.sqlite3.connect', side_effect=recording_connect), \
+                    mock.patch.object(SQLiteAuthRepository, '_create_schema', side_effect=KeyboardInterrupt()):
+                with self.assertRaises(KeyboardInterrupt):
+                    SQLiteAuthRepository(Path(directory) / 'auth.sqlite3')
+            self.assertEqual(len(connections), 1)
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connections[0].execute('SELECT 1')
+
+
 class StagingClose(unittest.TestCase):
     """ACC-PR35-20261017-06: one failing closer must not leave the others open."""
 
@@ -201,14 +221,42 @@ class StagingClose(unittest.TestCase):
         app.close()
         self.assertEqual(called, [1])
 
+    def test_an_interrupt_in_one_closer_does_not_strand_the_others(self):
+        """ACC-PR35R-20261018-01: KeyboardInterrupt/SystemExit are not Exceptions; every closer must still run."""
+        app = self.app()
+        calls = []
+
+        def interrupted():
+            calls.append('commands')
+            raise KeyboardInterrupt()
+        app._closers.extend([lambda: calls.append('auth'), interrupted])
+        with self.assertRaises(KeyboardInterrupt):
+            app.close()
+        self.assertEqual(calls, ['commands', 'auth'])
+        app.close()  # nothing left pending
+        self.assertEqual(calls, ['commands', 'auth'])
+
+    def test_a_cleanup_failure_does_not_replace_the_startup_error(self):
+        """ACC-PR35R-20261018-02: the caller must see why startup failed, not a secondary close failure."""
+        with tempfile.TemporaryDirectory() as directory:
+            real_close = SQLiteCommandRepository.close
+
+            def failing_close(self):
+                real_close(self)  # release the connection for real, then report a failure
+                raise RuntimeError('close boom')
+            with mock.patch.object(SQLiteCommandRepository, 'put_worker', side_effect=ValueError('startup boom')), \
+                    mock.patch.object(SQLiteCommandRepository, 'close', failing_close):
+                with self.assertRaisesRegex(ValueError, 'startup boom'):
+                    StagingApplication(origin='https://console.example.test', bootstrap_secret='x' * 40,
+                                       database=Path(directory) / 'staging.sqlite3')
+
 
 class ParityAndDocs(unittest.TestCase):
     """ACC-PR35-20261017-03 and -05."""
 
     def test_the_parity_suite_cross_checks_the_missing_ceiling_row(self):
-        source = (REPO / 'tests' / 'test_platform_command_parity.py').read_text()
-        self.assertIn("{'task_id': 't3'}, 'u1', {}),", source)
-        self.assertIn('fail closed in both stores', source)
+        from test_platform_command_parity import SUITE
+        self.assertTrue(any(row[5] == {} for row in SUITE), 'the parity suite needs a row with no quota ceiling')
 
     def test_the_missing_ceiling_is_refused_by_both_stores_through_the_shared_rules(self):
         from acc.platform import CommandRequest, InMemoryCommandRepository, QuotaExceeded
@@ -228,6 +276,12 @@ class ParityAndDocs(unittest.TestCase):
         text = (REPO / 'docs' / 'M09-PLATFORM-API-EVENTS.md').read_text()
         self.assertNotIn('remains separate and was not changed by this adapter', text)
         self.assertIn('ACC_STAGING_DATABASE', text)
+
+    def test_no_staging_text_still_claims_the_durable_mode_is_in_memory(self):
+        """ACC-PR35R-20261018-03."""
+        runtime = (REPO / 'docs' / 'M09-STAGING-RUNTIME.md').read_text()
+        self.assertNotIn('reads from that same\nin-memory state', runtime)
+        self.assertNotIn('Isolated in-memory staging composition', (REPO / 'acc' / 'staging.py').read_text())
 
 
 if __name__ == '__main__':

@@ -193,6 +193,9 @@ class ConversationTests(unittest.TestCase):
         planner = [t for t in self.c.store.tasks() if t.get('internal') == 'conversation'][0]
         self.assertEqual(planner['runs'][0]['agent'], 'local-reviewer')
         self.assertEqual(self.c.orchestrators.snapshot()['selected'], 'agent:local-reviewer')
+        # The routing sample is recorded just after the message leaves the queue, so wait for it (the assertion
+        # that exactly one sample exists is unchanged).
+        eventually(lambda: ('local-reviewer', 'coordinator') in self.c.router.profiles(), timeout=8)
         self.assertEqual(self.c.router.profiles()[('local-reviewer', 'coordinator')]['samples'], 1)
 
     def test_stale_saved_direct_session_recovers_to_automatic(self):
