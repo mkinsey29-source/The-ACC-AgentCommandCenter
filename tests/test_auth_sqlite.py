@@ -169,7 +169,7 @@ class SQLiteAuthRepositoryTests(unittest.TestCase):
                           else sqlite3.SQLITE_OK)
         with self.assertRaises(sqlite3.DatabaseError):
             self.repo.put_user(UserState('user-2'))
-        db.set_authorizer(None)
+        db.set_authorizer(lambda *args: sqlite3.SQLITE_OK)
         self.assertFalse(db.in_transaction)
         self.assertIsNone(self.repo.user('user-2'))
         self.repo.put_user(UserState('user-3'))

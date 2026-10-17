@@ -196,7 +196,7 @@ class SQLiteCommandRepositoryTests(unittest.TestCase):
                 else sqlite3.SQLITE_OK)
             with self.assertRaises(sqlite3.DatabaseError):
                 repository.set_quota_usage('acct-1', 'tasks.active', 2)
-            repo_connection.set_authorizer(None)
+            repo_connection.set_authorizer(lambda *args: sqlite3.SQLITE_OK)
 
             self.assertEqual(repository.quota_used('acct-1', 'tasks.active'), 0)
             repository.set_quota_usage('acct-1', 'tasks.active', 1)
@@ -208,7 +208,7 @@ class SQLiteCommandRepositoryTests(unittest.TestCase):
                 else sqlite3.SQLITE_OK)
             with self.assertRaises(sqlite3.DatabaseError):
                 repository.project('acct-1', 'project-1')
-            repo_connection.set_authorizer(None)
+            repo_connection.set_authorizer(lambda *args: sqlite3.SQLITE_OK)
             self.assertEqual(repository.project('acct-1', 'project-1')['revision'], 0)
             repository.close()
 

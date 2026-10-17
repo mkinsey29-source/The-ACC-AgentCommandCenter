@@ -116,7 +116,8 @@ class AlreadyRolledBack(unittest.TestCase):
             if action == sqlite3.SQLITE_TRANSACTION and arg1 == 'COMMIT' else sqlite3.SQLITE_OK)
         with self.assertRaises(sqlite3.DatabaseError):
             self.repository.set_quota_usage('acct', 'tasks.active', 2)
-        self.repository._db.set_authorizer(None)
+        # Python 3.10 cannot clear an authorizer with None (3.11+ can); install a permissive one instead.
+        self.repository._db.set_authorizer(lambda *args: sqlite3.SQLITE_OK)
         self.assertFalse(self.repository._db.in_transaction)
         self.assertEqual(self.repository.quota_used('acct', 'tasks.active'), 0)
 
