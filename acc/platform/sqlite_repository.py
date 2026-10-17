@@ -532,17 +532,27 @@ class _Transaction:
         return _finish_transaction(self.db, error_type)
 
 
+def _rollback_if_open(db) -> None:
+    """Roll back a transaction that is still open.
+
+    SQLite rolls some failed commits back by itself (a full disk or an I/O error), and then there is nothing to
+    roll back: ROLLBACK would raise "no transaction is active" although the connection is sound. A connection whose
+    state cannot be read is treated as open, so the rollback is attempted."""
+    if getattr(db, 'in_transaction', True):
+        db.execute('ROLLBACK')
+
+
 def _finish_transaction(db: sqlite3.Connection, error_type) -> bool:
     if error_type is None:
         try:
             db.execute('COMMIT')
         except BaseException:
-            # SQLite can leave a transaction active when COMMIT fails (for example,
-            # SQLITE_BUSY or an I/O error). Release any lock but preserve the commit error.
+            # SQLite can leave a transaction active when COMMIT fails (for example SQLITE_BUSY) or roll it back
+            # itself (a full disk, an I/O error). Release any lock but preserve the commit error.
             try:
-                db.execute('ROLLBACK')
+                _rollback_if_open(db)
             except BaseException:
-                # The transaction state is now unknown; never reuse this connection.
+                # A rollback that was needed and failed: the transaction state is unknown; never reuse this connection.
                 try:
                     db.close()
                 except BaseException:
@@ -550,7 +560,7 @@ def _finish_transaction(db: sqlite3.Connection, error_type) -> bool:
             raise
     else:
         try:
-            db.execute('ROLLBACK')
+            _rollback_if_open(db)
         except BaseException:
             # Returning False preserves the original exception from the with block.
             # The transaction state is now unknown; never reuse this connection.

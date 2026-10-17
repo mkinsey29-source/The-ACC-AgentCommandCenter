@@ -168,8 +168,14 @@ class StagingApplication:
 
     def close(self) -> None:
         """Close durable storage connections; a no-op for in-memory staging."""
-        while self._closers:
-            self._closers.pop()()
+        first_error = None
+        while self._closers:  # every closer runs, even if an earlier one fails; the first failure is then raised
+            try:
+                self._closers.pop()()
+            except Exception as error:
+                first_error = first_error or error
+        if first_error is not None:
+            raise first_error
 
     def __repr__(self) -> str:
         return 'StagingApplication()'
