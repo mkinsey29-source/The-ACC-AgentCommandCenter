@@ -7,7 +7,9 @@ from typing import Any, Mapping
 from ..auth import AuthenticationError, AuthorizationError, AuthService
 from ..auth.models import _bounded_id
 from .events import EventCursorError, PlatformEventSource, event_cursor, validate_event_batch
-from .repository import AccountProjectView, PlatformReadRepository, safe_public_record
+from .repository import (
+    AccountProjectView, PlatformReadRepository, ProjectSnapshot, safe_public_record,
+)
 
 
 @dataclass(frozen=True)
@@ -117,23 +119,28 @@ class PlatformApi:
             authorization, account_id, permissions=('project.read', 'task.read'))
         project_id = self._route_ids(project_id=project_id)['project_id']
         try:
-            project = self.reads.project(account_id, project_id)
-            if project is None:
+            # One repository call so every part reflects the same committed state; separate
+            # project/tasks/workers/attention reads could straddle a concurrent command.
+            snapshot = self.reads.project_snapshot(account_id, project_id)
+            if snapshot is None:
                 raise ApiError(404, 'not_found', 'Project not found.')
+            if not isinstance(snapshot, ProjectSnapshot):
+                raise ValueError('Platform repository returned an invalid project snapshot.')
+            project = snapshot.project
             project_view = self._project_view(project, account_id)
             if project.project_id != project_id:
                 raise ApiError(500, 'invalid_repository_state', 'Platform repository state is invalid.')
             tasks = [
                 safe_public_record(item, account_id=account_id, project_id=project_id)
-                for item in self.reads.tasks(account_id, project_id)
+                for item in snapshot.tasks
             ]
             workers = [
                 safe_public_record(item, account_id=account_id, project_id=project_id)
-                for item in self.reads.workers(account_id, project_id)
+                for item in snapshot.workers
             ]
             attention = [
                 safe_public_record(item, account_id=account_id, project_id=project_id)
-                for item in self.reads.attention(account_id, project_id)
+                for item in snapshot.attention
             ]
         except ApiError:
             raise

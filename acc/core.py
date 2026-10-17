@@ -1210,7 +1210,11 @@ class Coordinator:
             self.halt.wait(1)
 
     def close(self):
-        self.halt.set()
+        # start() holds the lock for its whole body, from the halt check through spawning the runner. Setting halt
+        # under the same lock means a launch already in progress has finished (so self.process is set and is stopped
+        # below) and any later start() sees halt and refuses; otherwise a runner could appear after the checks.
+        with self.lock:
+            self.halt.set()
         if self.process:
             try:
                 self.stop(self.running_task)

@@ -6,13 +6,18 @@ command.applied -> browser -> disconnect/reconnect/replay
 import asyncio
 import importlib
 import json
+import multiprocessing
 import os
+import sqlite3
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
+from acc.auth import UserState
 from acc.staging import (STAGING_ACCOUNT_ID, STAGING_ORIGIN_DEFAULT, STAGING_PROJECT_ID,
-                         StagingApplication, build_staging_app)
+                         STAGING_USER_ID, StagingApplication, build_staging_app)
 
 ORIGIN = STAGING_ORIGIN_DEFAULT
 SECRET = 'staging-secret-' + 'k' * 32
@@ -75,7 +80,11 @@ class WebSocketClient:
 
 class StagingEndToEndTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.app = StagingApplication(origin=ORIGIN, bootstrap_secret=SECRET)
+        self.app = self.new_app()
+
+    def new_app(self):
+        """A separate staging instance with its own state (in memory here)."""
+        return StagingApplication(origin=ORIGIN, bootstrap_secret=SECRET)
 
     async def bootstrap(self, app=None):
         status, headers, body, _ = await http(
@@ -219,7 +228,7 @@ class StagingEndToEndTests(unittest.IsolatedAsyncioTestCase):
             headers=h, body=cmd)
         self.assertEqual(status, 403)
         # Staging fixture and the bearer are not valid in a different app instance.
-        other = StagingApplication(origin=ORIGIN, bootstrap_secret=SECRET)
+        other = self.new_app()
         status, _, _, _ = await http(other, 'GET', PROJECT, headers=h)
         self.assertEqual(status, 401)
 
@@ -318,7 +327,7 @@ class StagingEndToEndTests(unittest.IsolatedAsyncioTestCase):
     async def test_19_fresh_instance_has_fresh_state(self):
         auth, _ = await self.bootstrap()
         await self.command(auth, 'op-1', 0)
-        fresh = StagingApplication(origin=ORIGIN, bootstrap_secret=SECRET)
+        fresh = self.new_app()
         self.app = fresh
         auth2, _ = await self.bootstrap(fresh)
         state = await self.get_state(auth2)
@@ -368,6 +377,197 @@ class StagingEndToEndTests(unittest.IsolatedAsyncioTestCase):
             module = importlib.import_module('staging_app')
             self.assertEqual(module.app.transport.origins.allowed_origins, frozenset((ORIGIN,)))
             sys.modules.pop('staging_app', None)
+
+
+
+class DurableStagingEndToEndTests(StagingEndToEndTests):
+    """The whole browser end-to-end suite again, with every instance on its own SQLite file."""
+
+    async def asyncSetUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self._apps = []
+        await super().asyncSetUp()
+
+    async def asyncTearDown(self):
+        for app in self._apps:
+            app.close()
+        self._temp.cleanup()
+
+    def new_app(self):
+        path = Path(self._temp.name) / f'staging-{len(self._apps)}.sqlite3'
+        app = StagingApplication(origin=ORIGIN, bootstrap_secret=SECRET, database=path)
+        self._apps.append(app)
+        return app
+
+    async def test_durable_suite_really_runs_on_sqlite(self):
+        from acc.platform import SQLiteCommandRepository
+        from acc.auth import SQLiteAuthRepository
+        self.assertIsInstance(self.app.state, SQLiteCommandRepository)
+        self.assertIsInstance(self.app.auth.repository, SQLiteAuthRepository)
+        self.assertTrue(Path(self.app.database).is_file())
+
+
+def _start_staging(database, barrier, results):
+    barrier.wait(timeout=10)
+    try:
+        StagingApplication(origin=ORIGIN, bootstrap_secret=SECRET, database=database).close()
+        results.put('ok')
+    except Exception as error:
+        results.put(f'{type(error).__name__}: {error}')
+
+
+class DurableStagingRestartTests(unittest.IsolatedAsyncioTestCase):
+    """What durable storage adds: restarts and a second process share one store."""
+
+    async def asyncSetUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.path = Path(self._temp.name) / 'staging.sqlite3'
+        self.apps = []
+
+    async def asyncTearDown(self):
+        for app in self.apps:
+            app.close()
+        self._temp.cleanup()
+
+    def start(self):
+        app = StagingApplication(origin=ORIGIN, bootstrap_secret=SECRET, database=self.path)
+        self.apps.append(app)
+        return app
+
+    def restart(self, app):
+        app.close()
+        return self.start()
+
+    async def bootstrap(self, app, expect=201):
+        status, _, body, _ = await http(app, 'POST', '/staging/session',
+                                        headers=[(b'x-acc-staging-secret', SECRET.encode())])
+        self.assertEqual(status, expect, body)
+        return 'Bearer ' + body['access_token'] if status == 201 else None
+
+    async def call(self, app, auth, method='GET', path=PROJECT, body=None, query=b''):
+        headers = [(b'authorization', auth.encode())]
+        if body is not None:
+            headers.append((b'content-type', b'application/json'))
+        status, _, response, _ = await http(app, method, path, headers=headers, body=body,
+                                            query=query)
+        return status, response
+
+    def create(self, operation, revision, task_id):
+        return {'operation_id': operation, 'kind': 'task.create', 'expected_revision': revision,
+                'payload': {'task_id': task_id}}
+
+    async def test_session_state_and_event_cursor_survive_a_restart(self):
+        app = self.start()
+        auth = await self.bootstrap(app)
+        self.assertEqual((await self.call(app, auth, 'POST', PROJECT + '/commands',
+                                          self.create('op-1', 0, 'task-1')))[0], 201)
+        _, events = await self.call(app, auth, path=PROJECT + '/events')
+        cursor = events['cursor']
+
+        app = self.restart(app)
+        status, state = await self.call(app, auth)  # the pre-restart bearer still works
+        self.assertEqual(status, 200)
+        self.assertEqual((state['project']['revision'], [t['id'] for t in state['tasks']]),
+                         (1, ['task-1']))
+        _, replay = await self.call(app, auth, path=PROJECT + '/events', query=b'after=0')
+        self.assertEqual([e['data']['operation_id'] for e in replay['events']], ['op-1'])
+        _, after = await self.call(app, auth, path=PROJECT + '/events',
+                                   query=f'after={cursor}'.encode())
+        self.assertEqual((after['events'], after.get('reset_required', False)), ([], False))
+        # Idempotent replay of a pre-restart operation, then the next revision.
+        status, replayed = await self.call(app, auth, 'POST', PROJECT + '/commands',
+                                           self.create('op-1', 0, 'task-1'))
+        self.assertEqual((status, replayed['replayed']), (200, True))
+        self.assertEqual((await self.call(app, auth, 'POST', PROJECT + '/commands',
+                                          self.create('op-2', 1, 'task-2')))[0], 201)
+
+    async def test_revocation_survives_a_restart(self):
+        app = self.start()
+        auth = await self.bootstrap(app)
+        self.assertTrue(app.auth.revoke(auth[len('Bearer '):]))
+        app = self.restart(app)
+        self.assertEqual((await self.call(app, auth))[0], 401)
+
+    async def test_fixture_is_applied_once_and_never_resurrected_by_a_restart(self):
+        app = self.start()
+        auth = await self.bootstrap(app)
+        repository = app.auth.repository
+        self.assertTrue(repository.remove_membership(STAGING_ACCOUNT_ID, STAGING_USER_ID))
+        app = self.restart(app)
+        self.assertEqual((await self.call(app, auth))[0], 403)  # membership stays removed
+        await self.bootstrap(app, expect=401)
+
+        app.auth.repository.put_user(UserState(STAGING_USER_ID, status='suspended'))
+        app = self.restart(app)
+        self.assertEqual(app.auth.repository.user(STAGING_USER_ID).status, 'suspended')
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM m08_provisioning').fetchone()[0], 1)
+
+    async def test_two_instances_share_sessions_and_state_but_not_websocket_tickets(self):
+        first, second = self.start(), self.start()  # e.g. two worker processes on one file
+        auth = await self.bootstrap(first)
+        self.assertEqual((await self.call(first, auth, 'POST', PROJECT + '/commands',
+                                          self.create('op-1', 0, 'task-1')))[0], 201)
+        status, state = await self.call(second, auth)
+        self.assertEqual((status, state['project']['revision']), (200, 1))
+        status, ticket = await self.call(first, auth, 'POST', PROJECT + '/event-ticket')
+        self.assertEqual(status, 201)
+        # Tickets are process-local by design: another worker refuses them.
+        ws = WebSocketClient(second, ticket['ticket'])
+        self.assertEqual((await ws.next())['code'], 4401)
+
+    def test_concurrent_first_starts_apply_the_fixture_once(self):
+        context = multiprocessing.get_context('spawn')
+        barrier, results = context.Barrier(4), context.Queue()
+        workers = [context.Process(target=_start_staging, args=(str(self.path), barrier, results))
+                   for _ in range(4)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(60)
+        self.assertEqual(sorted(results.get(timeout=5) for _ in workers), ['ok'] * 4)
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM m08_provisioning').fetchone()[0], 1)
+            self.assertEqual(db.execute('SELECT count(*) FROM m09_projects').fetchone()[0], 1)
+
+    def test_invalid_configuration_never_creates_or_provisions_a_database(self):
+        for origin, secret in (('http://insecure.example', SECRET), (ORIGIN, 'short')):
+            with self.subTest(origin=origin), self.assertRaises(ValueError):
+                StagingApplication(origin=origin, bootstrap_secret=secret, database=self.path)
+            self.assertFalse(self.path.exists())
+
+    def test_failure_after_storage_opens_closes_every_connection(self):
+        from acc.platform.sqlite_repository import SQLiteCommandRepository
+        self.restart(self.start())  # create a valid durable store, then break its M09 schema
+        self.apps[-1].close()
+        with sqlite3.connect(self.path) as db:
+            db.execute('UPDATE m09_schema_meta SET version=99')
+        closed = []
+        real_auth_close = __import__('acc.auth', fromlist=['SQLiteAuthRepository']).SQLiteAuthRepository.close
+        with mock.patch('acc.staging.SQLiteAuthRepository.close', autospec=True,
+                        side_effect=lambda repo: (closed.append('auth'), real_auth_close(repo))):
+            with self.assertRaisesRegex(RuntimeError, 'Unsupported M09'):
+                StagingApplication(origin=ORIGIN, bootstrap_secret=SECRET, database=self.path)
+        self.assertEqual(closed, ['auth'])
+        with sqlite3.connect(self.path) as db:
+            db.execute('UPDATE m09_schema_meta SET version=2')
+        SQLiteCommandRepository(self.path).close()
+
+    def test_database_setting_must_be_an_absolute_path(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith('ACC_STAGING_')}
+        env['ACC_STAGING_BOOTSTRAP_SECRET'] = SECRET
+        for value in ('', 'relative/staging.sqlite3', ':memory:'):
+            with self.subTest(value=value), mock.patch.dict(os.environ, env, clear=True):
+                os.environ['ACC_STAGING_DATABASE'] = value
+                with self.assertRaises(ValueError):
+                    build_staging_app()
+        with mock.patch.dict(os.environ, env, clear=True):
+            os.environ['ACC_STAGING_DATABASE'] = str(self.path)
+            app = build_staging_app()
+            self.apps.append(app)
+            self.assertEqual(app.database, str(self.path))
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(build_staging_app().database)  # unset keeps staging in memory
 
 
 if __name__ == '__main__':

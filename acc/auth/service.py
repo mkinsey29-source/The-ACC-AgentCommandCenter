@@ -11,7 +11,7 @@ from ..contracts import capability_list, capability_name
 from ..state_authority import policy_for
 from .identity import IdentityVerificationError, IdentityVerifier, verifier_map
 from .models import AuthContext, SessionRecord, VerifiedIdentity
-from .repository import AuthRepository
+from .repository import AuthRepository, AuthSnapshot
 
 
 class AuthError(Exception):
@@ -169,14 +169,31 @@ class AuthService:
         operation must pass the route's tenant ID, or use ``authorize``/``require_limit``, which
         require it.
         """
-        record = self.repository.session(_token_digest(token))
+        snapshot = self.repository.auth_snapshot(_token_digest(token))
         # Unknown, revoked and expired sessions are deliberately indistinguishable.
-        if record is None or record.revoked or int(self.clock()) >= record.expires_at:
+        if snapshot is None:
+            raise AuthenticationError(_SESSION_INACTIVE)
+        if type(snapshot) is not AuthSnapshot:
+            raise AuthenticationError(_SESSION_INACTIVE)
+        record = snapshot.session
+        if record.revoked or int(self.clock()) >= record.expires_at:
             raise AuthenticationError(_SESSION_INACTIVE)
         if account_id is not None and record.account_id != account_id:
             raise AuthorizationError('ACC session is not valid for this account.')
-        self._active_user(record.user_id)
-        account, membership, entitlements = self._account_access(record.account_id, record.user_id)
+        user = snapshot.user
+        if user is None or user.user_id != record.user_id or user.status != 'active':
+            raise AuthenticationError('ACC user is not active.')
+        account = snapshot.account
+        if (account is None or account.account_id != record.account_id
+                or account.status != 'active'):
+            raise AuthorizationError('ACC account is not active.')
+        membership = snapshot.membership
+        if (membership is None or membership.account_id != record.account_id
+                or membership.user_id != record.user_id):
+            raise AuthorizationError('ACC account membership is no longer active.')
+        entitlements = snapshot.entitlements
+        if entitlements is None or entitlements.account_id != record.account_id:
+            raise AuthorizationError('ACC account has no entitlement snapshot.')
         return AuthContext(
             session=record,
             account=account,

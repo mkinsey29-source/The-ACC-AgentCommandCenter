@@ -7,7 +7,8 @@ from .commands import (
     PlatformCommandRepository, QuotaExceeded, QuotaReservation,
 )
 from .command_memory import InMemoryCommandRepository
-from .repository import AccountProjectView, PlatformReadRepository
+from .sqlite_repository import SQLiteCommandRepository, SQLitePlatformReadRepository
+from .repository import AccountProjectView, PlatformReadRepository, ProjectSnapshot
 from .transport import EventTicketStore, HostedTransport, OriginPolicy
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     'EventBatch', 'EventCursorError', 'IdempotencyConflict', 'InMemoryCommandRepository',
     'EventTicketStore', 'HostedTransport', 'OriginPolicy',
     'PlatformApi', 'PlatformCommandRepository', 'PlatformEvent', 'PlatformEventSource',
-    'PlatformReadRepository', 'QuotaExceeded', 'QuotaReservation',
+    'PlatformReadRepository', 'ProjectSnapshot', 'QuotaExceeded', 'QuotaReservation',
+    'SQLiteCommandRepository',
+    'SQLitePlatformReadRepository',
     'bearer_token',
 ]
