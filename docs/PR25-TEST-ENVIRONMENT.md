@@ -7,6 +7,9 @@ Test state lives in temporary directories. No paid models are called.
 ## Local Linux or Windows
 
 Use Python 3.12 and Git; Node 22 enables the JavaScript syntax check.
+Python must include venv/ensurepip. On Debian/Ubuntu installations where it is
+missing, install the matching `python3.12-venv` package first. A fix branch's
+actual commit is recorded in results.json rather than assumed to be the original PR25 head.
 From this checkout run:
 
 ```sh

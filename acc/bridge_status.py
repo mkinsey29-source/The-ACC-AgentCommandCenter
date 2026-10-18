@@ -57,12 +57,11 @@ class BridgeStatus:
             saved = json.loads(row[0]) if row else None
             new_bridge = not saved or saved.get('bridge_id') != bridge_id
             if new_bridge:
-                last_verified = saved.get('conversation_verified_at') if saved else None
                 saved = {'connected': True, 'bridge_id': bridge_id, 'client': {},
                          'connected_at': stamp, 'last_seen': stamp,
                          'tools_discovered': False, 'tools_discovered_at': None,
                          'last_tool': None, 'last_tool_at': None,
-                         'conversation_steps': [], 'conversation_verified_at': last_verified}
+                         'conversation_steps': [], 'conversation_verified_at': None}
             saved['connected'] = True
             saved['last_seen'] = stamp
             if client:

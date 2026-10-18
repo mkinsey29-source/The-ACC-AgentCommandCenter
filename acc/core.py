@@ -1200,7 +1200,10 @@ class Coordinator:
             self.halt.wait(1)
 
     def close(self):
-        self.halt.set()
+        # Fence start() before inspecting the process: an in-flight launch owns
+        # this same lock until its process and collector have been registered.
+        with self.lock:
+            self.halt.set()
         if self.process:
             try:
                 self.stop(self.running_task)
