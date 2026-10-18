@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "ACC",
+    "slug": "acc-android",
+    "scheme": "acc",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "updates": { "enabled": false },
+    "plugins": ["expo-router", ["expo-build-properties", {"android": {"compileSdkVersion": 36, "targetSdkVersion": 36}}]],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.agentcommandcenter.acc",
+      "versionCode": 1,
+      "allowBackup": false,
+      "adaptiveIcon": {
+        "backgroundColor": "#10151d",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-foreground.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-build-properties"
+    ]
+  }
+}
