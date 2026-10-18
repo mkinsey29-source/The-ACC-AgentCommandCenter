@@ -1,0 +1,14 @@
+{
+  "name": "ACC PR25 validation",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+  "postCreateCommand": "python tools/pr25-tests/bootstrap.py --sdk",
+  "remoteUser": "vscode",
+  "shutdownAction": "stopContainer",
+  "forwardPorts": [],
+  "portsAttributes": {
+    "8765": { "onAutoForward": "ignore", "visibility": "private" }
+  }
+}
