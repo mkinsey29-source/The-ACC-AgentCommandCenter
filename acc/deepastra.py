@@ -43,13 +43,46 @@ except ImportError:
     import worker_prompt
 
 
+def _proc_numbers(path, field):
+    for line in Path(path).read_text(encoding='ascii').splitlines():
+        if line.startswith(field + ':'):
+            return [int(value) for value in line.split(':', 1)[1].split()]
+    raise ValueError('Missing proc field: ' + field)
+
+
 def _children(pid):
     """Immediate child pids of `pid`, or [] if unavailable (e.g. Windows, or already reaped)."""
     try:
-        text = Path('/proc/%d/task/%d/children' % (pid, pid)).read_text(encoding='ascii')
-    except OSError:
+        # A container can inherit a proc mount from an outer PID namespace.
+        # pidfd's Pid is in the proc mount's namespace; killpg needs ours.
+        depth = len(_proc_numbers('/proc/self/status', 'NSpid')) - 1
+        proc_pid = pid
+        if depth:
+            fd = os.pidfd_open(pid)
+            try:
+                proc_pid = _proc_numbers('/proc/self/fdinfo/' + str(fd), 'Pid')[0]
+            finally:
+                os.close(fd)
+        if proc_pid <= 0:
+            return []
+        entries = list(Path('/proc').iterdir())
+    except (OSError, ValueError, AttributeError, IndexError):
         return []
-    return [int(p) for p in text.split()]
+    translated = []
+    # PPid is available even on kernels without CONFIG_PROC_CHILDREN. That
+    # optional children file also omits children when a sibling exits mid-read.
+    for entry in entries:
+        if not entry.name.isdecimal():
+            continue
+        try:
+            status = entry / 'status'
+            if _proc_numbers(status, 'PPid') != [proc_pid]:
+                continue
+            child = _proc_numbers(status, 'NSpid')[depth] if depth else int(entry.name)
+            translated.append(child)
+        except (OSError, ValueError, IndexError):
+            continue  # A child can exit between enumeration and translation.
+    return translated
 
 
 def _kill_orphans(launcher_pid):
