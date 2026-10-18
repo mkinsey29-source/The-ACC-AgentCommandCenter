@@ -24,7 +24,7 @@ The vault conflict check is not a cross-process lock. SAF providers do not promi
 
 ## Build
 
-Requirements: Node >=22.13, a full JDK17, Android SDK platform36/build-tools36.0.0, NDK27.1.12297006/CMake3.22.1, network access for dependencies. Expo58/RN0.88 defaults to compile SDK37; build-properties currently selects compile/target36 because the available Android SDK repository did not offer37. Native compilation determines whether that override is viable; do not infer compatibility from a JavaScript bundle.
+Requirements: Node >=22.13, a full JDK17, Android SDK (including platform37.0/build-tools37.0.0), NDK27.1.12297006/CMake3.22.1, accepted SDK licenses and dependency network access. Use Expo58/RN0.88 defaults: the compiled APK reports compile SDK37, target36 and minimum24. The available SDK package is named `platforms;android-37.0`; asking for `platforms;android-37` failed. Gradle installed the matching platform/build tools automatically after license acceptance. No forced compile-SDK downgrade is used.
 
 ```sh
 cd mobile
