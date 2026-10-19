@@ -1,6 +1,6 @@
 # Existing repository reuse · October 18, 2026
 
-Owner direction: inspect available repos before rebuilding useful functionality; prioritize local Android files for the Second Brain. This is a bounded source audit, not a new acceptance gate. No external application source has been copied into build1.
+Owner direction: inspect available repos before rebuilding useful functionality; prioritize local Android files for Sentry. This is a bounded source audit, not a new acceptance gate. No external application source has been copied into build1.
 
 | Repository / observed ref | Relevant source inspected | Disposition |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ Owner direction: inspect available repos before rebuilding useful functionality;
 
 Accessible-repository listing was checked; the audit selected the relevant workspace/runtime/storage repos rather than cloning unrelated products. GitHub tree responses were untruncated at the API; Composio previews were shortened, so the actual remote responses were parsed to enumerate candidate paths. Private Replicator clone failed without shell credentials; authenticated connector reads succeeded. Other repos remain untouched.
 
-## Local Second Brain direction
+## Local Sentry direction
 
 Plain Markdown is the portable source for notes. Build1 creates app-local files and offers Android's folder picker to copy them into a newly created child folder, verify the copies, then use that folder. No Drive API/OAuth is required. App-local pre-write backups and optimistic conflict checks mitigate failed saves; they do not constitute multi-agent writer leases or atomic SAF transactions. Do not import Drive histories automatically or remove existing project records.
 

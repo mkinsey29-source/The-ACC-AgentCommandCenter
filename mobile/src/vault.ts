@@ -29,7 +29,7 @@ export async function saveNote(vault: Vault, name: string, text: string, expecte
     // Preserve a readable local recovery copy before touching the selected file.
     // SAF providers do not promise atomic replacement; this is a backup, not a lock.
     if (!FS.documentDirectory) throw new Error('Backup storage is unavailable. The note was not changed.');
-    const backups = FS.documentDirectory + 'SecondBrain-backups/';
+    const backups = FS.documentDirectory + 'Sentry-backups/';
     await FS.makeDirectoryAsync(backups, { intermediates: true });
     await FS.writeAsStringAsync(backups + Date.now() + '-' + name, expected);
     await FS.writeAsStringAsync(vault.files[name], text);
@@ -48,7 +48,7 @@ export async function openVault(): Promise<Vault> {
   const files: Record<string, string> = {};
   if (Platform.OS !== 'web') {
     if (!FS.documentDirectory) throw new Error('Device storage is unavailable.');
-    const root = FS.documentDirectory + 'SecondBrain/';
+    const root = FS.documentDirectory + 'Sentry/';
     await FS.makeDirectoryAsync(root, { intermediates: true });
     for (const [name, content] of Object.entries(vaultTemplates)) {
       files[name] = root + name;
@@ -65,7 +65,7 @@ export async function chooseFolder(current: Vault): Promise<Vault | null> {
   const permission = await FS.StorageAccessFramework.requestDirectoryPermissionsAsync();
   if (!permission.granted) return null;
   // Always create a new child folder; never overwrite an existing user's vault.
-  const folderName = 'ACC-SecondBrain-' + Date.now();
+  const folderName = 'Sentry-' + Date.now();
   const root = await FS.StorageAccessFramework.makeDirectoryAsync(permission.directoryUri, folderName);
   const files: Record<string, string> = {};
   for (const name of Object.keys(vaultTemplates)) {

@@ -4,7 +4,11 @@ React Native + Expo standalone Android workspace. APK iterations are the primary
 
 ## Try it
 
-Install `ACC-Android-build-1.apk` on an ARM64 Android device. Open ACC, create a project, add a task and change its manual status. Close/reopen the app to check persistence. In Memory, edit a Markdown note and save it. On Android, **Choose folder** copies the five current notes into a new `ACC-SecondBrain-<timestamp>` child and switches to it after verifying every copy. Select an on-device folder for offline files; Android's picker may also offer cloud providers. Existing folders/files are never replaced by that operation.
+Build 1 is available from [GitHub Releases](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/tag/android-build-1). It uses the earlier Second Brain labels and `ACC-SecondBrain-<timestamp>` folder names. The Sentry rename in current source will ship in the next APK; it does not change an installed Build 1.
+
+Install the APK on an ARM64 Android device. Open ACC, create a project, add a task and change its manual status. Close/reopen the app to check persistence. In Memory, edit a Markdown note and save it. On Android, **Choose folder** copies the five current notes into a new `Sentry-<timestamp>` child and switches to it after verifying every copy. Select an on-device folder for offline files; Android's picker may also offer cloud providers. Existing folders/files are never replaced by that operation.
+
+The local memory feature is named **Sentry**. Existing saved folder references and notes remain in use after an upgrade, including folders created by Build 1 under the older name. New folder copies use `Sentry-<timestamp>`; the timestamp keeps each copy distinct. Existing notes are not rewritten to change their headings.
 
 Default notes live in app-private device storage; uninstall removes app-private data. Choose a separate local folder to retain readable Markdown outside the app. Workspace tasks/settings remain in app-private AsyncStorage. The five-note vault is currently shared across the workspace, not separate per project. No Google Drive API integration or automatic sync runs.
 
@@ -12,7 +16,7 @@ Default notes live in app-private device storage; uninstall removes app-private 
 
 - Tablet side rails and compact phone layout, Agent/Task/Terminal/Memory views.
 - Projects, local manual tasks, status changes and recent activity persisted on device.
-- Local Markdown Second Brain: AGENTS.md, consolidated_summary.md, session_summary.md, lessons.md and handoff.md.
+- Sentry with five local Markdown notes: AGENTS.md, consolidated_summary.md, session_summary.md, lessons.md and handoff.md.
 - Read-before-save conflict detection, local pre-write recovery copies, readback verification and unsaved-draft protection when changing notes/folders.
 - A local console with `help`, `status`, `tasks`, `clear`.
 
