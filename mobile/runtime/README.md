@@ -4,7 +4,7 @@ This is a personal/local development bridge for the standalone Android APK.
 Claude Code and Codex run as their **unmodified official binaries**. Sign in
 through those programs; ACC does not read their token files or offer a Claude
 subscription login of its own. Both adapters use the same authenticated HTTP
-contract, chat UI, cancellation and recovery handling.
+contract, chat UI, cancellation and recovery handling. Protocol 2 proves runtime identity before a conversation is sent, signs each request and response with HMAC-SHA256, and binds requests to a fresh nonce, timestamp, method, path, body digest and runtime boot ID. The pairing secret itself is never transmitted. Redirects and stale/replayed signatures are refused; another listener cannot forge a completed response. This authenticates traffic; loopback HTTP is not encrypted. Keep remote connections on trusted HTTPS.
 
 Build 2 adds text conversations. It does not yet start task-board agents, write
 project files, run a terminal shell from the APK, or attach Sentry notes. Only the
@@ -102,7 +102,7 @@ python3 acc_mobile_runtime.py --bind YOUR_PRIVATE_IPV4 --cert /private/cert.pem 
 Pair using the matching `https://` hostname from that certificate. HTTP LAN
 addresses, URL credentials, paths, query strings and redirects are refused by the
 APK. The runtime refuses browser-origin requests and offers no CORS exemption.
-There is no unauthenticated health or chat endpoint.
+There is no unauthenticated health or chat endpoint. The only unauthenticated route is a bounded handshake: it returns a proof for a caller-supplied nonce and the current boot ID, and cannot run a model. Both devices’ clocks must be within 30 seconds.
 
 ## Billing and connection evidence
 

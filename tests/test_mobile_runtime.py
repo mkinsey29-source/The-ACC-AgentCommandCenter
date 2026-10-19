@@ -1,4 +1,5 @@
 """Build 2 runtime boundary tests. Fake executables are not live inference evidence."""
+import hashlib
 import importlib.util
 import json
 import os
@@ -65,16 +66,22 @@ class MobileRuntimeTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def request(self, path, body=None, headers=None, authenticated=True):
-        h = {'Authorization': 'Bearer ' + self.secret} if authenticated else {}
+        raw = json.dumps(body).encode() if body is not None else b''
+        h = self.signed_headers(path, raw, 'POST' if body is not None else 'GET') if authenticated else {}
         if body is not None:
             h['Content-Type'] = 'application/json'
         h.update(headers or {})
-        req = Request(self.base + path, data=json.dumps(body).encode() if body is not None else None, headers=h)
+        req = Request(self.base + path, data=raw if body is not None else None, headers=h)
         try:
             with urlopen(req, timeout=20) as response:
                 return response.status, json.load(response)
         except HTTPError as e:
             return e.code, json.load(e)
+
+    def signed_headers(self, path, body=b'', method='GET', nonce=None):
+        nonce=nonce or secrets.token_hex(16);stamp=str(int(time.time()))
+        signed='\n'.join(('acc-request-v2',self.runtime.boot,nonce,stamp,method,path,hashlib.sha256(body).hexdigest()))
+        return {'X-ACC-Nonce':nonce,'X-ACC-Time':stamp,'X-ACC-Boot':self.runtime.boot,'X-ACC-Signature':self.runtime.mac(signed)}
 
     def payload(self, p='claude', **overrides):
         return dict(id=secrets.token_hex(16), provider=p, model='', messages=[{'role':'user','text':'Hi, RTL שלום and newline\n $(touch do-not-run)'}], **overrides)
@@ -91,6 +98,21 @@ class MobileRuntimeTests(unittest.TestCase):
         self.assertEqual(401, self.request('/v1/chat', self.payload(), authenticated=False)[0])
         self.assertEqual(403, self.request('/v1/chat', self.payload(), headers={'Origin':'https://evil.example'})[0])
         self.assertEqual({}, self.runtime.jobs)
+
+    def test_handshake_proof_and_transport_replay_protection(self):
+        nonce=secrets.token_hex(16)
+        code,hello=self.request('/v1/handshake',{'nonce':nonce},authenticated=False)
+        self.assertEqual(200,code)
+        self.assertEqual(self.runtime.mac('acc-server-v2\n'+nonce+'\n'+self.runtime.boot),hello['proof'])
+        headers=self.signed_headers('/v1/status')
+        self.assertEqual(200,self.request('/v1/status',headers=headers,authenticated=False)[0])
+        self.assertEqual(409,self.request('/v1/status',headers=headers,authenticated=False)[0])
+        headers=self.signed_headers('/v1/status');headers['X-ACC-Boot']='0'*32
+        self.assertEqual(401,self.request('/v1/status',headers=headers,authenticated=False)[0])
+        data=self.payload();raw=json.dumps(data).encode();headers=self.signed_headers('/v1/chat',raw,'POST')
+        data['messages'][0]['text']='changed after signing'
+        self.assertEqual(401,self.request('/v1/chat',data,headers=headers,authenticated=False)[0])
+        self.assertEqual({},self.runtime.jobs)
 
     def test_both_cli_adapters_execute_through_http(self):
         code, status = self.request('/v1/status')

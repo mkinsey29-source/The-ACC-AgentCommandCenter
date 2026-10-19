@@ -222,9 +222,30 @@ class Runtime:
         self.lock = threading.RLock()
         self.jobs = {}
         self.closed = False
+        self.boot = secrets.token_hex(16)
+        self.nonces = {}
 
     def status(self):
-        return {"protocol": 1, "runtime": "acc-mobile", "providers": [provider_status(p, self.executables[p]) for p in PROVIDERS]}
+        return {"protocol": 2, "runtime": "acc-mobile", "providers": [provider_status(p, self.executables[p]) for p in PROVIDERS]}
+
+    def mac(self, text):
+        return hmac.new(self.token.encode(), text.encode(), hashlib.sha256).hexdigest()
+
+    def authenticate(self, headers, method, path, body):
+        nonce, stamp, boot = (headers.get(k, '') for k in ('X-ACC-Nonce', 'X-ACC-Time', 'X-ACC-Boot'))
+        if not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', nonce) or not re.fullmatch(r'[0-9]{10}', stamp) or boot != self.boot:
+            raise BridgeError('Pair this device with the runtime.', 401)
+        if abs(time.time() - int(stamp)) > 30:
+            raise BridgeError('Check the clocks on both devices.', 401)
+        signed = '\n'.join(('acc-request-v2', boot, nonce, stamp, method, path, hashlib.sha256(body).hexdigest()))
+        if not hmac.compare_digest(headers.get('X-ACC-Signature', '').encode(), self.mac(signed).encode()):
+            raise BridgeError('Pair this device with the runtime.', 401)
+        with self.lock:
+            now = time.time()
+            self.nonces = {n: t for n, t in self.nonces.items() if now - t <= 60}
+            if nonce in self.nonces or len(self.nonces) >= 1000:
+                raise BridgeError('Replay or request limit reached.', 409)
+            self.nonces[nonce] = now
 
     def submit(self, data):
         data = validate_request(data)
@@ -326,6 +347,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        nonce = self.headers.get('X-ACC-Nonce', '')
+        if re.fullmatch(r'[A-Za-z0-9_-]{16,80}', nonce):
+            signed = '\n'.join(('acc-response-v2', nonce, str(status), hashlib.sha256(raw).hexdigest()))
+            self.send_header('X-ACC-Proof', self.server.runtime.mac(signed))
         self.end_headers()
         self.wfile.write(raw)
 
@@ -333,14 +358,31 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.headers.get("Origin") or self.headers.get("Sec-Fetch-Site"):
                 raise BridgeError("Browser-origin requests are refused.", 403)
-            expected = "Bearer " + self.server.runtime.token
-            if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), expected.encode()):
-                raise BridgeError("Pair this device with the runtime.", 401)
             if self.headers.get("Transfer-Encoding"):
                 raise BridgeError("Chunked requests are not accepted.")
             path = self.path
             if "?" in path or "#" in path:
                 raise BridgeError("Query strings are not accepted.")
+            body = b''
+            if method == 'POST':
+                if self.headers.get('Content-Type') != 'application/json':
+                    raise BridgeError('JSON content is required.', 415)
+                try:
+                    length = int(self.headers.get('Content-Length', '0'))
+                except ValueError:
+                    raise BridgeError('Invalid body size.') from None
+                if not 0 < length <= MAX_BODY:
+                    raise BridgeError('Request exceeds the size limit.', 413)
+                body = self.rfile.read(length)
+            if method == 'POST' and path == '/v1/handshake':
+                data = json.loads(body)
+                nonce = data.get('nonce') if isinstance(data, dict) else None
+                if not isinstance(nonce, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', nonce):
+                    raise BridgeError('Invalid handshake.')
+                boot = self.server.runtime.boot
+                return self.respond(200, {'protocol': 2, 'nonce': nonce, 'boot': boot,
+                    'proof': self.server.runtime.mac('acc-server-v2\n' + nonce + '\n' + boot)})
+            self.server.runtime.authenticate(self.headers, method, path, body)
             match = re.fullmatch(r"/v1/jobs/([a-zA-Z0-9_-]{16,80})(/cancel)?", path)
             if method == "GET" and path == "/v1/status":
                 return self.respond(200, self.server.runtime.status())
@@ -349,15 +391,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == "POST" and match and match[2]:
                 return self.respond(200, self.server.runtime.cancel(match[1]))
             if method == "POST" and path == "/v1/chat":
-                if self.headers.get("Content-Type") != "application/json":
-                    raise BridgeError("JSON content is required.", 415)
-                try:
-                    length = int(self.headers.get("Content-Length", "0"))
-                except ValueError:
-                    raise BridgeError("Invalid body size.") from None
-                if not 0 < length <= MAX_BODY:
-                    raise BridgeError("Request exceeds the size limit.", 413)
-                data = json.loads(self.rfile.read(length))
+                data = json.loads(body)
                 return self.respond(202, self.server.runtime.submit(data))
             raise BridgeError("Route not found.", 404)
         except BridgeError as e:

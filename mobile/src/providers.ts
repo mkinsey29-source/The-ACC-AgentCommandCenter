@@ -1,6 +1,10 @@
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { fetch as expoFetch } from 'expo/fetch';
+import { uuid } from 'expo';
+import { hmac } from '@noble/hashes/hmac.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
 export type Provider = 'claude' | 'codex';
 export const providerNames: Record<Provider, string> = { claude: 'Claude Code', codex: 'ChatGPT / Codex' };
@@ -50,12 +54,16 @@ export async function runtimeRequest(connection: Connection, path: string, body?
   const c = validateConnection(connection);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30_000);
-  try {
-    const response = await expoFetch(c.url + path, {
-      method: body === undefined ? 'GET' : 'POST', redirect: 'error', credentials: 'omit',
-      headers: { Authorization: `Bearer ${c.token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-      body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal,
+  const mac = (text: string) => bytesToHex(hmac(sha256, utf8ToBytes(c.token), utf8ToBytes(text)));
+  const digest = (text: string) => bytesToHex(sha256(utf8ToBytes(text)));
+  async function exchange(route: string, method: string, rawBody?: string, headers?: Record<string, string>) {
+    return expoFetch(c.url + route, {
+      method, redirect: 'error', credentials: 'omit',
+      headers: { ...(rawBody === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
+      body: rawBody, signal: controller.signal,
     });
+  }
+  async function readResponse(response: Awaited<ReturnType<typeof exchange>>, limit: number) {
     const reader = response.body?.getReader();
     if (!reader) throw new Error('Runtime returned an empty response.');
     const decoder = new TextDecoder();
@@ -64,10 +72,30 @@ export async function runtimeRequest(connection: Connection, path: string, body?
       const part = await reader.read();
       if (part.done) break;
       bytes += part.value.length;
-      if (bytes > 700_000) { await reader.cancel(); throw new Error('Runtime response is too large.'); }
+      if (bytes > limit) { await reader.cancel(); throw new Error('Runtime response is too large.'); }
       raw += decoder.decode(part.value, { stream: true });
     }
-    raw += decoder.decode();
+    return raw + decoder.decode();
+  }
+  try {
+    // Prove possession of the pairing secret before sending any conversation.
+    // A replacement loopback listener never receives the secret itself.
+    const challenge = uuid.v4();
+    const helloResponse = await exchange('/v1/handshake', 'POST', JSON.stringify({ nonce: challenge }));
+    const hello = JSON.parse(await readResponse(helloResponse, 4096));
+    if (!helloResponse.ok || hello.protocol !== 2 || hello.nonce !== challenge || typeof hello.boot !== 'string' ||
+        !/^[a-f0-9]{32}$/.test(hello.boot) || hello.proof !== mac(`acc-server-v2\n${challenge}\n${hello.boot}`)) {
+      throw new Error('Runtime identity could not be verified. Check the pairing secret and runtime.');
+    }
+    const nonce = uuid.v4(), stamp = Math.floor(Date.now() / 1000).toString();
+    const method = body === undefined ? 'GET' : 'POST';
+    const rawBody = body === undefined ? undefined : JSON.stringify(body);
+    const signature = mac(['acc-request-v2', hello.boot, nonce, stamp, method, path, digest(rawBody || '')].join('\n'));
+    const response = await exchange(path, method, rawBody, { 'X-ACC-Nonce': nonce, 'X-ACC-Time': stamp, 'X-ACC-Boot': hello.boot, 'X-ACC-Signature': signature });
+    const raw = await readResponse(response, 700_000);
+    if (response.headers.get('X-ACC-Proof') !== mac(['acc-response-v2', nonce, String(response.status), digest(raw)].join('\n'))) {
+      throw new Error('Runtime response could not be authenticated.');
+    }
     if (response.status === 401) throw new Error('Runtime pairing was refused. Check Connections.');
     if (response.status === 404) throw new Error('Request not found. The runtime may have restarted. It has not been resent.');
     if (!response.ok) throw new Error(`Runtime refused the request (${response.status}). Check the runtime and retry deliberately.`);
@@ -77,7 +105,7 @@ export async function runtimeRequest(connection: Connection, path: string, body?
 
 export async function checkRuntime(connection: Connection): Promise<ProviderStatus[]> {
   const data = await runtimeRequest(connection, '/v1/status') as { protocol?: number; runtime?: string; providers?: ProviderStatus[] };
-  if (data?.protocol !== 1 || data.runtime !== 'acc-mobile' || !Array.isArray(data.providers) || data.providers.length !== 2 ||
+  if (data?.protocol !== 2 || data.runtime !== 'acc-mobile' || !Array.isArray(data.providers) || data.providers.length !== 2 ||
       !(['claude', 'codex'] as Provider[]).every(id => data.providers?.filter(p => p.id === id).length === 1) ||
       data.providers.some(p => !['signed_in', 'sign_in_needed', 'not_installed', 'check_failed'].includes(p.state) || !['subscription', 'api', 'unknown'].includes(p.billing))) {
     throw new Error('This runtime is not compatible with ACC Build 2.');
