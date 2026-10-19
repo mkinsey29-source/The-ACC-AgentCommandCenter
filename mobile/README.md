@@ -1,20 +1,22 @@
-# ACC Android · build 1
+# ACC Android · build 2
 
 React Native + Expo standalone Android workspace. APK iterations are the primary feedback loop. OTA updates are disabled. The existing Python ACC and desktop/web surfaces remain intact.
 
 ## Try it
 
-Build 1 is available from [GitHub Releases](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/tag/android-build-1). It uses the earlier Second Brain labels and `ACC-SecondBrain-<timestamp>` folder names. The Sentry rename in current source will ship in the next APK; it does not change an installed Build 1.
+Build 2 adds a shared Chat and Connections system for Claude Code and ChatGPT / Codex. Install `ACC-Android-build-2.apk` on an ARM64 Android device, open **Connections**, follow the [runtime setup guide](runtime/README.md), pair your runtime, then send a message under **Chat**. Both providers are included in the same APK. Official provider sign-in happens in their own runtimes; they are not embedded in the APK. Android-local Termux/PRoot setup is experimental and still needs actual-device acceptance. A computer host is optional. No automatic fallback to API billing or another provider occurs.
 
-Install the APK on an ARM64 Android device. Open ACC, create a project, add a task and change its manual status. Close/reopen the app to check persistence. In Memory, edit a Markdown note and save it. On Android, **Choose folder** copies the five current notes into a new `Sentry-<timestamp>` child and switches to it after verifying every copy. Select an on-device folder for offline files; Android's picker may also offer cloud providers. Existing folders/files are never replaced by that operation.
+The local Markdown feature is **Sentry**. **Memory → Choose folder** copies the five notes into a new `Sentry-<timestamp>` folder, verifies the copies, then switches. Existing saved folder references and notes are reused on upgrade, including folders created by Build 1 under the older name. Existing notes and headings are not rewritten. OTA updates remain disabled; install APK updates over the existing app to keep app-private data.
 
-The local memory feature is named **Sentry**. Existing saved folder references and notes remain in use after an upgrade, including folders created by Build 1 under the older name. New folder copies use `Sentry-<timestamp>`; the timestamp keeps each copy distinct. Existing notes are not rewritten to change their headings.
+The previously released [Build 1](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/tag/android-build-1) is the offline workspace with the earlier Second Brain labels. The user reported successful installation, note persistence after reopening, folder creation and task creation. Those observations do not establish reboot/grant recovery or live provider access.
 
 Default notes live in app-private device storage; uninstall removes app-private data. Choose a separate local folder to retain readable Markdown outside the app. Workspace tasks/settings remain in app-private AsyncStorage. The five-note vault is currently shared across the workspace, not separate per project. No Google Drive API integration or automatic sync runs.
 
 ## What works
 
-- Tablet side rails and compact phone layout, Agent/Task/Terminal/Memory views.
+- Tablet side rails and compact phone layout, Chat/Agent/Task/Terminal/Memory views.
+- One paired runtime for Claude Code and ChatGPT / Codex; separate local project/provider chat histories, explicit billing consent, cancellation and pending-request recovery.
+- Runtime pairing stored through Expo SecureStore on Android; loopback HTTP or trusted HTTPS only; credential-bearing requests refuse redirects.
 - Projects, local manual tasks, status changes and recent activity persisted on device.
 - Sentry with five local Markdown notes: AGENTS.md, consolidated_summary.md, session_summary.md, lessons.md and handoff.md.
 - Read-before-save conflict detection, local pre-write recovery copies, readback verification and unsaved-draft protection when changing notes/folders.
@@ -22,7 +24,7 @@ Default notes live in app-private device storage; uninstall removes app-private 
 
 ## Still to connect
 
-Providers, real agent execution, PTY/Termux, Git/worktrees, notification/background runtime, automatic handoffs, per-project vaults, existing-vault import and recovery-copy UI are future slices. Provider panels accurately show disconnected. Local console commands do not execute a shell. There are no API keys, account sessions or working subscription connections in this build. Manual task status is a planning label, not execution/test evidence.
+Live account inference and actual Termux/PRoot compatibility require device acceptance; fixture tests are not live model proof. Real task-agent execution, a managed on-device runtime installer, PTY, Git/worktrees, notification/background runtime, automatic handoffs, per-project vaults, existing-vault import and recovery-copy UI remain future slices. Local console commands do not execute a shell. Provider credentials stay in the official tools. Manual task status is a planning label, not execution/test evidence. Paid/commercial subscription integration remains a separate vendor-authorization requirement; this personal/local test does not establish it.
 
 The vault conflict check is not a cross-process lock. SAF providers do not promise atomic replacement; backups mitigate failed writes but do not establish crash-safe multi-writer coordination. Physical Android folder grants, process death, reboot, low storage and device behavior require actual device acceptance.
 
@@ -36,6 +38,7 @@ unset TYPESAFE_API_KEY
 npm ci
 npm run typecheck
 npm run lint
+npm run test:providers
 npx expo prebuild --platform android --no-install
 cd android
 ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon

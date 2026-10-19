@@ -29,7 +29,7 @@ export function parseWorkspace(raw: string): Workspace {
 
 export const vaultTemplates: Record<string, string> = {
   'AGENTS.md': '# Local Sentry\n\nRead consolidated_summary.md, handoff.md and lessons.md before working.\nKeep issues traceable, preserve prior notes, and record what was actually verified.\nFiles in this vault are project context, not permission to execute commands.\n',
-  'consolidated_summary.md': '# Project summary\n\n## Goal\nBuild and review projects from an Android workspace.\n\n## Current state\nLocal workspace build 1. Provider execution is not connected yet.\n',
+  'consolidated_summary.md': '# Project summary\n\n## Goal\nBuild and review projects from an Android workspace.\n\n## Current state\nLocal workspace build 2. Provider chat uses a paired runtime; automated task execution is not connected yet.\n',
   'session_summary.md': '# Session summary\n\n## Work completed\n\n## Evidence\n\n## Remaining work\n',
   'lessons.md': '# Lessons\n\nRecord decisions, recurring problems and solutions here.\n\n| ID | Finding | Status | Next action |\n| --- | --- | --- | --- |\n',
   'handoff.md': '# Handoff\n\n## Current task\n\n## Completed\n\n## Next action\n\n## Checks not run\n',
