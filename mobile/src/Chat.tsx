@@ -2,16 +2,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { uuid } from 'expo';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ChatGPTAccount } from './chatgpt';
+import { ChatGPTThread } from './ChatGPTThread';
 import { Connection, Job, Message, Provider, providerNames, runtimeRequest, safeConnectionError, validateJob } from './providers';
 
 type History = { messages: Message[]; pending?: string; problem?: string };
 const blank: History = { messages: [] };
 
-export function Chat({ connection, project, openConnections }: { connection: Connection | null; project: string; openConnections: () => void }) {
-  const [provider, setProvider] = useState<Provider>('claude');
+export function Chat({ connection, project, openConnections, account }: { connection: Connection | null; project: string; openConnections: () => void; account?: ChatGPTAccount }) {
+  const [provider, setProvider] = useState<Provider | 'chatgpt'>('chatgpt');
   return <View style={s.grow}>
-    <View style={s.header}><View style={s.row}>{(['claude', 'codex'] as Provider[]).map(p => <Pressable key={p} accessibilityRole="tab" accessibilityState={{ selected: p === provider }} onPress={() => setProvider(p)} style={[s.button, provider === p && s.active]}><Text style={s.text}>{providerNames[p]}</Text></Pressable>)}</View><Pressable accessibilityRole="button" onPress={openConnections} style={s.button}><Text style={s.blue}>Connections</Text></Pressable></View>
-    <Thread key={`${project}:${connection?.id || 'none'}:${provider}`} connection={connection} project={project} provider={provider} openConnections={openConnections} />
+    <View style={s.header}><View style={s.row}>{(['chatgpt', 'claude', 'codex'] as const).filter(p => p !== 'codex' || !!connection).map(p => <Pressable key={p} accessibilityRole="tab" accessibilityState={{ selected: p === provider }} onPress={() => setProvider(p)} style={[s.button, provider === p && s.active]}><Text style={s.text}>{p === 'chatgpt' ? 'ChatGPT' : p === 'codex' ? 'Codex runtime' : providerNames[p]}</Text></Pressable>)}</View><Pressable accessibilityRole="button" onPress={openConnections} style={s.button}><Text style={s.blue}>Connections</Text></Pressable></View>
+    {provider === 'chatgpt' ? <ChatGPTThread key={`${project}:${account?.id || 'none'}`} account={account} project={project} openConnections={openConnections} /> : <Thread key={`${project}:${connection?.id || 'none'}:${provider}`} connection={connection} project={project} provider={provider} openConnections={openConnections} />}
   </View>;
 }
 
@@ -123,7 +125,7 @@ function Thread({ connection, project, provider, openConnections }: { connection
   return <View style={s.grow}>
     <View style={s.context}><Text style={s.muted}>{connection ? `Paired runtime · ${connection.models[provider] || 'provider default'} · text chat` : 'No runtime paired'}</Text><Text style={s.muted}>ACC sends this conversation. Sentry notes and project files are not attached automatically.</Text></View>
     <ScrollView ref={transcript} style={s.grow} contentContainerStyle={s.messages} onContentSizeChange={() => transcript.current?.scrollToEnd({ animated: false })}>
-      {!history.messages.length && <View style={s.empty}><Text style={s.heading}>Talk to {providerNames[provider]}</Text><Text style={s.muted}>Pair a runtime in Connections, complete the provider’s own sign-in, then send a message. Each provider keeps a separate conversation for this project.</Text>{!connection && <Pressable accessibilityRole="button" onPress={openConnections} style={s.button}><Text style={s.blue}>Set up connections</Text></Pressable>}</View>}
+      {!history.messages.length && <View style={s.empty}><Text style={s.heading}>Talk to {providerNames[provider]}</Text><Text style={s.muted}>This provider currently needs a separately configured runtime. Easy Android setup is not ready yet. ChatGPT has a direct account connection in Connections.</Text>{!connection && <Pressable accessibilityRole="button" onPress={openConnections} style={s.button}><Text style={s.blue}>Set up connections</Text></Pressable>}</View>}
       {history.messages.map((m, i) => <View key={i} style={[s.message, m.role === 'user' && s.user]}><Text style={s.role}>{m.role === 'user' ? 'YOU' : providerNames[provider].toUpperCase()}</Text><Text selectable style={s.reply}>{m.text}</Text></View>)}
       {working && <ActivityIndicator color="#a7cff9" />}
     </ScrollView>

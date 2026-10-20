@@ -7,8 +7,8 @@ npm run typecheck
 npm run lint
 npx expo prebuild --platform android --no-install
 cd android
-./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+./gradlew :acc-chatgpt:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
 cd ..
 mkdir -p builds
-cp android/app/build/outputs/apk/release/app-release.apk builds/ACC-Android-build-2.apk
-sha256sum builds/ACC-Android-build-2.apk
+cp android/app/build/outputs/apk/release/app-release.apk builds/ACC-Android-build-3.apk
+sha256sum builds/ACC-Android-build-3.apk

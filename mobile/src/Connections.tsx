@@ -1,3 +1,5 @@
+import { ChatGPTConnections } from './ChatGPTConnections';
+import { ChatGPTStatus } from './chatgpt';
 import { useState } from 'react';
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -6,7 +8,8 @@ import { checkRuntime, Connection, normalizeEndpoint, Provider, providerNames, P
 
 const setup = `pkg update\npkg install python git proot-distro\nproot-distro install debian\nproot-distro login debian`;
 
-export function Connections({ connection, onChange }: { connection: Connection | null; onChange: (value: Connection | null) => void }) {
+export function Connections({ connection, onChange, chatGPT, refreshChatGPT }: { connection: Connection | null; onChange: (value: Connection | null) => void; chatGPT: ChatGPTStatus; refreshChatGPT: () => Promise<void> }) {
+  const [advanced, setAdvanced] = useState(false);
   const [url, setUrl] = useState(connection?.url || 'http://127.0.0.1:8765');
   const [token, setToken] = useState(connection?.token || '');
   const [allowApi, setAllowApi] = useState(connection?.allowApi || false);
@@ -35,7 +38,12 @@ export function Connections({ connection, onChange }: { connection: Connection |
     finally { setBusy(false); }
   }
   return <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-    <Text style={s.text}>One runtime connects Claude Code and ChatGPT / Codex. Sign in to each provider in its own terminal. ACC keeps only its runtime pairing secret.</Text>
+    <ChatGPTConnections status={chatGPT} refresh={refreshChatGPT} />
+    <Text style={s.heading}>Claude</Text>
+    <Text style={s.text}>Simple subscription setup is not ready for Claude in ACC. Its current connection needs the official Claude Code runtime. You can use ChatGPT above without installing a terminal.</Text>
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded: advanced }} onPress={() => setAdvanced(!advanced)} style={s.button}><Text style={s.blue}>{advanced ? 'Hide advanced runtime setup' : 'Advanced: use an existing runtime'}</Text></Pressable>
+    {advanced && <>
+    <Text style={s.text}>Optional connection for an existing Claude Code / Codex runtime. It is separate from the direct ChatGPT connection above.</Text>
     {Platform.OS === 'web' && <Text style={s.notice}>Browser preview does not persist pairing and the runtime refuses browser-origin requests. Connect from the Android APK.</Text>}
     <Text style={s.heading}>Pair your runtime</Text>
     <Text style={s.text}>On this tablet: use the loopback address below. For a computer: use its HTTPS address. Changing the runtime or models starts a separate chat history.</Text>
@@ -54,6 +62,7 @@ export function Connections({ connection, onChange }: { connection: Connection |
     <Pressable accessibilityRole="button" onPress={() => Clipboard.setStringAsync(setup).then(() => setMessage('Initial Termux commands copied. Follow the runtime guide for the remaining steps.')).catch(() => setMessage('Could not copy. Select the commands above.'))} style={s.button}><Text style={s.blue}>Copy initial Termux commands</Text></Pressable>
     <Text style={s.text}>Then follow the runtime guide to install both tools and start ACC’s bridge. Complete “claude auth login” and “codex login” in that terminal. Enter the ACC pairing secret here—not a provider token.</Text>
     <Pressable accessibilityRole="button" onPress={() => Linking.openURL('https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/blob/feature/android-build-2-providers-20261019/mobile/runtime/README.md').catch(() => setMessage('Could not open the runtime guide.'))} style={s.button}><Text style={s.blue}>Open runtime setup guide</Text></Pressable>
+    </>}
   </ScrollView>;
 }
 
