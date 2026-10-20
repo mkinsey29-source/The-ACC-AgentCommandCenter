@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: acc-android-native-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   candidate:
     runs-on: ubuntu-24.04
@@ -23,6 +23,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Locate installed Android tools
+        run: |
+          acc_cli=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)
+          test -x "$acc_cli"
+          dirname "$acc_cli" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
       - name: Prepare source and run focused checks
         run: |
           cd mobile
@@ -83,3 +89,50 @@ jobs:
             exit 1
           fi
           gh release create android-build-4 mobile/builds/ACC-Android-build-4.apk mobile/builds/build4-verification.json --target "$GITHUB_SHA" --prerelease --title 'ACC Android Build 4 — connection-panel crash fix' --notes-file mobile/builds/build4-release-notes.md
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Locate installed Android tools
+        run: |
+          acc_cli=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)
+          test -x "$acc_cli"
+          dirname "$acc_cli" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+      - name: Prepare baseline source
+        run: |
+          git fetch origin 72d10fd072fa99190ce5f8b64d804d487ea211b9
+          git worktree add --detach "$RUNNER_TEMP/acc-baseline" 72d10fd072fa99190ce5f8b64d804d487ea211b9
+          cd "$RUNNER_TEMP/acc-baseline/mobile"
+          npm ci --no-audit --no-fund
+          npx expo prebuild --platform android --no-install
+      - name: Build standalone x86 emulator APK
+        run: |
+          unset TYPESAFE_API_KEY
+          cd "$RUNNER_TEMP/acc-baseline/mobile/android"
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
+      - name: Prepare Android emulator
+        run: |
+          sudo chmod a+rw /dev/kvm
+          sdkmanager 'system-images;android-36;google_apis;x86_64' 'emulator' 'platform-tools'
+          echo no | avdmanager create avd --force --name acc-smoke --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          "$ANDROID_HOME/emulator/emulator" -avd acc-smoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          adb wait-for-device
+          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 2; done'
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb shell input keyevent 82
+      - name: Reproduce connection-panel crash
+        run: |
+          unset TYPESAFE_API_KEY
+          adb install -r "$RUNNER_TEMP/acc-baseline/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          python3 mobile/scripts/android-smoke.py
