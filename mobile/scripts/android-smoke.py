@@ -44,10 +44,16 @@ def tap(label, scroll=False):
         time.sleep(.5)
     raise AssertionError("UI control not found: " + label)
 
-def expect(label):
-    healthy()
-    tree = hierarchy()
-    assert any(label in n.get("text", "") or label in n.get("content-desc", "") for n in tree.iter("node")), label
+def expect(label, scroll=False):
+    for _ in range(5 if scroll else 1):
+        healthy()
+        tree = hierarchy()
+        if any(label in n.get("text", "") or label in n.get("content-desc", "") for n in tree.iter("node")):
+            return
+        if scroll:
+            size = list(map(int, re.findall(r"\d+", adb("shell", "wm", "size"))))[-2:]
+            adb("shell", "input", "swipe", str(size[0] // 2), str(size[1] * 3 // 4), str(size[0] // 2), str(size[1] // 3), "300")
+    raise AssertionError(label)
 
 adb("logcat", "-c")
 adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity")
@@ -67,7 +73,7 @@ try:
     # with accessibilityRole="status". No real pairing secret or network needed.
     tap("Advanced: use an existing runtime", scroll=True)
     tap("Pair and check both", scroll=True)
-    expect("Invalid saved connection")
+    expect("Invalid saved connection", scroll=True)
     print("PASS: invalid runtime pairing renders a native status notice")
     adb("shell", "input", "keyevent", "4")
     time.sleep(1)
@@ -82,6 +88,11 @@ try:
         expect("Provider connections")
         tap("Close")
     print("PASS: native Connections opens/closes repeatedly")
+    tap("+ Project")
+    expect("New project")
+    tap("Close")
+    healthy()
+    print("PASS: shared project panel opens/closes with its native keyboard")
 except Exception:
     print(adb("logcat", "-b", "crash", "-d", "-t", "120"))
     raise

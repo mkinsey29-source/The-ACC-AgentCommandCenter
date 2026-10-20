@@ -55,26 +55,10 @@ jobs:
         run: |
           unset TYPESAFE_API_KEY
           cd mobile/android
-          ./gradlew :acc-chatgpt:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --max-workers=2
-      - name: Prepare Android emulator
-        run: |
-          sudo chmod a+rw /dev/kvm
-          sdkmanager 'system-images;android-36;google_apis;x86_64' 'emulator' 'platform-tools'
-          echo no | avdmanager create avd --force --name acc-smoke --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
-          "$ANDROID_HOME/emulator/emulator" -avd acc-smoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          adb wait-for-device
-          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 2; done'
-          adb shell settings put global window_animation_scale 0
-          adb shell settings put global transition_animation_scale 0
-          adb shell settings put global animator_duration_scale 0
-          adb shell input keyevent 82
-      - name: Test actual native provider setup panel
-        run: |
-          unset TYPESAFE_API_KEY
-          adb install -r mobile/android/app/build/outputs/apk/release/app-release.apk
-          python3 mobile/scripts/android-smoke.py
+          ./gradlew :acc-chatgpt:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
       - name: Verify numbered APK and upgrade signing identity
         run: |
+          unset TYPESAFE_API_KEY
           mkdir -p mobile/builds
           cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
           curl -fL --retry 2 https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-3/ACC-Android-build-3.apk -o "$RUNNER_TEMP/build3.apk"
@@ -85,6 +69,38 @@ jobs:
           "$acc_tools/aapt" dump badging mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-badging.txt"
           "$acc_tools/aapt" dump xmltree mobile/builds/ACC-Android-build-4.apk AndroidManifest.xml > "$RUNNER_TEMP/build4-manifest.txt"
           python3 mobile/scripts/verify-release.py
+      - name: Preserve private candidate for independent emulator retries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          acc_candidate_tag="android-build-4-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$acc_candidate_tag" mobile/builds/ACC-Android-build-4.apk mobile/builds/build4-verification.json --target "$GITHUB_SHA" --draft --prerelease --title "Unverified Build 4 candidate ${GITHUB_SHA}" --notes 'Internal recovery artifact. Packaging and native unit checks complete; Android UI validation pending.'
+      - name: Prepare Android emulator
+        run: |
+          sudo chmod a+rw /dev/kvm
+          sdkmanager 'system-images;android-36;google_apis;x86_64' 'emulator' 'platform-tools'
+          export ANDROID_SDK_HOME="$RUNNER_TEMP/acc-android-user"
+          export ANDROID_USER_HOME="$ANDROID_SDK_HOME/.android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --force --name acc-smoke --package 'system-images;android-36;google_apis;x86_64' --device pixel_6 --path "$ANDROID_AVD_HOME/acc-smoke.avd"
+          test -f "$ANDROID_AVD_HOME/acc-smoke.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -accel-check
+          trap 'tail -80 "$RUNNER_TEMP/emulator.log"' EXIT
+          "$ANDROID_HOME/emulator/emulator" -avd acc-smoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu software -memory 2048 > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          timeout 120 adb wait-for-device
+          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 2; done'
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb shell input keyevent 82
+      - name: Test actual native provider setup panel
+        run: |
+          unset TYPESAFE_API_KEY
+          adb install -r mobile/android/app/build/outputs/apk/release/app-release.apk
+          python3 mobile/scripts/android-smoke.py
       - name: Publish verified personal-test APK without Actions artifact storage
         env:
           GH_TOKEN: ${{ github.token }}
@@ -124,14 +140,23 @@ jobs:
         run: |
           unset TYPESAFE_API_KEY
           cd "$RUNNER_TEMP/acc-baseline/mobile/android"
-          ./gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
       - name: Prepare Android emulator
         run: |
           sudo chmod a+rw /dev/kvm
           sdkmanager 'system-images;android-36;google_apis;x86_64' 'emulator' 'platform-tools'
-          echo no | avdmanager create avd --force --name acc-smoke --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
-          "$ANDROID_HOME/emulator/emulator" -avd acc-smoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          adb wait-for-device
+          export ANDROID_SDK_HOME="$RUNNER_TEMP/acc-android-user"
+          export ANDROID_USER_HOME="$ANDROID_SDK_HOME/.android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --force --name acc-smoke --package 'system-images;android-36;google_apis;x86_64' --device pixel_6 --path "$ANDROID_AVD_HOME/acc-smoke.avd"
+          test -f "$ANDROID_AVD_HOME/acc-smoke.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -accel-check
+          trap 'tail -80 "$RUNNER_TEMP/emulator.log"' EXIT
+          "$ANDROID_HOME/emulator/emulator" -avd acc-smoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu software -memory 2048 > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          timeout 120 adb wait-for-device
           timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 2; done'
           adb shell settings put global window_animation_scale 0
           adb shell settings put global transition_animation_scale 0

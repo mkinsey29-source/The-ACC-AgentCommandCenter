@@ -5,6 +5,7 @@ import os
 import re
 import struct
 import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 scratch = Path(os.environ['RUNNER_TEMP'])
@@ -21,6 +22,11 @@ manifest = (scratch / 'build4-manifest.txt').read_text()
 assert re.search(r'android:allowBackup[^\n]*0x0\b', manifest)
 assert re.search(r'expo\.modules\.updates\.ENABLED[^\n]*\n[^\n]*android:value[^\n]*0x0\b', manifest)
 metadata = {'source_sha': os.environ['GITHUB_SHA'], 'bytes': apk.stat().st_size, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'same_signer_as_build3': True, 'versionCode': 4, 'versionName': '0.4.0'}
+reports = [p for p in Path('mobile').rglob('TEST-*.xml') if 'test-results/testDebugUnitTest' in p.as_posix()]
+assert reports, 'Native unit test reports missing'
+metadata['native_unit_tests'] = {key: sum(int(ET.parse(p).getroot().get(key, '0')) for p in reports) for key in ['tests', 'failures', 'errors', 'skipped']}
+assert metadata['native_unit_tests']['tests'] > 0
+assert all(metadata['native_unit_tests'][key] == 0 for key in ['failures', 'errors', 'skipped'])
 with zipfile.ZipFile(apk) as z:
     metadata['abis'] = sorted({p.split('/')[1] for p in z.namelist() if p.startswith('lib/') and p.endswith('.so')})
     assert metadata['abis'] == ['arm64-v8a', 'x86_64']
