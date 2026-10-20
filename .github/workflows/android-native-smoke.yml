@@ -23,6 +23,7 @@ jobs:
           java-version: '17'
       - name: Prepare baseline source
         run: |
+          git fetch origin 72d10fd072fa99190ce5f8b64d804d487ea211b9
           git worktree add --detach "$RUNNER_TEMP/acc-baseline" 72d10fd072fa99190ce5f8b64d804d487ea211b9
           cd "$RUNNER_TEMP/acc-baseline/mobile"
           npm ci --no-audit --no-fund
