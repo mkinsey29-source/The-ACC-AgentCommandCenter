@@ -72,9 +72,12 @@ internal class ChatGPTEngine(private val context: Context) {
       val a = accounts.getJSONObject(i)
       result.put(JSONObject().put("id", a.getString("id")).put("label", a.getString("label")).put("signedIn", a.has("access_token")))
     }
+    val connected = (0 until accounts.length()).any { accounts.getJSONObject(it).has("access_token") }
     JSONObject().put("accounts", result).put("active", data.optString("active"))
+      .put("welcomePending", connected && !data.optBoolean("welcomed"))
       .put("signingIn", attempt != null).put("message", loginMessage).toString()
   }
+  fun acknowledgePlanUse() = synchronized(lock) { val data = load(); data.put("welcomed", true); save(data) }
   fun choose(id: String) = synchronized(lock) {
     check(activeChat.get() == null && attempt == null)
     val data = load(); account(data, id); data.put("active", id); save(data)

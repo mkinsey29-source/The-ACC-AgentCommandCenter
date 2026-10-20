@@ -2,10 +2,11 @@ import { requireOptionalNativeModule } from 'expo';
 import { Linking, Platform } from 'react-native';
 
 export type ChatGPTAccount = { id: string; label: string; signedIn: boolean };
-export type ChatGPTStatus = { accounts: ChatGPTAccount[]; active: string; signingIn: boolean; message: string };
+export type ChatGPTStatus = { accounts: ChatGPTAccount[]; active: string; welcomePending: boolean; signingIn: boolean; message: string };
 export type ChatGPTModel = { id: string; name: string };
 type NativeChatGPT = {
   status(): Promise<string>;
+  acknowledgePlanUse(): Promise<string>;
   beginSignIn(id: string | null): Promise<string>;
   cancelSignIn(): Promise<void>;
   selectAccount(id: string): Promise<string>;
@@ -16,7 +17,7 @@ type NativeChatGPT = {
 };
 const native = Platform.OS === 'android' ? requireOptionalNativeModule<NativeChatGPT>('AccChatGPT') : null;
 export const supportsChatGPT = !!native;
-export const emptyChatGPT: ChatGPTStatus = { accounts: [], active: '', signingIn: false, message: '' };
+export const emptyChatGPT: ChatGPTStatus = { accounts: [], active: '', welcomePending: false, signingIn: false, message: '' };
 function module(): NativeChatGPT {
   if (!native) throw new Error('Direct ChatGPT sign-in needs the Android build 3 APK. It is not available in the browser preview or Expo Go.');
   return native;
@@ -38,3 +39,5 @@ export const sendChatGPT = (id: string, accountId: string, model: string, messag
 export const cancelChatGPT = (id: string) => module().cancelChat(id);
 // Native errors are fixed messages and never include remote response bodies or credentials.
 export const chatGPTError = (error: unknown) => error instanceof Error ? error.message : 'ChatGPT could not complete this action. Try again deliberately.';
+
+export const acknowledgeChatGPTPlan = async (): Promise<ChatGPTStatus> => JSON.parse(await module().acknowledgePlanUse());

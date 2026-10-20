@@ -20,6 +20,7 @@ class AccChatGPTModule : Module() {
       try { promise.resolve(engine.status()) } catch (_: Exception) { promise.reject("ACC_STORAGE", "ChatGPT account storage could not be opened. Its saved data was preserved.", null) }
     }
     AsyncFunction("beginSignIn") { id: String?, promise: Promise -> run(promise, "Could not start sign-in. Finish or cancel the current request and retry.") { engine.begin(id) } }
+    AsyncFunction("acknowledgePlanUse") { promise: Promise -> run(promise, "Could not save this preference.") { engine.acknowledgePlanUse(); engine.status() } }
     AsyncFunction("cancelSignIn") { engine.cancelSignIn() }
     AsyncFunction("selectAccount") { id: String, promise: Promise -> run(promise, "Could not switch accounts. Finish or cancel the current request first.") { engine.choose(id); engine.status() } }
     AsyncFunction("signOut") { id: String, promise: Promise -> run(promise, "Could not sign out. Finish or cancel the current request first.") { engine.signOut(id) } }

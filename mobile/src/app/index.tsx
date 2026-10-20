@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { initialWorkspace, parseWorkspace, statuses, Task, vaultTemplates, Workspace } from '../model';
-import { chatGPTStatus, ChatGPTStatus, emptyChatGPT } from '../chatgpt';
+import { acknowledgeChatGPTPlan, chatGPTStatus, ChatGPTStatus, emptyChatGPT } from '../chatgpt';
 import { Chat } from '../Chat';
 import { Connections } from '../Connections';
 import { Connection, loadConnection } from '../providers';
@@ -161,6 +161,7 @@ export default function WorkspaceScreen() {
       </View>
       {tab === 'Tasks' && <View style={s.bottomRail}><View style={[s.row, { gap: 8 }]}><View style={s.dot} /><Text style={s.label}>ADD A TASK</Text><Text style={[s.muted, s.grow]} numberOfLines={1}>{saveStatus}</Text></View><View style={s.composer}><TextInput accessibilityLabel="New task" editable={ready} value={draft} maxLength={500} onChangeText={setDraft} onSubmitEditing={addTask} style={s.input} placeholder="Enter a new task…" placeholderTextColor={C.muted} /><Button title="Add task" active disabled={!draft.trim() || !ready} onPress={addTask} /></View>{!wide && <Text numberOfLines={1} style={s.muted}>{workspace.events[0]}</Text>}</View>}
       <Modal transparent visible={modal !== null} animationType="fade" onRequestClose={() => setModal(null)}><View style={s.modalBackdrop}><View style={s.modal}><View style={s.sectionHeader}><Text style={s.heading}>{modal === 'project' ? 'New project' : 'Provider connections'}</Text><Button title="Close" onPress={() => setModal(null)} /></View>{modal === 'project' ? <><TextInput accessibilityLabel="Project name" autoFocus value={projectDraft} maxLength={80} onChangeText={setProjectDraft} placeholder="Project name" placeholderTextColor={C.muted} style={s.projectInput} /><Button title="Create project" active disabled={!projectDraft.trim()} onPress={() => { const name = projectDraft.trim(); const id = Date.now().toString(36); change(w => ({ ...w, projects: [...w.projects, { id, name }] }), `Project created: ${name}`); setProject(id); setProjectDraft(''); setModal(null); }} /></> : modal === 'providers' ? <Connections connection={connection} onChange={setConnection} chatGPT={chatGPT} refreshChatGPT={refreshChatGPT} /> : null}</View></View></Modal>
+      <Modal transparent visible={chatGPT.welcomePending} animationType="fade" onRequestClose={() => acknowledgeChatGPTPlan().then(setChatGPT).catch(() => setError('Could not save the plan notice.'))}><View style={s.modalBackdrop}><View style={s.modal}><Text style={s.heading}>You’re using your ChatGPT plan</Text><Text style={s.muted}>Eligible AI requests in ACC use your ChatGPT plan or credits allowance. Manage ACC’s access and usage limits in ChatGPT settings.</Text><Button title="Got it" active onPress={() => acknowledgeChatGPTPlan().then(setChatGPT).catch(() => setError('Could not save the plan notice.'))} /></View></View></Modal>
     </KeyboardAvoidingView>
   </SafeAreaView>;
 }

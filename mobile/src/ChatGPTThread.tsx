@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { uuid } from 'expo';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { cancelChatGPT, ChatGPTAccount, ChatGPTModel, chatGPTError, chatGPTModels, sendChatGPT } from './chatgpt';
 import { Message } from './providers';
 
@@ -83,9 +83,10 @@ export function ChatGPTThread({ account, project, openConnections }: { account?:
     try { await save({ messages: [] }); setNotice('New conversation.'); } catch { setNotice('Could not save a new conversation.'); }
   }
   return <View style={s.grow}>
-    <View style={s.context}><Text style={s.muted}>{account?.signedIn ? `${account.label} · ChatGPT plan connection` : 'Connect your ChatGPT account to begin'}</Text><Text style={s.muted}>Only this conversation is sent. Sentry and project files are not attached automatically.</Text>
+    <View style={s.context}><Text style={s.muted}>{account?.signedIn ? `${account.label} · Using ChatGPT plan` : 'Connect your ChatGPT account to begin'}</Text><Text style={s.muted}>Only this conversation is sent. Sentry and project files are not attached automatically.</Text>
       {account?.signedIn && <View style={s.row}><Pressable accessibilityRole="button" disabled={busy || loadingModels} onPress={() => setShowModels(!showModels)} style={s.button}><Text style={s.blue}>{loadingModels ? 'Loading models…' : models.find(m => m.id === model)?.name || 'Choose model'}</Text></Pressable><Pressable accessibilityRole="button" disabled={busy || loadingModels} onPress={loadModels} style={s.button}><Text style={s.muted}>Refresh models</Text></Pressable></View>}
       {showModels && <ScrollView style={{ maxHeight: 170 }}>{models.map(m => <Pressable accessibilityRole="radio" accessibilityState={{ checked: m.id === model }} key={m.id} disabled={busy} onPress={() => { setModel(m.id); setShowModels(false); }} style={s.button}><Text style={s.text}>{m.id === model ? '● ' : ''}{m.name}</Text></Pressable>)}</ScrollView>}
+      {account?.signedIn && <Pressable accessibilityRole="link" onPress={() => Linking.openURL('https://chatgpt.com/settings/usage').catch(() => setNotice('Open ChatGPT Settings → Usage to manage limits.'))}><Text style={s.blue}>Manage usage</Text></Pressable>}
     </View>
     <ScrollView ref={transcript} style={s.grow} contentContainerStyle={s.messages} onContentSizeChange={() => transcript.current?.scrollToEnd({ animated: false })}>
       {!history.messages.length && <View style={s.empty}><Text style={s.heading}>ChatGPT in ACC</Text><Text style={s.muted}>{account?.signedIn ? 'Choose an available model and send a message. Your ChatGPT account allowance and limits apply.' : 'Tap Connect ChatGPT, sign in on the official OpenAI page, then return here. No terminal setup.'}</Text>{!account?.signedIn && <Pressable accessibilityRole="button" onPress={openConnections} style={s.button}><Text style={s.blue}>Connect ChatGPT</Text></Pressable>}</View>}
