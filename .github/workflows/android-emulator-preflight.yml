@@ -1,0 +1,33 @@
+name: Android emulator preflight
+on:
+  push:
+    branches: [fix/android-build4-emulator-preflight-20261020]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  emulator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare and boot Android 16 with diagnostics
+        run: |
+          acc_cli=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)
+          test -x "$acc_cli"
+          export PATH="$(dirname "$acc_cli"):$ANDROID_HOME/platform-tools:$PATH"
+          sudo chmod a+rw /dev/kvm
+          df -h /
+          sdkmanager 'system-images;android-36;google_apis;x86_64' 'emulator' 'platform-tools'
+          echo no | avdmanager create avd --force --name acc-preflight --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          "$ANDROID_HOME/emulator/emulator" -accel-check
+          trap 'tail -100 "$RUNNER_TEMP/emulator.log"' EXIT
+          "$ANDROID_HOME/emulator/emulator" -avd acc-preflight -no-window -no-audio -no-boot-anim -no-snapshot -gpu software -memory 2048 > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          timeout 120 adb wait-for-device
+          timeout 180 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 2; done'
+          adb shell input keyevent 82
+          adb shell getprop ro.build.version.release
+          echo 'PASS: Android 16 emulator booted and accepts adb commands'
