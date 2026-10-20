@@ -93,7 +93,7 @@ export function ChatGPTThread({ account, project, openConnections }: { account?:
       {history.messages.map((m, i) => <View key={i} style={[s.message, m.role === 'user' && s.user]}><Text style={s.role}>{m.role === 'user' ? 'YOU' : 'CHATGPT'}</Text><Text selectable style={s.reply}>{m.text}</Text></View>)}
       {busy && <ActivityIndicator color="#a7cff9" />}
     </ScrollView>
-    {notice || history.problem ? <Text accessibilityRole="status" style={s.notice}>{notice || history.problem}</Text> : null}
+    {notice || history.problem ? <Text role="status" accessibilityLiveRegion="polite" style={s.notice}>{notice || history.problem}</Text> : null}
     <View style={s.row}>{busy ? <Pressable accessibilityRole="button" onPress={() => history.pending && cancelChatGPT(history.pending).then(() => setNotice('Stop requested. Any partial response is not saved as completed.')).catch(() => setNotice('Stop could not be confirmed.'))} style={s.button}><Text style={s.text}>Stop request</Text></Pressable> : <Pressable accessibilityRole="button" disabled={!ready} onPress={fresh} style={s.button}><Text style={s.text}>New conversation</Text></Pressable>}</View>
     <View style={s.composer}><TextInput accessibilityLabel="Chat message" multiline maxLength={10000} editable={ready && !busy && !history.problem} value={draft} onChangeText={setDraft} placeholder="Message ChatGPT…" placeholderTextColor="#9aabc2" style={s.input} /><Pressable accessibilityRole="button" disabled={!ready || !account?.signedIn || !model || busy || !!history.problem || !draft.trim()} onPress={send} style={s.button}><Text style={s.blue}>Send</Text></Pressable></View>
   </View>;

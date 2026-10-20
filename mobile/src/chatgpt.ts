@@ -19,7 +19,7 @@ const native = Platform.OS === 'android' ? requireOptionalNativeModule<NativeCha
 export const supportsChatGPT = !!native;
 export const emptyChatGPT: ChatGPTStatus = { accounts: [], active: '', welcomePending: false, signingIn: false, message: '' };
 function module(): NativeChatGPT {
-  if (!native) throw new Error('Direct ChatGPT sign-in needs the Android build 3 APK. It is not available in the browser preview or Expo Go.');
+  if (!native) throw new Error('Direct ChatGPT sign-in needs the Android APK with direct sign-in. It is not available in the browser preview or Expo Go.');
   return native;
 }
 export async function chatGPTStatus(): Promise<ChatGPTStatus> {

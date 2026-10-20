@@ -53,7 +53,7 @@ export function Connections({ connection, onChange, chatGPT, refreshChatGPT }: {
     <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: allowApi, disabled: busy }} disabled={busy} onPress={() => setAllowApi(!allowApi)} style={s.button}><Text style={s.notice}>{allowApi ? '☑' : '☐'} Allow separately billed API or unconfirmed billing</Text></Pressable>
     <Text style={s.text}>Off by default. Subscription sign-in does not guarantee quota or model eligibility. No automatic provider or billing fallback.</Text>
     <View style={s.row}><Pressable accessibilityRole="button" disabled={busy} onPress={connect} style={s.button}><Text style={s.blue}>{busy ? 'Checking…' : 'Pair and check both'}</Text></Pressable>{connection && <Pressable accessibilityRole="button" disabled={busy} onPress={forget} style={s.button}><Text style={s.text}>Forget pairing</Text></Pressable>}</View>
-    {message ? <Text accessibilityRole="status" style={s.notice}>{message}</Text> : null}
+    {message ? <Text role="status" accessibilityLiveRegion="polite" style={s.notice}>{message}</Text> : null}
     {statuses.map(p => <Text key={p.id} style={s.text}>{providerNames[p.id]} · {p.state.replaceAll('_', ' ')} · {p.billing} billing</Text>)}
     <Text style={s.heading}>First-time runtime setup</Text>
     <Text style={s.text}>Android-local setup is experimental: Termux runs a Linux environment for the official provider binaries. It is not embedded in this APK. Keep that terminal running. No paid always-on server is required.</Text>

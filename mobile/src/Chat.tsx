@@ -129,7 +129,7 @@ function Thread({ connection, project, provider, openConnections }: { connection
       {history.messages.map((m, i) => <View key={i} style={[s.message, m.role === 'user' && s.user]}><Text style={s.role}>{m.role === 'user' ? 'YOU' : providerNames[provider].toUpperCase()}</Text><Text selectable style={s.reply}>{m.text}</Text></View>)}
       {working && <ActivityIndicator color="#a7cff9" />}
     </ScrollView>
-    {notice || history.problem ? <Text accessibilityRole="status" style={s.notice}>{notice || history.problem}</Text> : null}
+    {notice || history.problem ? <Text role="status" accessibilityLiveRegion="polite" style={s.notice}>{notice || history.problem}</Text> : null}
     <View style={s.actions}>
       {history.pending ? <><Pressable accessibilityRole="button" disabled={working} onPress={() => watch(history.pending!)} style={s.button}><Text style={s.blue}>Check response</Text></Pressable><Pressable accessibilityRole="button" onPress={cancel} style={s.button}><Text style={s.text}>Stop request</Text></Pressable>{!working && <Pressable accessibilityRole="button" onPress={keepInterrupted} style={s.button}><Text style={s.text}>Keep as interrupted</Text></Pressable>}</> : <Pressable accessibilityRole="button" disabled={!ready || working} onPress={fresh} style={s.button}><Text style={s.text}>New conversation</Text></Pressable>}
     </View>

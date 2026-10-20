@@ -7,11 +7,13 @@ permissions:
   contents: read
 concurrency:
   group: acc-android-native-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
-  baseline:
+  candidate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 40
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,18 +23,28 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Prepare baseline source
+      - name: Prepare source and run focused checks
         run: |
-          git fetch origin 72d10fd072fa99190ce5f8b64d804d487ea211b9
-          git worktree add --detach "$RUNNER_TEMP/acc-baseline" 72d10fd072fa99190ce5f8b64d804d487ea211b9
-          cd "$RUNNER_TEMP/acc-baseline/mobile"
+          cd mobile
           npm ci --no-audit --no-fund
+          unset TYPESAFE_API_KEY
+          npm run test:native-props
+          unset TYPESAFE_API_KEY
+          npm run typecheck
+          unset TYPESAFE_API_KEY
+          npm run lint
+          unset TYPESAFE_API_KEY
+          npm run test:providers
+          cd ..
+          unset TYPESAFE_API_KEY
+          python3 -m unittest discover -s tests -p test_mobile_runtime.py
+          cd mobile
           npx expo prebuild --platform android --no-install
-      - name: Build standalone x86 emulator APK
+      - name: Native unit tests and standalone APK for tablet and emulator
         run: |
           unset TYPESAFE_API_KEY
-          cd "$RUNNER_TEMP/acc-baseline/mobile/android"
-          ./gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
+          cd mobile/android
+          ./gradlew :acc-chatgpt:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --max-workers=2
       - name: Prepare Android emulator
         run: |
           sudo chmod a+rw /dev/kvm
@@ -45,8 +57,29 @@ jobs:
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
           adb shell input keyevent 82
-      - name: Reproduce connection-panel crash
+      - name: Test actual native provider setup panel
         run: |
           unset TYPESAFE_API_KEY
-          adb install -r "$RUNNER_TEMP/acc-baseline/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          adb install -r mobile/android/app/build/outputs/apk/release/app-release.apk
           python3 mobile/scripts/android-smoke.py
+      - name: Verify numbered APK and upgrade signing identity
+        run: |
+          mkdir -p mobile/builds
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
+          curl -fL --retry 2 https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-3/ACC-Android-build-3.apk -o "$RUNNER_TEMP/build3.apk"
+          acc_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$acc_tools/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/build3.apk" > "$RUNNER_TEMP/build3-signature.txt"
+          "$acc_tools/apksigner" verify --verbose --print-certs mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-signature.txt"
+          "$acc_tools/zipalign" -c -P 16 -v 4 mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-alignment.txt"
+          "$acc_tools/aapt" dump badging mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-badging.txt"
+          "$acc_tools/aapt" dump xmltree mobile/builds/ACC-Android-build-4.apk AndroidManifest.xml > "$RUNNER_TEMP/build4-manifest.txt"
+          python3 mobile/scripts/verify-release.py
+      - name: Publish verified personal-test APK without Actions artifact storage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view android-build-4 >/dev/null 2>&1; then
+            echo 'Build 4 already exists; refusing to overwrite a numbered release.'
+            exit 1
+          fi
+          gh release create android-build-4 mobile/builds/ACC-Android-build-4.apk mobile/builds/build4-verification.json --target "$GITHUB_SHA" --prerelease --title 'ACC Android Build 4 — connection-panel crash fix' --notes-file mobile/builds/build4-release-notes.md

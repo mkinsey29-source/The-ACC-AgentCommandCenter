@@ -24,7 +24,7 @@ def healthy():
         print(crash)
         raise AssertionError("ACC left the foreground or its process terminated")
 
-def tap(label):
+def tap(label, scroll=False):
     end = time.monotonic() + 30
     while time.monotonic() < end:
         healthy()
@@ -34,9 +34,13 @@ def tap(label):
             n = candidates[0]
             bounds = list(map(int, re.findall(r"\d+", n.get("bounds", ""))))
             assert len(bounds) == 4, label
-            adb("shell", "input", "tap", str((bounds[0] + bounds[2]) // 2), str((bounds[1] + bounds[3]) // 2))
-            time.sleep(1)
-            return
+            if bounds[2] > bounds[0] and bounds[3] > bounds[1]:
+                adb("shell", "input", "tap", str((bounds[0] + bounds[2]) // 2), str((bounds[1] + bounds[3]) // 2))
+                time.sleep(1)
+                return
+        if scroll:
+            size = list(map(int, re.findall(r"\d+", adb("shell", "wm", "size"))))[-2:]
+            adb("shell", "input", "swipe", str(size[0] // 2), str(size[1] * 3 // 4), str(size[0] // 2), str(size[1] // 3), "300")
         time.sleep(.5)
     raise AssertionError("UI control not found: " + label)
 
@@ -59,6 +63,19 @@ try:
     tap("Connect ChatGPT")
     expect("Provider connections")
     print("PASS: ChatGPT Connect ChatGPT opens native panel")
+    # A local validation error exercises the status Text which crashed Android
+    # with accessibilityRole="status". No real pairing secret or network needed.
+    tap("Advanced: use an existing runtime", scroll=True)
+    tap("Pair and check both", scroll=True)
+    expect("Invalid saved connection")
+    print("PASS: invalid runtime pairing renders a native status notice")
+    adb("shell", "input", "keyevent", "4")
+    time.sleep(1)
+    healthy()
+    expect("Connect ChatGPT")
+    print("PASS: Android Back dismisses the panel without leaving ACC")
+    tap("Connect ChatGPT")
+    expect("Provider connections")
     tap("Close")
     for _ in range(3):
         tap("Connections")
