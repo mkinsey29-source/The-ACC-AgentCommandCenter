@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, AppState, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { initialWorkspace, parseWorkspace, statuses, Task, vaultTemplates, Workspace } from '../model';
+import { chatGPTStatus, ChatGPTStatus, emptyChatGPT } from '../chatgpt';
 import { Chat } from '../Chat';
 import { Connections } from '../Connections';
 import { Connection, loadConnection } from '../providers';
@@ -29,6 +30,8 @@ export default function WorkspaceScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<'project' | 'providers' | null>(null);
   const [connection, setConnection] = useState<Connection | null>(null);
+  const [chatGPT, setChatGPT] = useState<ChatGPTStatus>(emptyChatGPT);
+  async function refreshChatGPT() { setChatGPT(await chatGPTStatus()); }
   const [projectDraft, setProjectDraft] = useState('');
   const [vault, setVault] = useState<Vault | null>(null);
   const [note, setNote] = useState('consolidated_summary.md');
@@ -37,7 +40,7 @@ export default function WorkspaceScreen() {
   const [noteReady, setNoteReady] = useState(false);
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteError, setNoteError] = useState('');
-  const [terminal, setTerminal] = useState(['ACC local console · build 2', 'Type help for workspace commands. Shell execution is not connected.']);
+  const [terminal, setTerminal] = useState(['ACC local console · build 3', 'Type help for workspace commands. Shell execution is not connected.']);
   const [command, setCommand] = useState('');
   const writeQueue = useRef(Promise.resolve());
   const noteQueue = useRef(0);
@@ -53,6 +56,15 @@ export default function WorkspaceScreen() {
     openVault().then(v => { if (alive) setVault(v); }).catch(() => { if (alive) setNoteError('Cannot open the saved vault. Check the folder permission in Android settings.'); });
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    async function refresh() { try { const value = await chatGPTStatus(); if (alive) setChatGPT(value); } catch { if (alive) setError('ChatGPT account storage could not be opened. Saved data was preserved.'); } }
+    void refresh();
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') void refresh(); });
+    const timer = modal === 'providers' || chatGPT.signingIn ? setInterval(() => void refresh(), 2000) : undefined;
+    return () => { alive = false; subscription.remove(); if (timer) clearInterval(timer); };
+  }, [modal, chatGPT.signingIn]);
 
   useEffect(() => {
     if (!ready) return;
@@ -129,15 +141,15 @@ export default function WorkspaceScreen() {
 
   return <SafeAreaView style={s.safe}>
     <KeyboardAvoidingView style={s.grow} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={s.header}><View style={s.brandMark}><Text style={s.brandIcon}>A</Text></View><View style={s.grow}><Text style={s.brand}>ACC <Text style={s.brandSub}>/ COMMAND CENTER</Text></Text><Text style={s.muted}>{currentProject?.name || 'Workspace'} · Android build 2</Text></View><Button title="Connections" onPress={() => setModal('providers')} /></View>
+      <View style={s.header}><View style={s.brandMark}><Text style={s.brandIcon}>A</Text></View><View style={s.grow}><Text style={s.brand}>ACC <Text style={s.brandSub}>/ COMMAND CENTER</Text></Text><Text style={s.muted}>{currentProject?.name || 'Workspace'} · Android build 3</Text></View><Button title="Connections" onPress={() => setModal('providers')} /></View>
       <View style={s.projectRow}><ScrollView horizontal contentContainerStyle={{ gap: 6, alignItems: 'center' }}>{workspace.projects.map(p => <Button key={p.id} title={p.name} active={p.id === project} onPress={() => { setProject(p.id); setSelected(null); }} />)}<Button title="+ Project" disabled={!ready} onPress={() => setModal('project')} /></ScrollView></View>
       {error ? <Text accessibilityRole="alert" style={s.warning}>{error}</Text> : null}
       {!ready ? <ActivityIndicator color={C.blue} style={{ margin: 10 }} /> : null}
       <View style={s.body}>
-        {wide && tab !== 'Terminal' && <View style={s.leftRail}><Label>WORKSPACE</Label><Text style={s.heading}>{currentProject?.name}</Text><Text style={s.muted}>Local project · chat and planning</Text><View style={s.divider} /><Label>NEEDS ATTENTION</Label><Pressable accessibilityRole="button" onPress={() => setModal('providers')} style={s.attention}><Text style={s.amber}>{connection ? 'Open provider connections' : 'Connect your first provider'}</Text><Text style={s.muted}>ChatGPT / Codex or Claude</Text></Pressable><View style={s.divider} /><Label>PROGRESS</Label><Text style={s.bigNumber}>{done}<Text style={s.smallNumber}> / {tasks.length}</Text></Text><Text style={s.muted}>Tasks marked done</Text><View style={s.progress}><View style={[s.progressFill, { width: `${tasks.length ? done / tasks.length * 100 : 0}%` }]} /></View><View style={s.divider} /><Label>LOCAL MEMORY</Label><Text style={s.muted}>Readable Markdown. Your decisions, lessons and handoffs stay on this device.</Text><Button title="Open Sentry" onPress={() => setTab('Memory')} /></View>}
+        {wide && tab !== 'Terminal' && <View style={s.leftRail}><Label>WORKSPACE</Label><Text style={s.heading}>{currentProject?.name}</Text><Text style={s.muted}>Local project · chat and planning</Text><View style={s.divider} /><Label>NEEDS ATTENTION</Label><Pressable accessibilityRole="button" onPress={() => setModal('providers')} style={s.attention}><Text style={s.amber}>{connection || chatGPT.accounts.some(a => a.signedIn) ? 'Open provider connections' : 'Connect your first provider'}</Text><Text style={s.muted}>ChatGPT account · optional runtimes</Text></Pressable><View style={s.divider} /><Label>PROGRESS</Label><Text style={s.bigNumber}>{done}<Text style={s.smallNumber}> / {tasks.length}</Text></Text><Text style={s.muted}>Tasks marked done</Text><View style={s.progress}><View style={[s.progressFill, { width: `${tasks.length ? done / tasks.length * 100 : 0}%` }]} /></View><View style={s.divider} /><Label>LOCAL MEMORY</Label><Text style={s.muted}>Readable Markdown. Your decisions, lessons and handoffs stay on this device.</Text><Button title="Open Sentry" onPress={() => setTab('Memory')} /></View>}
         <View style={s.center}>
           <View style={s.tabs}>{(['Chat', 'Agents', 'Tasks', 'Terminal', 'Memory'] as Tab[]).map(name => <Pressable key={name} accessibilityRole="tab" accessibilityState={{ selected: tab === name }} onPress={() => setTab(name)} style={[s.tab, tab === name && s.tabActive]}><Text style={[s.tabText, tab === name && { color: C.blue }]}>{name.toUpperCase()}</Text></Pressable>)}</View>
-          {tab === 'Chat' ? <Chat connection={connection} project={project} openConnections={() => setModal('providers')} /> : tab === 'Memory' ? memory : tab === 'Tasks' ? <>
+          {tab === 'Chat' ? <Chat account={chatGPT.accounts.find(a => a.id === chatGPT.active)} connection={connection} project={project} openConnections={() => setModal('providers')} /> : tab === 'Memory' ? memory : tab === 'Tasks' ? <>
             <View style={s.sectionHeader}><View><Text style={s.heading}>Task board</Text><Text style={s.muted}>{tasks.length} tasks · {done} done · saved locally</Text></View><Text style={s.badge}>MANUAL</Text></View>
             <ScrollView style={s.grow} contentContainerStyle={{ padding: 14, gap: 10 }}>
               {tasks.map((task, i) => <Pressable accessibilityRole="button" accessibilityLabel={`Select task: ${task.title}`} key={task.id} onPress={() => setSelected(task.id)} style={[s.task, selected === task.id && s.taskSelected]}><View style={[s.row, { gap: 12 }]}><Text style={s.taskNumber}>{String(i + 1).padStart(2, '0')}</Text><View style={s.grow}><Text style={s.taskTitle}>{task.title}</Text><Text style={s.muted}>{currentProject.name} · Unassigned</Text></View></View><View style={[s.row, { justifyContent: 'space-between', marginTop: 10 }]}><Text style={[s.status, { color: task.status === 'Done' ? C.green : task.status === 'Review' ? C.amber : C.blue }]}>{task.status}</Text><Button title="Change status" disabled={!ready} onPress={() => advance(task)} /></View></Pressable>)}
@@ -148,7 +160,7 @@ export default function WorkspaceScreen() {
         {wide && tab === 'Tasks' && <View style={s.rightRail}><Label>TASK DETAILS</Label><Text style={s.heading}>{selectedTask?.title || 'Select a task'}</Text><Text style={s.muted}>{selectedTask ? `${selectedTask.status} · manual status` : 'Inspect a task from the board.'}</Text><View style={s.divider} /><Label>EXECUTION</Label><Text style={s.muted}>Tasks are manual planning items. Use Chat for provider conversations; automated task execution is not connected yet.</Text><View style={s.divider} /><Label>PLAY-BY-PLAY</Label>{workspace.events.slice(0, 5).map((event, i) => <Text key={i} style={s.event}>{event}</Text>)}</View>}
       </View>
       {tab === 'Tasks' && <View style={s.bottomRail}><View style={[s.row, { gap: 8 }]}><View style={s.dot} /><Text style={s.label}>ADD A TASK</Text><Text style={[s.muted, s.grow]} numberOfLines={1}>{saveStatus}</Text></View><View style={s.composer}><TextInput accessibilityLabel="New task" editable={ready} value={draft} maxLength={500} onChangeText={setDraft} onSubmitEditing={addTask} style={s.input} placeholder="Enter a new task…" placeholderTextColor={C.muted} /><Button title="Add task" active disabled={!draft.trim() || !ready} onPress={addTask} /></View>{!wide && <Text numberOfLines={1} style={s.muted}>{workspace.events[0]}</Text>}</View>}
-      <Modal transparent visible={modal !== null} animationType="fade" onRequestClose={() => setModal(null)}><View style={s.modalBackdrop}><View style={s.modal}><View style={s.sectionHeader}><Text style={s.heading}>{modal === 'project' ? 'New project' : 'Provider connections'}</Text><Button title="Close" onPress={() => setModal(null)} /></View>{modal === 'project' ? <><TextInput accessibilityLabel="Project name" autoFocus value={projectDraft} maxLength={80} onChangeText={setProjectDraft} placeholder="Project name" placeholderTextColor={C.muted} style={s.projectInput} /><Button title="Create project" active disabled={!projectDraft.trim()} onPress={() => { const name = projectDraft.trim(); const id = Date.now().toString(36); change(w => ({ ...w, projects: [...w.projects, { id, name }] }), `Project created: ${name}`); setProject(id); setProjectDraft(''); setModal(null); }} /></> : modal === 'providers' ? <Connections connection={connection} onChange={setConnection} /> : null}</View></View></Modal>
+      <Modal transparent visible={modal !== null} animationType="fade" onRequestClose={() => setModal(null)}><View style={s.modalBackdrop}><View style={s.modal}><View style={s.sectionHeader}><Text style={s.heading}>{modal === 'project' ? 'New project' : 'Provider connections'}</Text><Button title="Close" onPress={() => setModal(null)} /></View>{modal === 'project' ? <><TextInput accessibilityLabel="Project name" autoFocus value={projectDraft} maxLength={80} onChangeText={setProjectDraft} placeholder="Project name" placeholderTextColor={C.muted} style={s.projectInput} /><Button title="Create project" active disabled={!projectDraft.trim()} onPress={() => { const name = projectDraft.trim(); const id = Date.now().toString(36); change(w => ({ ...w, projects: [...w.projects, { id, name }] }), `Project created: ${name}`); setProject(id); setProjectDraft(''); setModal(null); }} /></> : modal === 'providers' ? <Connections connection={connection} onChange={setConnection} chatGPT={chatGPT} refreshChatGPT={refreshChatGPT} /> : null}</View></View></Modal>
     </KeyboardAvoidingView>
   </SafeAreaView>;
 }
