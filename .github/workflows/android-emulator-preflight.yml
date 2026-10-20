@@ -22,7 +22,15 @@ jobs:
           sudo chmod a+rw /dev/kvm
           df -h /
           sdkmanager 'system-images;android-36;google_apis;x86_64' 'emulator' 'platform-tools'
-          echo no | avdmanager create avd --force --name acc-preflight --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          export ANDROID_SDK_HOME="$RUNNER_TEMP/acc-android-user"
+          export ANDROID_USER_HOME="$ANDROID_SDK_HOME/.android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --force --name acc-preflight --package 'system-images;android-36;google_apis;x86_64' --device pixel_6 --path "$ANDROID_AVD_HOME/acc-preflight.avd"
+          avdmanager list avd
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          test -f "$ANDROID_AVD_HOME/acc-preflight.ini"
           "$ANDROID_HOME/emulator/emulator" -accel-check
           trap 'tail -100 "$RUNNER_TEMP/emulator.log"' EXIT
           "$ANDROID_HOME/emulator/emulator" -avd acc-preflight -no-window -no-audio -no-boot-anim -no-snapshot -gpu software -memory 2048 > "$RUNNER_TEMP/emulator.log" 2>&1 &
