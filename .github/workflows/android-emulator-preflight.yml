@@ -3,13 +3,25 @@ on:
   push:
     branches: [fix/android-build4-emulator-preflight-20261020]
   workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: Optional existing Build 4 candidate release to test
+        type: string
+        default: ''
+      publish:
+        description: Publish Build 4 only after both native layout checks pass
+        type: boolean
+        default: false
 permissions:
-  contents: read
+  contents: write
 jobs:
   emulator:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/android-build4-provider-crash-20261020
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -39,3 +51,49 @@ jobs:
           adb shell input keyevent 82
           adb shell getprop ro.build.version.release
           echo 'PASS: Android 16 emulator booted and accepts adb commands'
+      - name: Verify and install the preserved APK
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACC_CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: |
+          unset TYPESAFE_API_KEY
+          [[ "$ACC_CANDIDATE_TAG" =~ ^android-build-4(-candidate-[0-9]+-[0-9]+)?$ ]]
+          mkdir -p "$RUNNER_TEMP/acc-apk"
+          gh release download "$ACC_CANDIDATE_TAG" --pattern ACC-Android-build-4.apk --pattern build4-verification.json --dir "$RUNNER_TEMP/acc-apk"
+          python3 - <<'CHECK'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'acc-apk'
+          metadata=json.loads((root/'build4-verification.json').read_text())
+          assert hashlib.sha256((root/'ACC-Android-build-4.apk').read_bytes()).hexdigest()==metadata['sha256']
+          assert metadata['versionCode']==4 and metadata['versionName']=='0.4.0'
+          print('Verified exact preserved APK bytes from source', metadata['source_sha'])
+          CHECK
+          adb install -r "$RUNNER_TEMP/acc-apk/ACC-Android-build-4.apk"
+      - name: Native phone and tablet setup checks on the same APK
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        run: |
+          unset TYPESAFE_API_KEY
+          python3 mobile/scripts/android-smoke.py
+          adb shell wm size 1600x2560
+          adb shell wm density 213
+          adb shell am force-stop com.agentcommandcenter.acc
+          unset TYPESAFE_API_KEY
+          python3 mobile/scripts/android-smoke.py
+      - name: Publish the verified candidate after native phone and tablet checks
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != '' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          acc_source=$(python3 -c 'import json,os,pathlib; print(json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"acc-apk/build4-verification.json").read_text())["source_sha"])')
+          if gh release view android-build-4 >/dev/null 2>&1; then
+            mkdir -p "$RUNNER_TEMP/acc-published"
+            gh release download android-build-4 --pattern build4-verification.json --dir "$RUNNER_TEMP/acc-published"
+            python3 - <<'CHECK'
+          import json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          assert json.loads((root/'acc-apk/build4-verification.json').read_text())['sha256']==json.loads((root/'acc-published/build4-verification.json').read_text())['sha256'], 'Build 4 exists with different bytes; refusing replacement'
+          CHECK
+            exit 0
+          fi
+          gh release create android-build-4 "$RUNNER_TEMP/acc-apk/ACC-Android-build-4.apk" "$RUNNER_TEMP/acc-apk/build4-verification.json" --target "$acc_source" --prerelease --title 'ACC Android Build 4 — connection-panel crash fix' --notes 'Personal testing APK. Shared setup panels, Android status notices and empty-secret validation corrected. The same APK passed Android 16 phone and tablet setup-panel, validation-notice, Back and project-panel checks. Actual Samsung upgrade and provider sign-in/reply acceptance remain pending. Direct ChatGPT setup needs no Termux; simple Claude subscription onboarding remains unfinished. Same development signer; OTA and backup disabled. Source and SHA-256 are in the verification JSON.'
