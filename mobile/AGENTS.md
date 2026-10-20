@@ -1,5 +1,11 @@
 This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
 
+## Owner-approved Android workflow — 2026-10-19
+
+Follow the Android scope and standing authorization in the repository AGENTS.md. Deliver numbered installable APKs with OTA disabled. Use local Android builds when the build environment is available; EAS is an optional build service, not a publication authorization. Do not enable EAS Update or submit to a store without a separate request. Preserve the installed package/signing identity and existing workspace/Sentry data when preparing upgrades.
+
+Default onboarding must not expect the owner to install Termux, Linux or CLIs manually. Prefer supported account sign-in using the system browser; explain provider-specific limitations honestly. Keep optional runtime pairing under advanced setup. Do not claim working provider access until an actual account request completes. Routine implementation, focused checks, commits/pushes, draft PRs and personal test APK delivery are already authorized; historical desktop review rounds do not block mobile-only work.
+
 ## Expo has changed — do not trust your training data
 
 Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
@@ -31,7 +37,7 @@ Run lint and typecheck before declaring any task done.
 
 ## Building with EAS
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
+EAS may build and sign an APK in the cloud when needed (`eas build`). Store submission and OTA updates are not part of the authorized personal-testing workflow; OTA remains disabled. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
 Docs: https://docs.expo.dev/eas/index.md
 
 ## Rules
