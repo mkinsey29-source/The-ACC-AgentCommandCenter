@@ -3,10 +3,15 @@ on:
   push:
     branches: [fix/android-build4-provider-crash-20261020]
   workflow_dispatch:
+    inputs:
+      baseline:
+        description: Also reproduce the pinned Build 3 baseline
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
-  group: acc-android-native-${{ github.ref }}
+  group: acc-android-native-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 jobs:
   candidate:
@@ -90,6 +95,7 @@ jobs:
           fi
           gh release create android-build-4 mobile/builds/ACC-Android-build-4.apk mobile/builds/build4-verification.json --target "$GITHUB_SHA" --prerelease --title 'ACC Android Build 4 — connection-panel crash fix' --notes-file mobile/builds/build4-release-notes.md
   baseline:
+    if: github.event_name == 'workflow_dispatch' && inputs.baseline
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
