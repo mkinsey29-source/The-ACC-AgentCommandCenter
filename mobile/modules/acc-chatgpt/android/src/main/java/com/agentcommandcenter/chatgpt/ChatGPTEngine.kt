@@ -147,21 +147,21 @@ internal class ChatGPTEngine(private val context: Context) {
         a.server.close()
         // Retain an issued registration even if exchange fails (for example invalid_grant).
         // It has no tokens or trusted identity and does not replace an active account.
-        val registrationId = synchronized(lock) {
-          if (attempt !== a) return
+        SignInCompletion.run(register = { synchronized(lock) {
+          check(attempt === a)
           if (accountId != null) accountId else {
             val data = load(); val accounts = data.getJSONArray("accounts")
             val pending = JSONObject().put("id", UUID.randomUUID().toString()).put("client_id", accepted.second).put("subject", "")
             pending.put("label", "Unfinished sign-in · " + pending.getString("id").take(6)); accounts.put(pending); save(data)
             pending.getString("id")
           }
-        }
-        val response = json(OAuthCore.ISSUER + "/api/accounts/oauth/token", mapOf("grant_type" to "authorization_code", "client_id" to accepted.second, "code" to accepted.first,
-          "code_verifier" to a.verifier, "redirect_uri" to "http://127.0.0.1:${a.server.localPort}/auth/callback", "resource" to OAuthCore.RESOURCE))
-        val scopes = OAuthCore.scopes(response)
-        val claims = OAuthCore.validateId(response.getString("id_token"), json(OAuthCore.ISSUER + "/.well-known/jwks.json"), accepted.second, a.nonce, a.subject)
-        synchronized(lock) {
-          if (attempt !== a) return
+        } }, exchange = {
+          json(OAuthCore.ISSUER + "/api/accounts/oauth/token", mapOf("grant_type" to "authorization_code", "client_id" to accepted.second, "code" to accepted.first,
+            "code_verifier" to a.verifier, "redirect_uri" to "http://127.0.0.1:${a.server.localPort}/auth/callback", "resource" to OAuthCore.RESOURCE))
+        }, loadKeys = { json(OAuthCore.ISSUER + "/.well-known/jwks.json") }, validateIdentity = { response, keys ->
+          OAuthCore.validateId(response.getString("id_token"), keys, accepted.second, a.nonce, a.subject)
+        }, store = { registrationId, response, scopes, claims -> synchronized(lock) {
+          check(attempt === a)
           val data = load()
           val target = account(data, registrationId)
           target.put("client_id", accepted.second).put("subject", claims.getString("sub"))
@@ -169,12 +169,13 @@ internal class ChatGPTEngine(private val context: Context) {
           applyTokens(target, response, scopes)
           data.put("active", target.getString("id")); save(data)
           attempt = null; loginMessage = "ChatGPT account connected. Choose a model and send a message to verify access."
-        }
+        } })
         return
       }
       synchronized(lock) { if (attempt === a) { attempt = null; loginMessage = "Sign-in timed out. Tap Continue with ChatGPT to try again." } }
-    } catch (_: Exception) {
-      synchronized(lock) { if (attempt === a) { attempt = null; loginMessage = "Sign-in could not be completed. Select any unfinished registration below to retry. Your existing accounts were preserved." } }
+    } catch (e: Exception) {
+      val failure = e as? SignInFailure ?: SignInFailure(SignInStage.CALLBACK, e)
+      synchronized(lock) { if (attempt === a) { attempt = null; loginMessage = failure.userMessage() } }
     } finally { try { a.server.close() } catch (_: Exception) {} }
   }
   private fun applyTokens(target: JSONObject, response: JSONObject, scopes: List<String>) {
@@ -267,7 +268,10 @@ internal class ChatGPTEngine(private val context: Context) {
   }
   private fun request(url: String, body: String? = null, contentType: String = "application/json", token: String? = null): Reply {
     connection(url, body, contentType, token).execute().use { response ->
-      if (response.code !in 200..299) return Reply(response.code, "")
+      if (response.code !in 200..299) {
+        // Bound parsing, retain only allowlisted OAuth identifiers, discard raw body.
+        throw SignInHttpFailure.from(response.code, response.peekBody(4096).string())
+      }
       val source = requireNotNull(response.body).source()
       require(!source.request(1000001))
       return Reply(response.code, source.readUtf8())

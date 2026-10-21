@@ -10,24 +10,24 @@ from pathlib import Path
 from apk_signers import require_same_signers
 
 scratch = Path(os.environ['RUNNER_TEMP'])
-apk = Path('mobile/builds/ACC-Android-build-4.apk')
+apk = Path('mobile/builds/ACC-Android-build-5.apk')
 old = (scratch / 'build3-signature.txt').read_text()
-new = (scratch / 'build4-signature.txt').read_text()
+new = (scratch / 'build5-signature.txt').read_text()
 certificates = require_same_signers(old, new)
 assert 'Verified using v2 scheme (APK Signature Scheme v2): true' in new
-badging = (scratch / 'build4-badging.txt').read_text()
-assert "name='com.agentcommandcenter.acc' versionCode='4' versionName='0.4.0'" in badging
+badging = (scratch / 'build5-badging.txt').read_text()
+assert "name='com.agentcommandcenter.acc' versionCode='5' versionName='0.5.0'" in badging
 assert "sdkVersion:'24'" in badging and "targetSdkVersion:'36'" in badging
-manifest = (scratch / 'build4-manifest.txt').read_text()
+manifest = (scratch / 'build5-manifest.txt').read_text()
 assert re.search(r'android:allowBackup[^\n]*0x0\b', manifest)
 assert re.search(r'expo\.modules\.updates\.ENABLED[^\n]*\n[^\n]*android:value[^\n]*0x0\b', manifest)
-metadata = {'source_sha': os.environ.get('ACC_APK_SOURCE_SHA', os.environ['GITHUB_SHA']), 'verification_sha': os.environ['GITHUB_SHA'], 'bytes': apk.stat().st_size, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'same_signer_as_build3': True, 'versionCode': 4, 'versionName': '0.4.0'}
+metadata = {'source_sha': os.environ.get('ACC_APK_SOURCE_SHA', os.environ['GITHUB_SHA']), 'verification_sha': os.environ['GITHUB_SHA'], 'bytes': apk.stat().st_size, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'same_signer_as_build3': True, 'versionCode': 5, 'versionName': '0.5.0'}
 metadata['certificate_sha256'] = sorted(certificates)
 metadata['packaging_verified'] = True
 reports = [p for p in Path('mobile').rglob('TEST-*.xml') if 'test-results/testDebugUnitTest' in p.as_posix()]
 assert reports, 'Native unit test reports missing'
 metadata['native_unit_tests'] = {key: sum(int(ET.parse(p).getroot().get(key, '0')) for p in reports) for key in ['tests', 'failures', 'errors', 'skipped']}
-assert metadata['native_unit_tests']['tests'] > 0
+assert metadata['native_unit_tests']['tests'] >= 11
 assert all(metadata['native_unit_tests'][key] == 0 for key in ['failures', 'errors', 'skipped'])
 with zipfile.ZipFile(apk) as z:
     metadata['abis'] = sorted({p.split('/')[1] for p in z.namelist() if p.startswith('lib/') and p.endswith('.so')})
@@ -45,10 +45,10 @@ with zipfile.ZipFile(apk) as z:
     metadata['hermes_version'] = struct.unpack_from('<I', z.read('assets/index.android.bundle'), 8)[0]
     assert metadata['hermes_version'] == 99
     assert any(b'AccChatGPT' in z.read(p) for p in z.namelist() if p.endswith('.dex'))
-Path('mobile/builds/build4-verification.json').write_text(json.dumps(metadata, indent=2) + '\n')
-Path('mobile/builds/build4-release-notes.md').write_text(
-    'Personal Android test APK. Fixes provider-panel native window handling and Android status-message roles.\n\n'
-    'Install over the existing app; open Claude → Set up connections or ChatGPT → Connect ChatGPT. '
+Path('mobile/builds/build5-verification.json').write_text(json.dumps(metadata, indent=2) + '\n')
+Path('mobile/builds/build5-release-notes.md').write_text(
+    'Personal Android test APK. Identifies sign-in failure stages with safe diagnostics; the Samsung connection failure is not yet diagnosed or fixed.\n\n'
+    'Install over the existing app; open Connections → Continue with ChatGPT, complete browser sign-in and return to ACC. If it fails, report only the ACC-SIGNIN diagnostic shown inside ACC. '
     'The same APK passed native Android 16 emulator panel open/close/back and provider-setup smoke checks. '
     'A real ChatGPT sign-in and completed model reply still need physical-device acceptance. '
     'Simple Claude subscription onboarding remains unfinished; its runtime setup is Advanced. '
