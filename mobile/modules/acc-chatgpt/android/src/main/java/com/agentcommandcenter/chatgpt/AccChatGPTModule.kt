@@ -11,7 +11,7 @@ class AccChatGPTModule : Module() {
   private fun run(promise: Promise, message: String, block: () -> Any?) {
     worker.execute {
       try { promise.resolve(block()) }
-      catch (_: Exception) { promise.reject("ACC_CHATGPT", message, null) }
+      catch (error: Exception) { promise.reject("ACC_CHATGPT", (error as? ChatFailure)?.userMessage() ?: message, null) }
     }
   }
   override fun definition() = ModuleDefinition {

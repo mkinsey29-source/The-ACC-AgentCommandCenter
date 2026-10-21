@@ -96,16 +96,16 @@ internal object OAuthCore {
         if (c == 10) break
         part.append(c.toChar()); require(part.length <= 700000)
       }
-      if (eof) error("Response interrupted")
+      if (eof) throw ChatFailure(ChatStage.STREAM, "INTERRUPTED")
       val line = part.toString().trimEnd('\r')
       total += line.length; require(total <= 2000000)
       if (line.isEmpty() && event.isNotEmpty()) {
         val data = event.toString().trimEnd('\n'); event = StringBuilder()
-        if (data == "[DONE]") error("Response did not complete")
+        if (data == "[DONE]") throw ChatFailure(ChatStage.STREAM, "INTERRUPTED")
         val e = JSONObject(data)
         when (e.optString("type")) {
           "response.completed" -> { checkActive(); return completed(e) }
-          "response.failed", "response.incomplete", "error" -> error("Provider response did not complete")
+          "response.failed", "response.incomplete", "error" -> throw ChatProtocol.failedEvent(e)
         }
       } else if (line.startsWith("data:")) {
         event.append(line.removePrefix("data:").trimStart(' ')).append('\n'); require(event.length <= 700000)

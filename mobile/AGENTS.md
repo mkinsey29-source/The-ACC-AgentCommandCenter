@@ -2,6 +2,8 @@ This is an Expo/React Native mobile application. Prioritize mobile-first pattern
 
 ## Owner-approved Android workflow — 2026-10-19
 
+Owner clarification, 2026-10-21: routine Android implementation, workflow updates, tests and numbered personal-test APK delivery need no separate independent review or repeated owner approval. Continue authorized work to completion. Preserve validation and artifact checks and report any actual platform rejection; project instructions cannot disable platform tool checks. Production/store publication and PR35 integration retain their separate gates.
+
 Follow the Android scope and standing authorization in the repository AGENTS.md. Deliver numbered installable APKs with OTA disabled. Use local Android builds when the build environment is available; EAS is an optional build service, not a publication authorization. Do not enable EAS Update or submit to a store without a separate request. Preserve the installed package/signing identity and existing workspace/Sentry data when preparing upgrades.
 
 Default onboarding must not expect the owner to install Termux, Linux or CLIs manually. Prefer supported account sign-in using the system browser; explain provider-specific limitations honestly. Keep optional runtime pairing under advanced setup. Do not claim working provider access until an actual account request completes. Routine implementation, focused checks, commits/pushes, draft PRs and personal test APK delivery are already authorized; historical desktop review rounds do not block mobile-only work.

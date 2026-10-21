@@ -1,0 +1,26 @@
+# Build6 lessons and carryover
+
+## Delivered Build 6 — final verified state
+
+Build 6 is published for personal testing. APK source: `35dab13c1d6c44af41c86db4d7a45ffe7b0ab288`; native run [39687702869](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/actions/runs/39687702869) succeeded. Native Gradle: 18 tests, no failures/errors/skips; BUILD SUCCESSFUL in 15m45s, 653 tasks. Strict packaging/signing verification passed: version6/0.6.0, preserved upgrade signer, OTA/backup off, ARM64/x86_64, 16KiB ELF/ZIP and Hermes99. Six actual native smoke assertions passed on both phone and tablet dimensions. These are emulator layout checks, not live account inference.
+
+[APK](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-6/ACC-Android-build-6.apk) · [Verification JSON](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-6/build6-verification.json) · [Draft PR48](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/pull/48), unmerged and stacked on PR47/PR46. Public APK downloaded independently; source/test metadata and new compiled diagnostic/allowlisted-error markers verified. APK 52,314,138 bytes; SHA256 `8a3ae4067d5baa8cecb20ba5c85ebeefa4e03f0377b8935704afde1908fd8db2`.
+
+Corrected-source CI [39687702157](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/actions/runs/39687702157): Python3.10 553 tests/one skip, Python3.13 553 tests/zero skips, both successful. TypeScript, ESLint, provider checks, 40 native roles and eight signer-parser tests passed. TYPESAFE_API_KEY was unset before tests; Python used unittest discovery. Frozen spine unchanged. Later documentation commits do not change the APK source.
+
+The first native attempt39686566125 remains failed: Android test compile rejected JSONObject.keySet(). Replaced with keys().asSequence().toSet() and retained the exact expected-field assertion; full corrected native retry passed. No success is attributed to the failed attempt.
+
+Actual completed provider reply and exact original failure cause remain UNVERIFIED. Build6 adds safe ACC-CHAT diagnostics and corrects case-sensitive event-stream MIME handling; this is not evidence that the reported live failure is fixed. Simple Claude subscription onboarding remains unfinished; tasks remain manual planning. Routine Android work needs no separate independent review or repeated approval, as explicitly authorized; project settings do not disable platform checks. PR35/production/store gates remain.
+
+## Historical preparation and failed-attempt record
+
+- ACC-APK6-20261021-01 OPEN: reply failures were hidden by generic AccChatGPTModule catch and discarded HTTP/SSE errors. No evidence yet establishes service refusal, policy/limits, network timeout or parser failure as the observed cause. Next device retry should report ACC-CHAT diagnostic and safe req_ correlation ID.
+- IMPLEMENTED/native verification pending: safe ChatProtocol HTTP/body-shape/allowlisted-code handling, terminal SSE error classification, network/cancel categories and native bridge propagation. Never return raw descriptions, prompts/tokens, arbitrary error fields or exception messages. Error bodies bounded to4096characters; completion still requires response.completed.
+- FIXED IN SOURCE: MIME comparison had been case-sensitive; new contract accepts case-insensitive text/event-stream with charset parameters. Not established as the observed root cause.
+- POLICY: owner renewed no separate Android review gate, recorded in repository/mobile AGENTS; platform automatic checks remain operational. Actual Drive report rejection was honored. Verified destination ancestry and omitted account/device/browser/screenshot metadata in the accepted reduced note; no alternate write of original rejected payload.
+- TEST HISTORY: initial18Kotlin/JUnit result passed; a duplicate JVM invocation was started while the first session output was delayed, and also passed. It is not independent evidence or an independent review. Other focused and native checks retain separate results.
+- CARRY: full live reply, physical upgrade/data/Back/Sentry/tasks/lifecycle/SAF/Keystore/refresh acceptance remain deferred; simple Claude subscription onboarding unfinished; task board manual. Preserve historical runner defects and PR35/production/store gates. Build5 automatic publication succeeded; older Build4 reuse-path403 exact cause remains unproven.
+
+- APK6-06 FAILED native attempt39686566125 at a040008c0ec35e08789357dd5a9623defb78f540: main native Kotlin compiled; unit-test Kotlin failed at ChatProtocolTest.kt:19 because Android compile JSONObject lacks keySet(), despite desktop org.json fixture support. BUILD FAILED5m40s/115tasks. No APK retained/published; no native test or UI success claimed for this attempt. Replace test keySet with keys().asSequence().toSet() preserving the same exact-field assertion. Rerun18local tests and full native gates; do not weaken the test or call desktop fixtures native Android proof.
+
+- Post-download marker probe initially expected ACC-CHAT- as one compiled literal; source joins ACC-CHAT and fields with a separator. Corrected inspection found ACC-CHAT plus the new allowlisted error marker in classes.dex. Public hash and source/native-test metadata verified; no product change was needed.
