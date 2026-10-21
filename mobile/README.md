@@ -64,3 +64,5 @@ Browser export is a UI/persistence preview and cannot validate Android SAF or na
 ## Reuse
 
 See [REUSE.md](REUSE.md) for observed source candidates. No external application source was copied into build1. Existing code informs the boundaries; runtime/native bridges can be ported as useful app slices rather than requiring whole-project migration.
+
+Build7 is in preparation: fixes the documented direct-route missing Content-Type compatibility case while retaining completion-only success. See [Build7 handoff](session-notes/android-build7-20261021/handoff.md).

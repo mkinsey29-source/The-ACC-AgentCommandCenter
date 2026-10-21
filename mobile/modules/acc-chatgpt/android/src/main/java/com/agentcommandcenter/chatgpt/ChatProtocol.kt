@@ -2,6 +2,9 @@ package com.agentcommandcenter.chatgpt
 
 import org.json.JSONArray
 import org.json.JSONObject
+import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.io.Reader
 import java.net.SocketTimeoutException
@@ -34,6 +37,7 @@ internal class ChatFailure(
         "CANCELLED" -> "The reply was stopped. Its outcome may be incomplete."
         "INTERRUPTED" -> "The reply stream ended before completion. Its outcome is unknown."
         "INCOMPLETE" -> "ChatGPT returned an incomplete response."
+        "CONTENT_TYPE" -> "ChatGPT returned a reply format ACC could not use. Keep your sign-in and report this diagnostic."
         else -> "ChatGPT did not complete the reply."
       }
     }
@@ -52,6 +56,12 @@ internal class ChatFailure(
 }
 
 internal object ChatProtocol {
+  fun streamRequest(body: String, token: String): Request = Request.Builder()
+    .url(OAuthCore.RESOURCE + "/responses")
+    .header("Accept", "text/event-stream")
+    .header("Authorization", "Bearer $token")
+    .post(body.toRequestBody("application/json".toMediaType()))
+    .build()
   private val codes = setOf("subscription_sharing_user_not_eligible", "subscription_sharing_usage_limit_exceeded", "subscription_sharing_usage_unavailable", "subscription_sharing_unsupported_capability", "subscription_sharing_route_not_supported", "subscription_sharing_invalid_user", "subscription_sharing_user_unavailable", "chatpass_v2_scope_not_authorized", "chatpass_v2_invalid_authorization_context", "rate_limit_exceeded", "model_not_found", "invalid_api_key", "invalid_request_error", "server_error", "content_filter")
   private val params = setOf("model", "input", "store", "stream", "instructions", "tools", "service_tier")
   fun requestBody(model: String, rawMessages: String): String {
@@ -80,7 +90,14 @@ internal object ChatProtocol {
       val payload = try { JSONObject(raw.toString()) } catch (_: Exception) { null }
       throw providerFailure(ChatStage.RESPONSE, "HTTP$status", payload, requestId)
     }
-    if (!contentType?.substringBefore(';')?.trim().equals("text/event-stream", ignoreCase = true)) throw ChatFailure(ChatStage.RESPONSE, "CONTENT_TYPE", requestId = safeRequestId(requestId))
+    val mediaType = contentType?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT)?.takeIf { it.isNotEmpty() }
+    // The official direct route can omit Content-Type on a valid SSE response.
+    // Missing metadata is not success: the parser still requires response.completed.
+    // An explicit conflicting type is rejected without interpreting its body as a reply.
+    if (mediaType != null && mediaType != "text/event-stream") {
+      val shape = when (mediaType) { "application/json" -> "JSON"; "text/html" -> "HTML"; "text/plain" -> "TEXT"; else -> "OTHER" }
+      throw ChatFailure(ChatStage.RESPONSE, "CONTENT_TYPE", shape, requestId = safeRequestId(requestId))
+    }
     try { return OAuthCore.readStream(reader, checkActive) }
     catch (e: Exception) {
       val failure = ChatFailure.wrap(ChatStage.STREAM, e)

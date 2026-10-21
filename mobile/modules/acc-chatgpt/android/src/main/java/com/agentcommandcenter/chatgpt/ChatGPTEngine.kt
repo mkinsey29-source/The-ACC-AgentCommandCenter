@@ -239,7 +239,7 @@ internal class ChatGPTEngine(private val context: Context) {
         stage = ChatStage.ACCOUNT
         val a = freshAccount(); require(a.getString("id") == accountId)
         stage = ChatStage.REQUEST
-        val conn = connection(OAuthCore.RESOURCE + "/responses", body, "application/json", a.getString("access_token"))
+        val conn = client.newCall(ChatProtocol.streamRequest(body, a.getString("access_token")))
         call.connection = conn
         if (call.cancelled) throw ChatFailure(ChatStage.REQUEST, "CANCELLED")
         conn.execute().use { response ->
