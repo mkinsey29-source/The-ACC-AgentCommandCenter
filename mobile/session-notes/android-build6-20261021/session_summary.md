@@ -1,5 +1,19 @@
 # Build6 response errors — session summary
 
+## Delivered Build 6 — final verified state
+
+Build 6 is published for personal testing. APK source: `35dab13c1d6c44af41c86db4d7a45ffe7b0ab288`; native run [39687702869](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/actions/runs/39687702869) succeeded. Native Gradle: 18 tests, no failures/errors/skips; BUILD SUCCESSFUL in 15m45s, 653 tasks. Strict packaging/signing verification passed: version6/0.6.0, preserved upgrade signer, OTA/backup off, ARM64/x86_64, 16KiB ELF/ZIP and Hermes99. Six actual native smoke assertions passed on both phone and tablet dimensions. These are emulator layout checks, not live account inference.
+
+[APK](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-6/ACC-Android-build-6.apk) · [Verification JSON](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-6/build6-verification.json) · [Draft PR48](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/pull/48), unmerged and stacked on PR47/PR46. Public APK downloaded independently; source/test metadata and new compiled diagnostic/allowlisted-error markers verified. APK 52,314,138 bytes; SHA256 `8a3ae4067d5baa8cecb20ba5c85ebeefa4e03f0377b8935704afde1908fd8db2`.
+
+Corrected-source CI [39687702157](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/actions/runs/39687702157): Python3.10 553 tests/one skip, Python3.13 553 tests/zero skips, both successful. TypeScript, ESLint, provider checks, 40 native roles and eight signer-parser tests passed. TYPESAFE_API_KEY was unset before tests; Python used unittest discovery. Frozen spine unchanged. Later documentation commits do not change the APK source.
+
+The first native attempt39686566125 remains failed: Android test compile rejected JSONObject.keySet(). Replaced with keys().asSequence().toSet() and retained the exact expected-field assertion; full corrected native retry passed. No success is attributed to the failed attempt.
+
+Actual completed provider reply and exact original failure cause remain UNVERIFIED. Build6 adds safe ACC-CHAT diagnostics and corrects case-sensitive event-stream MIME handling; this is not evidence that the reported live failure is fixed. Simple Claude subscription onboarding remains unfinished; tasks remain manual planning. Routine Android work needs no separate independent review or repeated approval, as explicitly authorized; project settings do not disable platform checks. PR35/production/store gates remain.
+
+## Historical preparation and failed-attempt record
+
 Codex author; taskACC-APK6-20261021-01; October21,2026 America/New_York. Branchfix/android-build6-response-errors-20261021; basea6f36239edc70a9e1d6e2ef9a39f508a028cd4f8, stacked on draftPR47/Build5. Repository/Drive v3.2 Android scope and mobile policies followed; no subagents.
 
 Current defect: first reply fails with a generic bridge message that discards the actual request/response/stream failure. Root cause unknown; no completed live reply is claimed. Build6 extracts the exact supported request builder and response boundary into ChatProtocol. Fixed diagnostics expose stage, HTTP status, response shape, allowlisted provider code/parameter and a validated request ID. Arbitrary remote descriptions, prompts/tokens and exception strings remain private. Distinguish HTTP admission errors, structured API refusals, usage limits, failed/incomplete/interrupted streams, timeouts and cancellation. Keep store:false,stream:true, fixed official endpoints, no automatic resend or billing fallback. Event-stream MIME comparison now accepts valid case/charset variation. Existing completion-only success and account validation remain.

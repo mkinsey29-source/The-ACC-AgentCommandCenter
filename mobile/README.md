@@ -1,8 +1,8 @@
 # ACC Android · build 3
 
-Build6 is in preparation on `fix/android-build6-response-errors-20261021`: safe `ACC-CHAT-…` reply failure categories and request-ID correlation. Setup can progress to model selection, but completed inference is still unverified. See [Build6 handoff](session-notes/android-build6-20261021/handoff.md).
+Current personal test: [ACC Android Build 6](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-6/ACC-Android-build-6.apk). Install over the existing app and keep the existing sign-in. Start **New conversation** and send a short message. Build6 adds safe `ACC-CHAT-…` reply diagnostics; report only that diagnostic and safe request ID if it fails. A completed live reply and the original failure cause remain unverified. Never share credentials or callback URLs. Native phone/tablet checks, 18 native unit tests and packaging/signing checks pass; OTA remains off. Simple Claude subscription onboarding remains unfinished. [Current continuation packet](session-notes/android-build6-20261021/handoff.md).
 
-Current personal test: [ACC Android Build 5](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-5/ACC-Android-build-5.apk). Install over the existing app. Build4 now opens provider setup on the owner's Samsung, but sign-in still leaves an unfinished registration. Build5 adds safe `ACC-SIGNIN-…` failure diagnostics; it does not establish a fixed connection. Retry **Continue with ChatGPT**, return to ACC, and report only the in-app diagnostic if it fails. Never share the browser callback address. Native phone/tablet checks and11native unit tests pass; a real account reply remains unverified. Simple Claude subscription setup remains unfinished. [Current continuation packet](session-notes/android-build5-20261021/handoff.md).
+Previous Build5 added safe sign-in diagnostics and is superseded by Build6.
 
 React Native + Expo standalone Android workspace. APK iterations are the primary feedback loop. OTA updates are disabled. The existing Python ACC and desktop/web surfaces remain intact.
 
