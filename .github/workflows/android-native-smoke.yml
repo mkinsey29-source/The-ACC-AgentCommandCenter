@@ -49,6 +49,8 @@ jobs:
           cd ..
           unset TYPESAFE_API_KEY
           python3 -m unittest discover -s tests -p test_mobile_runtime.py
+          unset TYPESAFE_API_KEY
+          python3 -m unittest discover -s tests -p test_mobile_apk_signers.py
           cd mobile
           npx expo prebuild --platform android --no-install
       - name: Native unit tests and standalone APK for tablet and emulator
@@ -56,6 +58,14 @@ jobs:
           unset TYPESAFE_API_KEY
           cd mobile/android
           ./gradlew :acc-chatgpt:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+      - name: Preserve raw private APK before any packaging verifier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p mobile/builds
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
+          acc_candidate_tag="android-build-4-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$acc_candidate_tag" mobile/builds/ACC-Android-build-4.apk --target "$GITHUB_SHA" --draft --prerelease --title "Unverified Build 4 candidate ${GITHUB_SHA}" --notes 'Raw recovery APK. Packaging, signing identity and Android UI validation pending.'
       - name: Verify numbered APK and upgrade signing identity
         run: |
           unset TYPESAFE_API_KEY
@@ -63,18 +73,19 @@ jobs:
           cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
           curl -fL --retry 2 https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-3/ACC-Android-build-3.apk -o "$RUNNER_TEMP/build3.apk"
           acc_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-          "$acc_tools/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/build3.apk" > "$RUNNER_TEMP/build3-signature.txt"
-          "$acc_tools/apksigner" verify --verbose --print-certs mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-signature.txt"
+          "$acc_tools/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/build3.apk" > "$RUNNER_TEMP/build3-signature.txt" 2>&1
+          "$acc_tools/apksigner" verify --verbose --print-certs mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-signature.txt" 2>&1
           "$acc_tools/zipalign" -c -P 16 -v 4 mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-alignment.txt"
           "$acc_tools/aapt" dump badging mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-badging.txt"
           "$acc_tools/aapt" dump xmltree mobile/builds/ACC-Android-build-4.apk AndroidManifest.xml > "$RUNNER_TEMP/build4-manifest.txt"
+          cat "$RUNNER_TEMP/build3-signature.txt" "$RUNNER_TEMP/build4-signature.txt"
           python3 mobile/scripts/verify-release.py
-      - name: Preserve private candidate for independent emulator retries
+      - name: Attach verification only after packaging checks pass
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           acc_candidate_tag="android-build-4-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh release create "$acc_candidate_tag" mobile/builds/ACC-Android-build-4.apk mobile/builds/build4-verification.json --target "$GITHUB_SHA" --draft --prerelease --title "Unverified Build 4 candidate ${GITHUB_SHA}" --notes 'Internal recovery artifact. Packaging and native unit checks complete; Android UI validation pending.'
+          gh release upload "$acc_candidate_tag" mobile/builds/build4-verification.json
       - name: Prepare Android emulator
         run: |
           sudo chmod a+rw /dev/kvm
@@ -100,6 +111,14 @@ jobs:
         run: |
           unset TYPESAFE_API_KEY
           adb install -r mobile/android/app/build/outputs/apk/release/app-release.apk
+          python3 mobile/scripts/android-smoke.py
+      - name: Repeat native panel checks at tablet dimensions
+        run: |
+          adb shell am force-stop com.agentcommandcenter.acc
+          adb shell pm clear com.agentcommandcenter.acc
+          adb shell wm size 1600x2560
+          adb shell wm density 213
+          unset TYPESAFE_API_KEY
           python3 mobile/scripts/android-smoke.py
       - name: Publish verified personal-test APK without Actions artifact storage
         env:

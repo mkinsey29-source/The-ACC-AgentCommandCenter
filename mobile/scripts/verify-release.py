@@ -7,13 +7,13 @@ import struct
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from apk_signers import require_same_signers
 
 scratch = Path(os.environ['RUNNER_TEMP'])
 apk = Path('mobile/builds/ACC-Android-build-4.apk')
 old = (scratch / 'build3-signature.txt').read_text()
 new = (scratch / 'build4-signature.txt').read_text()
-cert = r'Signer #1 certificate SHA-256 digest: ([a-f0-9]+)'
-assert re.search(cert, old).group(1) == re.search(cert, new).group(1)
+certificates = require_same_signers(old, new)
 assert 'Verified using v2 scheme (APK Signature Scheme v2): true' in new
 badging = (scratch / 'build4-badging.txt').read_text()
 assert "name='com.agentcommandcenter.acc' versionCode='4' versionName='0.4.0'" in badging
@@ -22,6 +22,8 @@ manifest = (scratch / 'build4-manifest.txt').read_text()
 assert re.search(r'android:allowBackup[^\n]*0x0\b', manifest)
 assert re.search(r'expo\.modules\.updates\.ENABLED[^\n]*\n[^\n]*android:value[^\n]*0x0\b', manifest)
 metadata = {'source_sha': os.environ['GITHUB_SHA'], 'bytes': apk.stat().st_size, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'same_signer_as_build3': True, 'versionCode': 4, 'versionName': '0.4.0'}
+metadata['certificate_sha256'] = sorted(certificates)
+metadata['packaging_verified'] = True
 reports = [p for p in Path('mobile').rglob('TEST-*.xml') if 'test-results/testDebugUnitTest' in p.as_posix()]
 assert reports, 'Native unit test reports missing'
 metadata['native_unit_tests'] = {key: sum(int(ET.parse(p).getroot().get(key, '0')) for p in reports) for key in ['tests', 'failures', 'errors', 'skipped']}
