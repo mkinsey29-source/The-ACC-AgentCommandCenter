@@ -125,5 +125,5 @@ export function validateJob(data: unknown, id: string, provider: Provider): Job 
 export function safeConnectionError(error: unknown, connection?: Connection | null): string {
   const message = error instanceof Error ? error.message : 'Connection failed.';
   // Network implementations can include URLs; never copy a pairing secret into UI/logs.
-  return (connection ? message.split(connection.token).join('[redacted]') : message).slice(0, 400);
+  return (connection?.token ? message.split(connection.token).join('[redacted]') : message).slice(0, 400);
 }

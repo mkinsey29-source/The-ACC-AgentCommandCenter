@@ -1,0 +1,217 @@
+name: Android native smoke
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: Reuse a saved raw candidate when only verification scripts changed
+        type: string
+        default: ''
+      baseline:
+        description: Also reproduce the pinned Build 3 baseline
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: acc-android-native-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    env:
+      ACC_CANDIDATE_TAG: ${{ inputs.candidate_tag || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve exact APK source and recover an unchanged candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          acc_source_sha="$GITHUB_SHA"
+          if [ -n "$ACC_CANDIDATE_TAG" ]; then
+            acc_source_sha=$(gh release view "$ACC_CANDIDATE_TAG" --json targetCommitish --jq .targetCommitish)
+            [[ "$acc_source_sha" =~ ^[0-9a-f]{40}$ ]]
+            git fetch --no-tags origin "$acc_source_sha"
+            git diff --exit-code "$acc_source_sha" HEAD -- mobile ':(exclude)mobile/scripts/**'
+            mkdir -p mobile/builds
+            gh release download "$ACC_CANDIDATE_TAG" -p ACC-Android-build-4.apk -D mobile/builds
+          fi
+          echo "ACC_APK_SOURCE_SHA=$acc_source_sha" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Locate installed Android tools
+        run: |
+          acc_cli=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)
+          test -x "$acc_cli"
+          dirname "$acc_cli" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+      - name: Prepare source and run focused checks
+        run: |
+          cd mobile
+          npm ci --no-audit --no-fund
+          unset TYPESAFE_API_KEY
+          npm run test:native-props
+          unset TYPESAFE_API_KEY
+          npm run typecheck
+          unset TYPESAFE_API_KEY
+          npm run lint
+          unset TYPESAFE_API_KEY
+          npm run test:providers
+          cd ..
+          unset TYPESAFE_API_KEY
+          python3 -m unittest discover -s tests -p test_mobile_runtime.py
+          unset TYPESAFE_API_KEY
+          python3 -m unittest discover -s tests -p test_mobile_apk_signers.py
+          cd mobile
+          npx expo prebuild --platform android --no-install
+      - name: Native unit tests and compile only when no saved APK exists
+        run: |
+          unset TYPESAFE_API_KEY
+          cd mobile/android
+          acc_gradle_tasks=(:acc-chatgpt:testDebugUnitTest)
+          if [ -z "$ACC_CANDIDATE_TAG" ]; then acc_gradle_tasks+=(:app:assembleRelease); fi
+          ./gradlew "${acc_gradle_tasks[@]}" -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+      - name: Preserve raw private APK before any packaging verifier
+        if: inputs.candidate_tag == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p mobile/builds
+          if [ -z "$ACC_CANDIDATE_TAG" ]; then
+            cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
+          fi
+          acc_candidate_tag="android-build-4-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$acc_candidate_tag" mobile/builds/ACC-Android-build-4.apk --target "$GITHUB_SHA" --draft --prerelease --title "Unverified Build 4 candidate ${GITHUB_SHA}" --notes 'Raw recovery APK. Packaging, signing identity and Android UI validation pending.'
+      - name: Verify numbered APK and upgrade signing identity
+        run: |
+          unset TYPESAFE_API_KEY
+          mkdir -p mobile/builds
+          if [ -z "$ACC_CANDIDATE_TAG" ]; then
+            cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
+          fi
+          curl -fL --retry 2 https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-3/ACC-Android-build-3.apk -o "$RUNNER_TEMP/build3.apk"
+          acc_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$acc_tools/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/build3.apk" > "$RUNNER_TEMP/build3-signature.txt" 2>&1
+          "$acc_tools/apksigner" verify --verbose --print-certs mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-signature.txt" 2>&1
+          "$acc_tools/zipalign" -c -P 16 -v 4 mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-alignment.txt"
+          "$acc_tools/aapt" dump badging mobile/builds/ACC-Android-build-4.apk > "$RUNNER_TEMP/build4-badging.txt"
+          "$acc_tools/aapt" dump xmltree mobile/builds/ACC-Android-build-4.apk AndroidManifest.xml > "$RUNNER_TEMP/build4-manifest.txt"
+          cat "$RUNNER_TEMP/build3-signature.txt" "$RUNNER_TEMP/build4-signature.txt"
+          python3 mobile/scripts/verify-release.py
+      - name: Attach verification only after packaging checks pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          acc_candidate_tag="${ACC_CANDIDATE_TAG:-android-build-4-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
+          if gh release view "$acc_candidate_tag" --json assets --jq '.assets[].name' | grep -Fxq build4-verification.json; then
+            echo 'Earlier packaging metadata retained; this run verified the APK again.'
+          else
+            gh release upload "$acc_candidate_tag" mobile/builds/build4-verification.json
+          fi
+      - name: Prepare Android emulator
+        run: |
+          sudo chmod a+rw /dev/kvm
+          sdkmanager 'system-images;android-36;google_apis;x86_64' 'emulator' 'platform-tools'
+          export ANDROID_SDK_HOME="$RUNNER_TEMP/acc-android-user"
+          export ANDROID_USER_HOME="$ANDROID_SDK_HOME/.android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --force --name acc-smoke --package 'system-images;android-36;google_apis;x86_64' --device pixel_6 --path "$ANDROID_AVD_HOME/acc-smoke.avd"
+          test -f "$ANDROID_AVD_HOME/acc-smoke.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -accel-check
+          trap 'tail -80 "$RUNNER_TEMP/emulator.log"' EXIT
+          "$ANDROID_HOME/emulator/emulator" -avd acc-smoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu software -memory 2048 > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          timeout 120 adb wait-for-device
+          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 2; done'
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb shell input keyevent 82
+      - name: Test actual native provider setup panel
+        run: |
+          unset TYPESAFE_API_KEY
+          adb install -r mobile/builds/ACC-Android-build-4.apk
+          python3 mobile/scripts/android-smoke.py
+      - name: Repeat native panel checks at tablet dimensions
+        run: |
+          adb shell am force-stop com.agentcommandcenter.acc
+          adb shell pm clear com.agentcommandcenter.acc
+          adb shell wm size 1600x2560
+          adb shell wm density 213
+          unset TYPESAFE_API_KEY
+          python3 mobile/scripts/android-smoke.py
+      - name: Publish verified personal-test APK without Actions artifact storage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view android-build-4 >/dev/null 2>&1; then
+            echo 'Build 4 already exists; refusing to overwrite a numbered release.'
+            exit 1
+          fi
+          gh release create android-build-4 mobile/builds/ACC-Android-build-4.apk mobile/builds/build4-verification.json --target "$ACC_APK_SOURCE_SHA" --prerelease --title 'ACC Android Build 4 — connection-panel crash fix' --notes-file mobile/builds/build4-release-notes.md
+  baseline:
+    if: github.event_name == 'workflow_dispatch' && inputs.baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Locate installed Android tools
+        run: |
+          acc_cli=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)
+          test -x "$acc_cli"
+          dirname "$acc_cli" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+      - name: Prepare baseline source
+        run: |
+          git fetch origin 72d10fd072fa99190ce5f8b64d804d487ea211b9
+          git worktree add --detach "$RUNNER_TEMP/acc-baseline" 72d10fd072fa99190ce5f8b64d804d487ea211b9
+          cd "$RUNNER_TEMP/acc-baseline/mobile"
+          npm ci --no-audit --no-fund
+          npx expo prebuild --platform android --no-install
+      - name: Build standalone x86 emulator APK
+        run: |
+          unset TYPESAFE_API_KEY
+          cd "$RUNNER_TEMP/acc-baseline/mobile/android"
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+      - name: Prepare Android emulator
+        run: |
+          sudo chmod a+rw /dev/kvm
+          sdkmanager 'system-images;android-36;google_apis;x86_64' 'emulator' 'platform-tools'
+          export ANDROID_SDK_HOME="$RUNNER_TEMP/acc-android-user"
+          export ANDROID_USER_HOME="$ANDROID_SDK_HOME/.android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --force --name acc-smoke --package 'system-images;android-36;google_apis;x86_64' --device pixel_6 --path "$ANDROID_AVD_HOME/acc-smoke.avd"
+          test -f "$ANDROID_AVD_HOME/acc-smoke.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -accel-check
+          trap 'tail -80 "$RUNNER_TEMP/emulator.log"' EXIT
+          "$ANDROID_HOME/emulator/emulator" -avd acc-smoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu software -memory 2048 > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          timeout 120 adb wait-for-device
+          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 2; done'
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb shell input keyevent 82
+      - name: Reproduce connection-panel crash
+        run: |
+          unset TYPESAFE_API_KEY
+          adb install -r "$RUNNER_TEMP/acc-baseline/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          python3 mobile/scripts/android-smoke.py

@@ -71,6 +71,7 @@ async function main() {
   assert.throws(() => api.validateJob({ ...job, reply: '' }, job.id, 'claude'));
   assert.throws(() => api.validateJob({ ...job, id: 'different' }, job.id, 'claude'));
   assert.equal(api.safeConnectionError(new Error('secret ' + connection.token), connection), 'secret [redacted]');
+  assert.equal(api.safeConnectionError(new Error('Invalid saved connection. Reconnect through Connections.'), { ...connection, token: '' }), 'Invalid saved connection. Reconnect through Connections.', 'An empty secret must preserve a readable validation error');
   await api.saveConnection(null);
   assert.equal(await api.loadConnection(), null);
   console.log('Provider transport: endpoint, encrypted-store boundary, signed transport with no transmitted pairing secret, redirect refusal, billing/status shape, result identity and redaction checks passed.');
