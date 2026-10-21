@@ -1,5 +1,7 @@
 # ACC Android · build 3
 
+Current personal test: [ACC Android Build 5](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-5/ACC-Android-build-5.apk). Install over the existing app. Build4 now opens provider setup on the owner's Samsung, but sign-in still leaves an unfinished registration. Build5 adds safe `ACC-SIGNIN-…` failure diagnostics; it does not establish a fixed connection. Retry **Continue with ChatGPT**, return to ACC, and report only the in-app diagnostic if it fails. Never share the browser callback address. Native phone/tablet checks and11native unit tests pass; a real account reply remains unverified. Simple Claude subscription setup remains unfinished. [Current continuation packet](session-notes/android-build5-20261021/handoff.md).
+
 React Native + Expo standalone Android workspace. APK iterations are the primary feedback loop. OTA updates are disabled. The existing Python ACC and desktop/web surfaces remain intact.
 
 ## Try it
