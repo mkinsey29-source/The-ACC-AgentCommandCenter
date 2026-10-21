@@ -21,7 +21,7 @@ assert "sdkVersion:'24'" in badging and "targetSdkVersion:'36'" in badging
 manifest = (scratch / 'build4-manifest.txt').read_text()
 assert re.search(r'android:allowBackup[^\n]*0x0\b', manifest)
 assert re.search(r'expo\.modules\.updates\.ENABLED[^\n]*\n[^\n]*android:value[^\n]*0x0\b', manifest)
-metadata = {'source_sha': os.environ['GITHUB_SHA'], 'bytes': apk.stat().st_size, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'same_signer_as_build3': True, 'versionCode': 4, 'versionName': '0.4.0'}
+metadata = {'source_sha': os.environ.get('ACC_APK_SOURCE_SHA', os.environ['GITHUB_SHA']), 'verification_sha': os.environ['GITHUB_SHA'], 'bytes': apk.stat().st_size, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'same_signer_as_build3': True, 'versionCode': 4, 'versionName': '0.4.0'}
 metadata['certificate_sha256'] = sorted(certificates)
 metadata['packaging_verified'] = True
 reports = [p for p in Path('mobile').rglob('TEST-*.xml') if 'test-results/testDebugUnitTest' in p.as_posix()]

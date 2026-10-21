@@ -1,9 +1,11 @@
 name: Android native smoke
 on:
-  push:
-    branches: [fix/android-build4-provider-crash-20261020]
   workflow_dispatch:
     inputs:
+      candidate_tag:
+        description: Reuse a saved raw candidate when only verification scripts changed
+        type: string
+        default: ''
       baseline:
         description: Also reproduce the pinned Build 3 baseline
         type: boolean
@@ -19,8 +21,24 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: write
+    env:
+      ACC_CANDIDATE_TAG: ${{ inputs.candidate_tag || '' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve exact APK source and recover an unchanged candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          acc_source_sha="$GITHUB_SHA"
+          if [ -n "$ACC_CANDIDATE_TAG" ]; then
+            acc_source_sha=$(gh release view "$ACC_CANDIDATE_TAG" --json targetCommitish --jq .targetCommitish)
+            [[ "$acc_source_sha" =~ ^[0-9a-f]{40}$ ]]
+            git fetch --no-tags origin "$acc_source_sha"
+            git diff --exit-code "$acc_source_sha" HEAD -- mobile ':(exclude)mobile/scripts/**'
+            mkdir -p mobile/builds
+            gh release download "$ACC_CANDIDATE_TAG" -p ACC-Android-build-4.apk -D mobile/builds
+          fi
+          echo "ACC_APK_SOURCE_SHA=$acc_source_sha" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -53,24 +71,31 @@ jobs:
           python3 -m unittest discover -s tests -p test_mobile_apk_signers.py
           cd mobile
           npx expo prebuild --platform android --no-install
-      - name: Native unit tests and standalone APK for tablet and emulator
+      - name: Native unit tests and compile only when no saved APK exists
         run: |
           unset TYPESAFE_API_KEY
           cd mobile/android
-          ./gradlew :acc-chatgpt:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+          acc_gradle_tasks=(:acc-chatgpt:testDebugUnitTest)
+          if [ -z "$ACC_CANDIDATE_TAG" ]; then acc_gradle_tasks+=(:app:assembleRelease); fi
+          ./gradlew "${acc_gradle_tasks[@]}" -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
       - name: Preserve raw private APK before any packaging verifier
+        if: inputs.candidate_tag == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p mobile/builds
-          cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
+          if [ -z "$ACC_CANDIDATE_TAG" ]; then
+            cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
+          fi
           acc_candidate_tag="android-build-4-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           gh release create "$acc_candidate_tag" mobile/builds/ACC-Android-build-4.apk --target "$GITHUB_SHA" --draft --prerelease --title "Unverified Build 4 candidate ${GITHUB_SHA}" --notes 'Raw recovery APK. Packaging, signing identity and Android UI validation pending.'
       - name: Verify numbered APK and upgrade signing identity
         run: |
           unset TYPESAFE_API_KEY
           mkdir -p mobile/builds
-          cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
+          if [ -z "$ACC_CANDIDATE_TAG" ]; then
+            cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-4.apk
+          fi
           curl -fL --retry 2 https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-3/ACC-Android-build-3.apk -o "$RUNNER_TEMP/build3.apk"
           acc_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
           "$acc_tools/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/build3.apk" > "$RUNNER_TEMP/build3-signature.txt" 2>&1
@@ -84,8 +109,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          acc_candidate_tag="android-build-4-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh release upload "$acc_candidate_tag" mobile/builds/build4-verification.json
+          acc_candidate_tag="${ACC_CANDIDATE_TAG:-android-build-4-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
+          if gh release view "$acc_candidate_tag" --json assets --jq '.assets[].name' | grep -Fxq build4-verification.json; then
+            echo 'Earlier packaging metadata retained; this run verified the APK again.'
+          else
+            gh release upload "$acc_candidate_tag" mobile/builds/build4-verification.json
+          fi
       - name: Prepare Android emulator
         run: |
           sudo chmod a+rw /dev/kvm
@@ -110,7 +139,7 @@ jobs:
       - name: Test actual native provider setup panel
         run: |
           unset TYPESAFE_API_KEY
-          adb install -r mobile/android/app/build/outputs/apk/release/app-release.apk
+          adb install -r mobile/builds/ACC-Android-build-4.apk
           python3 mobile/scripts/android-smoke.py
       - name: Repeat native panel checks at tablet dimensions
         run: |
@@ -128,7 +157,7 @@ jobs:
             echo 'Build 4 already exists; refusing to overwrite a numbered release.'
             exit 1
           fi
-          gh release create android-build-4 mobile/builds/ACC-Android-build-4.apk mobile/builds/build4-verification.json --target "$GITHUB_SHA" --prerelease --title 'ACC Android Build 4 — connection-panel crash fix' --notes-file mobile/builds/build4-release-notes.md
+          gh release create android-build-4 mobile/builds/ACC-Android-build-4.apk mobile/builds/build4-verification.json --target "$ACC_APK_SOURCE_SHA" --prerelease --title 'ACC Android Build 4 — connection-panel crash fix' --notes-file mobile/builds/build4-release-notes.md
   baseline:
     if: github.event_name == 'workflow_dispatch' && inputs.baseline
     runs-on: ubuntu-24.04

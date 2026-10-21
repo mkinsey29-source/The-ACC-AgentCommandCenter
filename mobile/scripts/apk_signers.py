@@ -4,7 +4,7 @@ import re
 
 def signer_fingerprints(output: str) -> frozenset[str]:
     values = re.findall(
-        r'^Signer[^\r\n]* certificate SHA-256 digest:[ \t]*([0-9a-f]{64})[ \t]*$',
+        r'^(?:V[1-4](?:\.[0-9]+)? )?Signer[^\r\n]* certificate SHA-256 digest:[ \t]*([0-9a-f]{64})[ \t]*$',
         output, re.IGNORECASE | re.MULTILINE,
     )
     if not values:

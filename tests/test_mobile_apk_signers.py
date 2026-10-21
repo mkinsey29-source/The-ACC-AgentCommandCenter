@@ -45,3 +45,12 @@ class ApkSignerFormatTests(unittest.TestCase):
     def test_source_stamp_is_not_an_apk_signer(self):
         output = self.line('Source Stamp Signer', 'b' * 64) + self.line('Signer #1')
         self.assertEqual(signers.signer_fingerprints(output), {self.fingerprint})
+
+    def test_actual_build_tools_scheme_label(self):
+        self.assertEqual(signers.require_same_signers(
+            self.line('Signer #1'), self.line('V2 Signer:'),
+        ), {self.fingerprint})
+
+    def test_scheme_label_changed_signer_is_refused(self):
+        with self.assertRaises(ValueError):
+            signers.require_same_signers(self.line('V2 Signer:'), self.line('V2 Signer:', 'a' * 64))
