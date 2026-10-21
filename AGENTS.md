@@ -2,6 +2,8 @@
 Version: 3.2 — 2026-10-03 approved summary roles and orchestrator reporting
 
 ### ACC Android scope and standing authorization — owner update 2026-10-19
+Owner clarification, 2026-10-21: routine Android implementation, workflow changes, tests and numbered personal-test APK delivery may proceed without a separate independent review or repeated owner approval. This supersedes historical review-only restrictions for this Android work. Preserve test/artifact verification, actual platform rejection handling, and the separate PR35/production/store gates. Project instructions cannot disable platform automatic tool checks.
+
 The active product direction is the Android tablet/phone ACC app, with Sentry as its local Markdown memory. Prioritize an installable, usable APK and straightforward supported provider sign-in. Manual Termux/Linux/CLI setup is not the accepted default onboarding. Do not represent provider chat as ready merely because a UI or fixture test works.
 
 Marvin authorizes routine project GitHub and Google Drive reads/writes, implementation on isolated feature branches, commits/pushes, draft PRs, local builds/tests, and numbered personal-testing APK delivery without repeated permission requests. Use connected tools for the assigned repository and verified ACC Drive project. Read live Drive files before in-place edits and preserve history. This is project authorization, not a change to ChatGPT's platform approval settings. If a platform action is rejected, state the actual reason, use an allowed safer path if available, and continue unaffected work; never claim the platform reviewer was disabled.

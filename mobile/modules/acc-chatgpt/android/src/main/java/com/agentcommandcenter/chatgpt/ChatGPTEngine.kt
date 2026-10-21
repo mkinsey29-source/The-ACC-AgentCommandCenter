@@ -230,34 +230,34 @@ internal class ChatGPTEngine(private val context: Context) {
   }
   fun cancelChat(id: String) { activeChat.get()?.takeIf { it.id == id }?.let { it.cancelled = true; it.connection?.cancel() } }
   fun chat(id: String, accountId: String, model: String, rawMessages: String): String {
-    require(id.matches(Regex("[A-Za-z0-9_-]{16,80}")) && model.length in 1..160)
-    val messages = JSONArray(rawMessages); require(messages.length() in 1..39 && messages.length() % 2 == 1)
-    var length = 0
-    val input = JSONArray()
-    for (i in 0 until messages.length()) {
-      val m = messages.getJSONObject(i); val role = m.getString("role"); val text = m.getString("text")
-      require(role == if (i % 2 == 0) "user" else "assistant"); require(text.isNotBlank() && text.length <= 100000)
-      length += text.length; input.put(JSONObject().put("role", role).put("content", text))
-    }
-    require(length <= 50000)
-    val call = ChatCall(id); check(activeChat.compareAndSet(null, call))
+    var stage = ChatStage.INPUT
     try {
-      val a = freshAccount(); require(a.getString("id") == accountId)
-      val body = JSONObject().put("model", model).put("input", input).put("store", false).put("stream", true).toString()
-      val conn = connection(OAuthCore.RESOURCE + "/responses", body, "application/json", a.getString("access_token"))
-      call.connection = conn
-      if (call.cancelled) error("Cancelled")
-      val response = conn.execute()
+      require(id.matches(Regex("[A-Za-z0-9_-]{16,80}")))
+      val body = ChatProtocol.requestBody(model, rawMessages)
+      val call = ChatCall(id); check(activeChat.compareAndSet(null, call))
       try {
-      check(response.code == 200)
-      require(response.header("Content-Type")?.startsWith("text/event-stream") == true)
-      val reader = requireNotNull(response.body).charStream().buffered()
-      val deadline = System.currentTimeMillis() + 180000
-      val reply = reader.use { OAuthCore.readStream(it) { check(!call.cancelled && System.currentTimeMillis() < deadline) } }
-      check(!call.cancelled)
-      return reply
-      } finally { response.close() }
-    } finally { call.connection?.cancel(); activeChat.compareAndSet(call, null) }
+        stage = ChatStage.ACCOUNT
+        val a = freshAccount(); require(a.getString("id") == accountId)
+        stage = ChatStage.REQUEST
+        val conn = connection(OAuthCore.RESOURCE + "/responses", body, "application/json", a.getString("access_token"))
+        call.connection = conn
+        if (call.cancelled) throw ChatFailure(ChatStage.REQUEST, "CANCELLED")
+        conn.execute().use { response ->
+          stage = ChatStage.RESPONSE
+          val reader = requireNotNull(response.body).charStream().buffered()
+          val deadline = System.currentTimeMillis() + 180000
+          val reply = reader.use {
+            ChatProtocol.read(response.code, response.header("Content-Type"), it, response.header("x-request-id")) {
+              if (call.cancelled) throw ChatFailure(ChatStage.STREAM, "CANCELLED")
+              if (System.currentTimeMillis() >= deadline) throw ChatFailure(ChatStage.STREAM, "TIMEOUT")
+            }
+          }
+          if (call.cancelled) throw ChatFailure(ChatStage.STREAM, "CANCELLED")
+          return reply
+        }
+      } catch (e: Exception) { throw ChatFailure.wrap(stage, e, call.cancelled) }
+      finally { call.connection?.cancel(); activeChat.compareAndSet(call, null) }
+    } catch (e: Exception) { throw ChatFailure.wrap(stage, e) }
   }
   private fun connection(url: String, body: String?, contentType: String, token: String?): Call {
     require(url.startsWith(OAuthCore.ISSUER + "/") || url.startsWith(OAuthCore.RESOURCE + "/"))
