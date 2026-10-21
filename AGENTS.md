@@ -1,6 +1,16 @@
 ## Second Brain — repository execution and Drive entry
 Version: 3.2 — 2026-10-03 approved summary roles and orchestrator reporting
 
+## ACC single-agent review exception — owner instruction 2026-10-21
+
+Marvin is currently using one agent and has suspended mandatory automatic, independent or second-agent review for ACC development and personal testing until he explicitly reinstates it. Do not automatically dispatch a reviewer or block authorized implementation, workflow updates, focused tests, feature-branch commits/draft PRs or numbered personal-test APK delivery waiting for another agent. The implementing agent performs and records the applicable checks; call this self-validation, never independent review.
+
+This explicit ACC-only owner exception takes precedence over inherited generic review prerequisites in Drive-root policy, this file, module instructions and historical review/handoff records for the stated development/personal-test scope. Review is optional when Marvin requests it, not an automatic prerequisite. It changes no other project's rules and does not close unresolved findings or convert unrun checks into passes.
+
+Preserve tests, security checks, artifact/signing/package/data/OTA validation, honest evidence, isolated ownership and all separate production, store publication, commercial/provider-access and permission gates. This exception does not authorize unrelated application merges or production-runtime integration. Historical review findings remain evidence and must be addressed where relevant. Platform tool-approval checks and repository access/security protections are separate and are not disabled by this policy.
+
+Authorization: Marvin's direct request in ChatGPT, 2026-10-21 23:53:06 UTC, message Sentinel_f130754a73a08191ac42fcf10e217fe6. Current source of this exception: ACC Drive AGENTS.md (file 1DShX5lan_mvZhgMeXVofd21z4RGGNmk0) and repository AGENTS.md. Retain the exception in new development branches; older branch instructions do not reinstate the suspended review requirement.
+
 ### Entry and source of truth
 Read Drive-root [AGENTS.md](https://drive.google.com/file/d/1BPuaOz5tZ3wDrhoGuBmgWEgQ4evGI35U/view) once per session. Read [ACC-Agent Command Center/AGENTS.md](https://drive.google.com/file/d/1DShX5lan_mvZhgMeXVofd21z4RGGNmk0/view?usp=drivesdk). Project folder: https://drive.google.com/drive/folders/1yozjqM3sAt9ySZUPIj77PVZ1cOj3uPIf. Locate the authorized project's existing folder under 50_Projects through live listings and verified IDs; do not create duplicates or assume similarly named repositories share a Drive project. Read the applicable project/parent AGENTS.md, consolidated_summary.md, current handoff.md and relevant lessons.md, then newer session_summary.md and local review evidence to identify progress after the baseline.
 Record role, task/run ID, policy versions, repository/branch/commit and evidence dates. Verify inherited claims against live sources. Relevant older lessons, handoffs and evidence remain accessible; routine rereading of weeks of summaries is unnecessary.
