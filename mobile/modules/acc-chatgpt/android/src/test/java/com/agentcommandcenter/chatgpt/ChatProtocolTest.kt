@@ -16,7 +16,7 @@ class ChatProtocolTest {
   private fun completed() = JSONObject().put("type", "response.completed").put("response", JSONObject().put("status", "completed").put("output", JSONArray().put(JSONObject().put("type", "message").put("role", "assistant").put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", "Reply 👋"))))))
   @Test fun exactRequestUsesOnlySupportedFieldsAndAlternatingHistory() {
     val body = JSONObject(ChatProtocol.requestBody("catalog-model", """[{"role":"user","text":"one"},{"role":"assistant","text":"two"},{"role":"user","text":"three"}]"""))
-    assertEquals(setOf("model", "input", "store", "stream"), body.keySet())
+    assertEquals(setOf("model", "input", "store", "stream"), body.keys().asSequence().toSet())
     assertEquals("catalog-model", body.getString("model")); assertFalse(body.getBoolean("store")); assertTrue(body.getBoolean("stream"))
     assertEquals("three", body.getJSONArray("input").getJSONObject(2).getString("content"))
     rejected { ChatProtocol.requestBody("m", """[{"role":"assistant","text":"wrong"}]""") }
