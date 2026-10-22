@@ -83,51 +83,6 @@ internal object OAuthCore {
     signInRequire(response.getLong("expires_in") in 1..604800, SignInCheck.TOKEN_EXPIRY)
     return granted
   }
-  fun readStream(reader: java.io.Reader, checkActive: () -> Unit = {}): String {
-    var total = 0
-    var event = StringBuilder()
-    while (true) {
-      checkActive()
-      val part = StringBuilder()
-      var eof = false
-      while (true) {
-        val c = reader.read()
-        if (c == -1) { eof = true; break }
-        if (c == 10) break
-        part.append(c.toChar()); require(part.length <= 700000)
-      }
-      if (eof) throw ChatFailure(ChatStage.STREAM, "INTERRUPTED")
-      val line = part.toString().trimEnd('\r')
-      total += line.length; require(total <= 2000000)
-      if (line.isEmpty() && event.isNotEmpty()) {
-        val data = event.toString().trimEnd('\n'); event = StringBuilder()
-        if (data == "[DONE]") throw ChatFailure(ChatStage.STREAM, "INTERRUPTED")
-        val e = JSONObject(data)
-        when (e.optString("type")) {
-          "response.completed" -> { checkActive(); return completed(e) }
-          "response.failed", "response.incomplete", "error" -> throw ChatProtocol.failedEvent(e)
-        }
-      } else if (line.startsWith("data:")) {
-        event.append(line.removePrefix("data:").trimStart(' ')).append('\n'); require(event.length <= 700000)
-      }
-    }
-  }
-  fun completed(event: JSONObject): String {
-    require(event.getString("type") == "response.completed")
-    val response = event.getJSONObject("response")
-    require(response.getString("status") == "completed")
-    val output = response.getJSONArray("output")
-    val text = StringBuilder()
-    for (i in 0 until output.length()) {
-      val item = output.getJSONObject(i)
-      if (item.optString("type") != "message" || item.optString("role") != "assistant") continue
-      val content = item.getJSONArray("content")
-      for (j in 0 until content.length()) {
-        val part = content.getJSONObject(j)
-        if (part.optString("type") == "output_text") text.append(part.getString("text"))
-      }
-    }
-    require(text.isNotBlank() && text.length <= 100000)
-    return text.toString()
-  }
+  fun readStream(reader: java.io.Reader, checkActive: () -> Unit = {}): String = ReplyStream.read(reader, checkActive)
+  fun completed(event: JSONObject): String = ReplyStream.completed(event)
 }

@@ -15,5 +15,5 @@ unset TYPESAFE_API_KEY
 ./gradlew :acc-chatgpt:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
 cd ..
 mkdir -p builds
-cp android/app/build/outputs/apk/release/app-release.apk builds/ACC-Android-build-7.apk
-sha256sum builds/ACC-Android-build-7.apk
+cp android/app/build/outputs/apk/release/app-release.apk builds/ACC-Android-build-8.apk
+sha256sum builds/ACC-Android-build-8.apk
