@@ -41,7 +41,7 @@ export default function WorkspaceScreen() {
   const [noteReady, setNoteReady] = useState(false);
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteError, setNoteError] = useState('');
-  const [terminal, setTerminal] = useState(['ACC local console · build 7', 'Type help for workspace commands. Shell execution is not connected.']);
+  const [terminal, setTerminal] = useState(['ACC local console · build 8', 'Type help for workspace commands. Shell execution is not connected.']);
   const [command, setCommand] = useState('');
   const writeQueue = useRef(Promise.resolve());
   const noteQueue = useRef(0);
@@ -143,7 +143,7 @@ export default function WorkspaceScreen() {
   return <SafeAreaView style={s.safe}>
     <KeyboardAvoidingView style={s.grow} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={s.grow} accessibilityElementsHidden={modal !== null || chatGPT.welcomePending} importantForAccessibility={modal !== null || chatGPT.welcomePending ? 'no-hide-descendants' : 'auto'}>
-      <View style={s.header}><View style={s.brandMark}><Text style={s.brandIcon}>A</Text></View><View style={s.grow}><Text style={s.brand}>ACC <Text style={s.brandSub}>/ COMMAND CENTER</Text></Text><Text style={s.muted}>{currentProject?.name || 'Workspace'} · Android build 7</Text></View><Button title="Connections" onPress={() => setModal('providers')} /></View>
+      <View style={s.header}><View style={s.brandMark}><Text style={s.brandIcon}>A</Text></View><View style={s.grow}><Text style={s.brand}>ACC <Text style={s.brandSub}>/ COMMAND CENTER</Text></Text><Text style={s.muted}>{currentProject?.name || 'Workspace'} · Android build 8</Text></View><Button title="Connections" onPress={() => setModal('providers')} /></View>
       <View style={s.projectRow}><ScrollView horizontal contentContainerStyle={{ gap: 6, alignItems: 'center' }}>{workspace.projects.map(p => <Button key={p.id} title={p.name} active={p.id === project} onPress={() => { setProject(p.id); setSelected(null); }} />)}<Button title="+ Project" disabled={!ready} onPress={() => setModal('project')} /></ScrollView></View>
       {error ? <Text accessibilityRole="alert" style={s.warning}>{error}</Text> : null}
       {!ready ? <ActivityIndicator color={C.blue} style={{ margin: 10 }} /> : null}

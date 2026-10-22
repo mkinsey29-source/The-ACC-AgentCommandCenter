@@ -38,6 +38,9 @@ internal class ChatFailure(
         "INTERRUPTED" -> "The reply stream ended before completion. Its outcome is unknown."
         "INCOMPLETE" -> "ChatGPT returned an incomplete response."
         "CONTENT_TYPE" -> "ChatGPT returned a reply format ACC could not use. Keep your sign-in and report this diagnostic."
+        "EVENT_JSON", "EVENT_TEXT", "COMPLETE_TYPE", "COMPLETE_SHAPE", "COMPLETE_STATUS", "COMPLETE_OUTPUT" -> "ACC could not decode a reply event. Keep your sign-in and report this diagnostic."
+        "EMPTY_OUTPUT" -> "ChatGPT ended the response without readable reply text."
+        "LINE_LIMIT", "EVENT_LIMIT", "STREAM_LIMIT", "OUTPUT_LIMIT" -> "The reply exceeded ACC's supported size."
         else -> "ChatGPT did not complete the reply."
       }
     }
