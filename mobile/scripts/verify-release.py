@@ -42,7 +42,11 @@ with zipfile.ZipFile(apk) as z:
             header = struct.unpack_from('<IIQQQQQQ', data, offset + i * size)
             assert header[0] != 1 or header[-1] >= 16384, p
     metadata['native_libraries'] = len(libs)
-    metadata['hermes_version'] = struct.unpack_from('<I', z.read('assets/index.android.bundle'), 8)[0]
+    bundle = z.read('assets/index.android.bundle')
+    metadata['hermes_version'] = struct.unpack_from('<I', bundle, 8)[0]
+    for marker in [b'GitHub access token', b'Open Claude Code in browser', b'Attach to next ChatGPT message']:
+        assert marker in bundle, 'Build9 JavaScript feature marker missing'
+    metadata['build9_feature_markers'] = True
     assert metadata['hermes_version'] == 99
     assert any(b'AccChatGPT' in z.read(p) for p in z.namelist() if p.endswith('.dex'))
 Path('mobile/builds/build9-verification.json').write_text(json.dumps(metadata, indent=2) + '\n')

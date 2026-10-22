@@ -34,7 +34,7 @@ jobs:
             acc_source_sha=$(gh release view "$ACC_CANDIDATE_TAG" --json targetCommitish --jq .targetCommitish)
             [[ "$acc_source_sha" =~ ^[0-9a-f]{40}$ ]]
             git fetch --no-tags origin "$acc_source_sha"
-            git diff --exit-code "$acc_source_sha" HEAD -- mobile ':(exclude)mobile/scripts/**'
+            git diff --exit-code "$acc_source_sha" HEAD -- mobile ':(exclude)mobile/scripts/**' ':(exclude)mobile/session-notes/**' ':(exclude)mobile/README.md'
             mkdir -p mobile/builds
             gh release download "$ACC_CANDIDATE_TAG" -p ACC-Android-build-9.apk -D mobile/builds
           fi

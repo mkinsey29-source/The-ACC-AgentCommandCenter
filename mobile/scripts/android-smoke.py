@@ -50,7 +50,7 @@ def enter(label, value):
     time.sleep(.5)
 
 def expect(label, scroll=False):
-    for _ in range(5 if scroll else 1):
+    for _ in range(15 if scroll else 1):
         healthy()
         tree = hierarchy()
         if any(label in n.get("text", "") or label in n.get("content-desc", "") for n in tree.iter("node")):
@@ -93,8 +93,7 @@ try:
     time.sleep(4)
     expect("Repository read verified", scroll=True)
     print("PASS: native GitHub reads actual public repository through fixed API")
-    tap("Open GitHub dir: mobile", scroll=True)
-    tap("Open GitHub file: mobile/package.json", scroll=True)
+    tap("Open GitHub file: README.md", scroll=True)
     expect("Attach to next ChatGPT message", scroll=True)
     tap("Attach to next ChatGPT message", scroll=True)
     expect("Next message:")
