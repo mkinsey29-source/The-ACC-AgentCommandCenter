@@ -1,3 +1,5 @@
+import { GitHubAttachment } from './github';
+import { ClaudeSetup } from './ClaudeSetup';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { uuid } from 'expo';
 import { useEffect, useRef, useState } from 'react';
@@ -9,11 +11,11 @@ import { Connection, Job, Message, Provider, providerNames, runtimeRequest, safe
 type History = { messages: Message[]; pending?: string; problem?: string };
 const blank: History = { messages: [] };
 
-export function Chat({ connection, project, openConnections, account }: { connection: Connection | null; project: string; openConnections: () => void; account?: ChatGPTAccount }) {
+export function Chat({ connection, project, openConnections, account, attachment, clearAttachment, repository }: { connection: Connection | null; project: string; openConnections: () => void; account?: ChatGPTAccount; attachment: GitHubAttachment | null; clearAttachment: () => void; repository?: string }) {
   const [provider, setProvider] = useState<Provider | 'chatgpt'>('chatgpt');
   return <View style={s.grow}>
     <View style={s.header}><View style={s.row}>{(['chatgpt', 'claude', 'codex'] as const).filter(p => p !== 'codex' || !!connection).map(p => <Pressable key={p} accessibilityRole="tab" accessibilityState={{ selected: p === provider }} onPress={() => setProvider(p)} style={[s.button, provider === p && s.active]}><Text style={s.text}>{p === 'chatgpt' ? 'ChatGPT' : p === 'codex' ? 'Codex runtime' : providerNames[p]}</Text></Pressable>)}</View><Pressable accessibilityRole="button" onPress={openConnections} style={s.button}><Text style={s.blue}>Connections</Text></Pressable></View>
-    {provider === 'chatgpt' ? <ChatGPTThread key={`${project}:${account?.id || 'none'}`} account={account} project={project} openConnections={openConnections} /> : <Thread key={`${project}:${connection?.id || 'none'}:${provider}`} connection={connection} project={project} provider={provider} openConnections={openConnections} />}
+    {provider === 'chatgpt' ? <ChatGPTThread key={`${project}:${account?.id || 'none'}`} account={account} project={project} openConnections={openConnections} attachment={attachment} clearAttachment={clearAttachment} /> : provider === 'claude' && !connection ? <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }}><ClaudeSetup repository={repository} /><Pressable accessibilityRole="button" onPress={openConnections} style={s.button}><Text style={s.blue}>Set up connections</Text></Pressable></ScrollView> : <Thread key={`${project}:${connection?.id || 'none'}:${provider}`} connection={connection} project={project} provider={provider} openConnections={openConnections} />}
   </View>;
 }
 

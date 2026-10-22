@@ -10,18 +10,18 @@ from pathlib import Path
 from apk_signers import require_same_signers
 
 scratch = Path(os.environ['RUNNER_TEMP'])
-apk = Path('mobile/builds/ACC-Android-build-8.apk')
+apk = Path('mobile/builds/ACC-Android-build-9.apk')
 old = (scratch / 'build3-signature.txt').read_text()
-new = (scratch / 'build8-signature.txt').read_text()
+new = (scratch / 'build9-signature.txt').read_text()
 certificates = require_same_signers(old, new)
 assert 'Verified using v2 scheme (APK Signature Scheme v2): true' in new
-badging = (scratch / 'build8-badging.txt').read_text()
-assert "name='com.agentcommandcenter.acc' versionCode='8' versionName='0.8.0'" in badging
+badging = (scratch / 'build9-badging.txt').read_text()
+assert "name='com.agentcommandcenter.acc' versionCode='9' versionName='0.9.0'" in badging
 assert "sdkVersion:'24'" in badging and "targetSdkVersion:'36'" in badging
-manifest = (scratch / 'build8-manifest.txt').read_text()
+manifest = (scratch / 'build9-manifest.txt').read_text()
 assert re.search(r'android:allowBackup[^\n]*0x0\b', manifest)
 assert re.search(r'expo\.modules\.updates\.ENABLED[^\n]*\n[^\n]*android:value[^\n]*0x0\b', manifest)
-metadata = {'source_sha': os.environ.get('ACC_APK_SOURCE_SHA', os.environ['GITHUB_SHA']), 'verification_sha': os.environ['GITHUB_SHA'], 'bytes': apk.stat().st_size, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'same_signer_as_build3': True, 'versionCode': 8, 'versionName': '0.8.0'}
+metadata = {'source_sha': os.environ.get('ACC_APK_SOURCE_SHA', os.environ['GITHUB_SHA']), 'verification_sha': os.environ['GITHUB_SHA'], 'bytes': apk.stat().st_size, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'same_signer_as_build3': True, 'versionCode': 9, 'versionName': '0.9.0'}
 metadata['certificate_sha256'] = sorted(certificates)
 metadata['packaging_verified'] = True
 reports = [p for p in Path('mobile').rglob('TEST-*.xml') if 'test-results/testDebugUnitTest' in p.as_posix()]
@@ -45,17 +45,11 @@ with zipfile.ZipFile(apk) as z:
     metadata['hermes_version'] = struct.unpack_from('<I', z.read('assets/index.android.bundle'), 8)[0]
     assert metadata['hermes_version'] == 99
     assert any(b'AccChatGPT' in z.read(p) for p in z.namelist() if p.endswith('.dex'))
-Path('mobile/builds/build8-verification.json').write_text(json.dumps(metadata, indent=2) + '\n')
-Path('mobile/builds/build8-release-notes.md').write_text(
-    'Personal Android test APK. Collects streamed reply text and requires response.completed before returning it, including compact terminal events. Handles LF/CRLF/CR, UTF-8 BOM and final-event EOF flush with bounded parsing and specific private diagnostics. Live inference success remains unverified.\n\n'
-    'Install over the existing app; keep your existing sign-in, start a New conversation and send one short message. If it fails, report the ACC-CHAT diagnostic text and request ID only, without credentials or browser addresses. '
-    'The same APK passed native Android 16 emulator panel open/close/back and provider-setup smoke checks. '
-    'Keep the existing sign-in. A completed model reply still needs physical-device acceptance. '
-    'Simple Claude subscription onboarding remains unfinished; its runtime setup is Advanced. '
-    'No Termux is needed for the standard ChatGPT connection.\n\n'
+Path('mobile/builds/build9-verification.json').write_text(json.dumps(metadata, indent=2) + '\n')
+Path('mobile/builds/build9-release-notes.md').write_text(
+    'Personal Android test APK. Adds official Claude Code browser setup plus GitHub repository/branch browsing, pinned UTF-8 file previews and explicit file attachments to the next ChatGPT message. Claude runs on its official browser page, not inside ACC; its sign-in and GitHub authorization stay with Claude.\n\n'
+    'Install over the existing app; do not uninstall. Existing ChatGPT sign-in, Sentry and task data stay on device. Public GitHub repositories need no sign-in. Private access uses a fine-grained selected-repository token entered only in Connections, encrypted on Android. Request Contents: Read-only and an expiry. ACC cannot push, merge or run autonomous repository tools. Files are sent only when deliberately attached and Send is pressed; sent content remains in local chat history.\n\n'
+    'Build8 direct ChatGPT replies were manually accepted. New GitHub private-account access and Claude cloud task completion remain owner acceptance checks. Native smoke uses only public fixtures, no account credentials.\n\n'
     f'Source: {metadata["source_sha"]}\n\nSHA-256: {metadata["sha256"]}\n\nBytes: {metadata["bytes"]}\n\n'
-    'ARM64 tablet/phone plus x86_64 emulator, min24/target36. Same development signer as Build3; OTA and backup disabled. '
-    'Focused checks, native unit tests and Android smoke tests passed; this is not an all-backend-suite green claim. '
-    'Existing runner failures remain open. No production deployment, store publication or commercial subscription approval. '
-    'Never share credentials or callback URLs in chat.\n')
+    'ARM64 tablet/phone plus x86_64 emulator, min24/target36. Same signer as Build3; OTA and backup disabled. No production/store publication or commercial subscription approval. Never share credentials or callback URLs in chat.\n')
 print(json.dumps(metadata, indent=2))

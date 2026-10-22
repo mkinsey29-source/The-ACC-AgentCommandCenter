@@ -1,3 +1,5 @@
+import { ClaudeSetup } from './ClaudeSetup';
+import { GitHubConnections } from './GitHubConnections';
 import { ChatGPTConnections } from './ChatGPTConnections';
 import { ChatGPTStatus } from './chatgpt';
 import { useState } from 'react';
@@ -8,7 +10,7 @@ import { checkRuntime, Connection, normalizeEndpoint, Provider, providerNames, P
 
 const setup = `pkg update\npkg install python git proot-distro\nproot-distro install debian\nproot-distro login debian`;
 
-export function Connections({ connection, onChange, chatGPT, refreshChatGPT }: { connection: Connection | null; onChange: (value: Connection | null) => void; chatGPT: ChatGPTStatus; refreshChatGPT: () => Promise<void> }) {
+export function Connections({ connection, onChange, chatGPT, refreshChatGPT, githubConnected, refreshGitHub, repository }: { connection: Connection | null; onChange: (value: Connection | null) => void; chatGPT: ChatGPTStatus; refreshChatGPT: () => Promise<void>; githubConnected: boolean; refreshGitHub: () => Promise<void>; repository?: string }) {
   const [advanced, setAdvanced] = useState(false);
   const [url, setUrl] = useState(connection?.url || 'http://127.0.0.1:8765');
   const [token, setToken] = useState(connection?.token || '');
@@ -39,8 +41,8 @@ export function Connections({ connection, onChange, chatGPT, refreshChatGPT }: {
   }
   return <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
     <ChatGPTConnections status={chatGPT} refresh={refreshChatGPT} />
-    <Text style={s.heading}>Claude</Text>
-    <Text style={s.text}>Simple subscription setup is not ready for Claude in ACC. Its current connection needs the official Claude Code runtime. You can use ChatGPT above without installing a terminal.</Text>
+    <GitHubConnections connected={githubConnected} refresh={refreshGitHub} />
+    <ClaudeSetup repository={repository} />
     <Pressable accessibilityRole="button" accessibilityState={{ expanded: advanced }} onPress={() => setAdvanced(!advanced)} style={s.button}><Text style={s.blue}>{advanced ? 'Hide advanced runtime setup' : 'Advanced: use an existing runtime'}</Text></Pressable>
     {advanced && <>
     <Text style={s.text}>Optional connection for an existing Claude Code / Codex runtime. It is separate from the direct ChatGPT connection above.</Text>

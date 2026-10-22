@@ -36,7 +36,7 @@ jobs:
             git fetch --no-tags origin "$acc_source_sha"
             git diff --exit-code "$acc_source_sha" HEAD -- mobile ':(exclude)mobile/scripts/**'
             mkdir -p mobile/builds
-            gh release download "$ACC_CANDIDATE_TAG" -p ACC-Android-build-8.apk -D mobile/builds
+            gh release download "$ACC_CANDIDATE_TAG" -p ACC-Android-build-9.apk -D mobile/builds
           fi
           echo "ACC_APK_SOURCE_SHA=$acc_source_sha" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
@@ -64,6 +64,8 @@ jobs:
           npm run lint
           unset TYPESAFE_API_KEY
           npm run test:providers
+          unset TYPESAFE_API_KEY
+          npm run test:github
           cd ..
           unset TYPESAFE_API_KEY
           python3 -m unittest discover -s tests -p test_mobile_runtime.py
@@ -85,35 +87,35 @@ jobs:
         run: |
           mkdir -p mobile/builds
           if [ -z "$ACC_CANDIDATE_TAG" ]; then
-            cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-8.apk
+            cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-9.apk
           fi
-          acc_candidate_tag="android-build-8-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh release create "$acc_candidate_tag" mobile/builds/ACC-Android-build-8.apk --target "$GITHUB_SHA" --draft --prerelease --title "Unverified Build 8 candidate ${GITHUB_SHA}" --notes 'Raw recovery APK. Packaging, signing identity and Android UI validation pending.'
+          acc_candidate_tag="android-build-9-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$acc_candidate_tag" mobile/builds/ACC-Android-build-9.apk --target "$GITHUB_SHA" --draft --prerelease --title "Unverified Build 9 candidate ${GITHUB_SHA}" --notes 'Raw recovery APK. Packaging, signing identity and Android UI validation pending.'
       - name: Verify numbered APK and upgrade signing identity
         run: |
           unset TYPESAFE_API_KEY
           mkdir -p mobile/builds
           if [ -z "$ACC_CANDIDATE_TAG" ]; then
-            cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-8.apk
+            cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-9.apk
           fi
           curl -fL --retry 2 https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-3/ACC-Android-build-3.apk -o "$RUNNER_TEMP/build3.apk"
           acc_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
           "$acc_tools/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/build3.apk" > "$RUNNER_TEMP/build3-signature.txt" 2>&1
-          "$acc_tools/apksigner" verify --verbose --print-certs mobile/builds/ACC-Android-build-8.apk > "$RUNNER_TEMP/build8-signature.txt" 2>&1
-          "$acc_tools/zipalign" -c -P 16 -v 4 mobile/builds/ACC-Android-build-8.apk > "$RUNNER_TEMP/build8-alignment.txt"
-          "$acc_tools/aapt" dump badging mobile/builds/ACC-Android-build-8.apk > "$RUNNER_TEMP/build8-badging.txt"
-          "$acc_tools/aapt" dump xmltree mobile/builds/ACC-Android-build-8.apk AndroidManifest.xml > "$RUNNER_TEMP/build8-manifest.txt"
-          cat "$RUNNER_TEMP/build3-signature.txt" "$RUNNER_TEMP/build8-signature.txt"
+          "$acc_tools/apksigner" verify --verbose --print-certs mobile/builds/ACC-Android-build-9.apk > "$RUNNER_TEMP/build9-signature.txt" 2>&1
+          "$acc_tools/zipalign" -c -P 16 -v 4 mobile/builds/ACC-Android-build-9.apk > "$RUNNER_TEMP/build9-alignment.txt"
+          "$acc_tools/aapt" dump badging mobile/builds/ACC-Android-build-9.apk > "$RUNNER_TEMP/build9-badging.txt"
+          "$acc_tools/aapt" dump xmltree mobile/builds/ACC-Android-build-9.apk AndroidManifest.xml > "$RUNNER_TEMP/build9-manifest.txt"
+          cat "$RUNNER_TEMP/build3-signature.txt" "$RUNNER_TEMP/build9-signature.txt"
           python3 mobile/scripts/verify-release.py
       - name: Attach verification only after packaging checks pass
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          acc_candidate_tag="${ACC_CANDIDATE_TAG:-android-build-8-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
-          if gh release view "$acc_candidate_tag" --json assets --jq '.assets[].name' | grep -Fxq build8-verification.json; then
+          acc_candidate_tag="${ACC_CANDIDATE_TAG:-android-build-9-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
+          if gh release view "$acc_candidate_tag" --json assets --jq '.assets[].name' | grep -Fxq build9-verification.json; then
             echo 'Earlier packaging metadata retained; this run verified the APK again.'
           else
-            gh release upload "$acc_candidate_tag" mobile/builds/build8-verification.json
+            gh release upload "$acc_candidate_tag" mobile/builds/build9-verification.json
           fi
       - name: Prepare Android emulator
         run: |
@@ -139,7 +141,7 @@ jobs:
       - name: Test actual native provider setup panel
         run: |
           unset TYPESAFE_API_KEY
-          adb install -r mobile/builds/ACC-Android-build-8.apk
+          adb install -r mobile/builds/ACC-Android-build-9.apk
           python3 mobile/scripts/android-smoke.py
       - name: Repeat native panel checks at tablet dimensions
         run: |
@@ -153,11 +155,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view android-build-8 >/dev/null 2>&1; then
-            echo 'Build 8 already exists; refusing to overwrite a numbered release.'
+          if gh release view android-build-9 >/dev/null 2>&1; then
+            echo 'Build 9 already exists; refusing to overwrite a numbered release.'
             exit 1
           fi
-          gh release create android-build-8 mobile/builds/ACC-Android-build-8.apk mobile/builds/build8-verification.json --target "$ACC_APK_SOURCE_SHA" --prerelease --title 'ACC Android Build 8 — reply stream assembly' --notes-file mobile/builds/build8-release-notes.md
+          gh release create android-build-9 mobile/builds/ACC-Android-build-9.apk mobile/builds/build9-verification.json --target "$ACC_APK_SOURCE_SHA" --prerelease --title 'ACC Android Build 9 — Claude browser setup and GitHub files' --notes-file mobile/builds/build9-release-notes.md
   baseline:
     if: github.event_name == 'workflow_dispatch' && inputs.baseline
     runs-on: ubuntu-24.04

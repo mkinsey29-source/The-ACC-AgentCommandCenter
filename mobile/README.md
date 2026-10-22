@@ -1,3 +1,13 @@
+# Current Android slice — Build 9
+
+Claude's default setup now opens official Claude Code in the browser, as selected by the owner. Sign-in, GitHub authorization and tasks run there; ACC does not claim an in-app Claude session. No manual terminal/computer required for that route.
+
+The GitHub tab reads public repositories without sign-in. For private repositories, create a fine-grained selected-repository token with Contents: Read-only and an expiry, paste only into Connections, then connect. Android encrypts the token in SecureStore. Choose a repository/branch, preview a UTF-8 file up to30KB, and explicitly attach it to the next ChatGPT message. Files are pinned to a commit and are sent only when Send is pressed; sent content remains in local conversation history. This is repository browsing/context, not autonomous GitHub tools or push/merge.
+
+Build8 live ChatGPT reply acceptance passed. Build9 native/package/public delivery and new account checks are tracked in [handoff](session-notes/android-build9-20261021/handoff.md). Preserve signing, install over the current app, keep data/OTA-off.
+
+## Earlier build records retained
+
 # ACC Android · build 3
 
 Current personal test: [ACC Android Build 8](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-8/ACC-Android-build-8.apk). Install over the existing app and keep the current sign-in. Start **New conversation** and send a short message. Build8 collects reply chunks through terminal completion, accepts compact completed events and fixes SSE framing compatibility. Actual completed live provider access remains unverified. If it fails report only the safe `ACC-CHAT-…` diagnostic and request ID. Native phone/tablet checks,36 native units and packaging/signing checks pass; OTA remains off. Simple Claude subscription onboarding remains unfinished. [Current continuation packet](session-notes/android-build8-20261021/handoff.md).

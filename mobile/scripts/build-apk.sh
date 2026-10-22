@@ -9,11 +9,15 @@ unset TYPESAFE_API_KEY
 npm run typecheck
 unset TYPESAFE_API_KEY
 npm run lint
+unset TYPESAFE_API_KEY
+npm run test:providers
+unset TYPESAFE_API_KEY
+npm run test:github
 npx expo prebuild --platform android --no-install
 cd android
 unset TYPESAFE_API_KEY
 ./gradlew :acc-chatgpt:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
 cd ..
 mkdir -p builds
-cp android/app/build/outputs/apk/release/app-release.apk builds/ACC-Android-build-8.apk
-sha256sum builds/ACC-Android-build-8.apk
+cp android/app/build/outputs/apk/release/app-release.apk builds/ACC-Android-build-9.apk
+sha256sum builds/ACC-Android-build-9.apk
