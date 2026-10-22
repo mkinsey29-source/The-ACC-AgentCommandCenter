@@ -5,6 +5,11 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.net.SocketTimeoutException
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
 
 class ChatProtocolTest {
   private val secret = "private-prompt-or-token-must-not-be-shown"
@@ -68,5 +73,80 @@ class ChatProtocolTest {
     assertEquals("ACC-CHAT-REQUEST-TIMEOUT", e.diagnostic); assertFalse(e.userMessage().contains(secret))
     assertEquals("CANCELLED", ChatFailure.wrap(ChatStage.REQUEST, java.io.IOException(secret), cancelled = true).reason)
     assertEquals("CANCELLED", failure { ChatProtocol.read(200, "text/event-stream", "data: ${completed()}\n\n".reader(), null) { throw ChatFailure(ChatStage.STREAM, "CANCELLED") } }.reason)
+  }
+  @Test fun streamRequestExplicitlyNegotiatesEventsWithoutChangingPayloadOrBilling() {
+    val body = ChatProtocol.requestBody("catalog-model", """[{"role":"user","text":"one"}]""")
+    val request = ChatProtocol.streamRequest(body, "fixture-token")
+    assertEquals("https://api.openai.com/v1/responses", request.url.toString())
+    assertEquals("POST", request.method)
+    assertEquals("text/event-stream", request.header("Accept"))
+    assertEquals("Bearer fixture-token", request.header("Authorization"))
+    assertNull(request.header("OpenAI-Organization")); assertNull(request.header("OpenAI-Project"))
+    val bytes = okio.Buffer(); requireNotNull(request.body).writeTo(bytes)
+    assertEquals(body, bytes.readUtf8()); assertEquals("application/json; charset=utf-8", request.body!!.contentType().toString())
+  }
+  @Test fun missingOrBlankContentTypeAcceptsOnlyCompletedEvents() {
+    for (contentType in listOf(null, "", "   ")) {
+      assertEquals("Reply 👋", ChatProtocol.read(200, contentType, "data: ${completed()}\n\n".reader(), null))
+    }
+    assertEquals("Reply 👋", ChatProtocol.read(200, "TEXT/EVENT-STREAM; charset=UTF-8", ": keepalive\r\n\r\ndata: ${completed()}\r\n\r\n".reader(), null))
+  }
+  @Test fun missingContentTypeNeverPromotesJsonHtmlPartialOrFailedOutput() {
+    val partial = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
+    for (raw in listOf("", "<html>$secret</html>\n", completed().toString(), partial, partial + "data: [DONE]\n\n")) {
+      val e = failure { ChatProtocol.read(200, null, raw.reader(), "req_fixture") }
+      assertEquals("INTERRUPTED", e.reason); assertFalse(e.userMessage().contains(secret))
+    }
+    val e = failure { ChatProtocol.read(200, null, "data: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"$secret\"}\n\n".reader(), "req_fixture") }
+    assertEquals("server_error", e.providerCode); assertFalse(e.userMessage().contains(secret))
+    assertEquals("CANCELLED", failure { ChatProtocol.read(200, null, "data: ${completed()}\n\n".reader(), null) { throw ChatFailure(ChatStage.STREAM, "CANCELLED") } }.reason)
+  }
+  @Test fun conflictingContentTypeIsClassifiedWithoutReadingOrExposingRawHeader() {
+    val reader = object : java.io.Reader() {
+      override fun read(chars: CharArray, offset: Int, length: Int): Int = throw AssertionError("Must not read conflicting media type")
+      override fun close() {}
+    }
+    for ((mime, shape) in listOf("application/json" to "JSON", "text/html; charset=utf-8" to "HTML", "text/plain" to "TEXT", secret to "OTHER")) {
+      val e = failure { ChatProtocol.read(200, mime, reader, secret) }
+      assertEquals("ACC-CHAT-RESPONSE-CONTENT_TYPE-$shape", e.diagnostic)
+      assertFalse(e.userMessage().contains(secret)); assertNull(e.requestId)
+    }
+  }
+  @Test fun actualHttpResponseWithoutContentTypeCompletesOneRequest() {
+    // Reproduce the documented direct-route response at the OkHttp/Reader boundary.
+    // Only the fixture destination changes; production headers/body builder is used.
+    val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")); server.soTimeout = 5000
+    val worker = Executors.newSingleThreadExecutor()
+    val client = OkHttpClient.Builder().retryOnConnectionFailure(false).followRedirects(false)
+      .callTimeout(5, TimeUnit.SECONDS).build()
+    try {
+      val received = worker.submit<List<String>> {
+        server.accept().use { socket ->
+          socket.soTimeout = 5000
+          val input = socket.getInputStream().bufferedReader(Charsets.UTF_8)
+          val headers = mutableListOf<String>()
+          while (true) { val line = requireNotNull(input.readLine()); if (line.isEmpty()) break; headers.add(line) }
+          val length = headers.single { it.startsWith("Content-Length:", ignoreCase = true) }.substringAfter(':').trim().toInt()
+          val body = CharArray(length); var count = 0
+          while (count < length) { val n = input.read(body, count, length - count); check(n > 0); count += n }
+          check(JSONObject(String(body)).getBoolean("stream"))
+          val payload = "data: ${completed()}\n\n".toByteArray(Charsets.UTF_8)
+          socket.getOutputStream().apply {
+            write("HTTP/1.1 200 OK\r\nContent-Length: ${payload.size}\r\nx-request-id: req_fixture_http\r\nConnection: close\r\n\r\n".toByteArray(Charsets.US_ASCII))
+            write(payload); flush()
+          }
+          headers
+        }
+      }
+      val request = ChatProtocol.streamRequest(ChatProtocol.requestBody("catalog-model", """[{"role":"user","text":"one"}]"""), "fixture-token")
+        .newBuilder().url("http://127.0.0.1:${server.localPort}/responses").build()
+      client.newCall(request).execute().use { response ->
+        assertEquals(200, response.code); assertNull(response.header("Content-Type"))
+        assertEquals("Reply 👋", ChatProtocol.read(response.code, response.header("Content-Type"), response.body!!.charStream(), response.header("x-request-id")))
+      }
+      assertTrue(received.get(5, TimeUnit.SECONDS).any { it.equals("Accept: text/event-stream", ignoreCase = true) })
+    } finally {
+      server.close(); worker.shutdownNow(); client.dispatcher.executorService.shutdownNow(); client.connectionPool.evictAll()
+    }
   }
 }
