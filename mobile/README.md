@@ -1,8 +1,8 @@
 # ACC Android · build 3
 
-Current personal test: [ACC Android Build 6](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-6/ACC-Android-build-6.apk). Install over the existing app and keep the existing sign-in. Start **New conversation** and send a short message. Build6 adds safe `ACC-CHAT-…` reply diagnostics; report only that diagnostic and safe request ID if it fails. A completed live reply and the original failure cause remain unverified. Never share credentials or callback URLs. Native phone/tablet checks, 18 native unit tests and packaging/signing checks pass; OTA remains off. Simple Claude subscription onboarding remains unfinished. [Current continuation packet](session-notes/android-build6-20261021/handoff.md).
+Current personal test: [ACC Android Build 7](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-7/ACC-Android-build-7.apk). Install over the existing app and keep the current sign-in. Start **New conversation** and send a short message. Build7 fixes the direct-route missing response Content-Type compatibility case and explicitly requests an event stream. A reply still requires terminal completion; actual live provider access remains unverified. If it fails report only the safe `ACC-CHAT-…` diagnostic and request ID. Native phone/tablet checks, 23 native unit tests and packaging/signing checks pass; OTA remains off. Simple Claude subscription onboarding remains unfinished. [Current continuation packet](session-notes/android-build7-20261021/handoff.md).
 
-Previous Build5 added safe sign-in diagnostics and is superseded by Build6.
+Previous Build5/6 sign-in/reply diagnostics are included and superseded by Build7.
 
 React Native + Expo standalone Android workspace. APK iterations are the primary feedback loop. OTA updates are disabled. The existing Python ACC and desktop/web surfaces remain intact.
 
@@ -64,5 +64,3 @@ Browser export is a UI/persistence preview and cannot validate Android SAF or na
 ## Reuse
 
 See [REUSE.md](REUSE.md) for observed source candidates. No external application source was copied into build1. Existing code informs the boundaries; runtime/native bridges can be ported as useful app slices rather than requiring whole-project migration.
-
-Build7 is in preparation: fixes the documented direct-route missing Content-Type compatibility case while retaining completion-only success. See [Build7 handoff](session-notes/android-build7-20261021/handoff.md).
