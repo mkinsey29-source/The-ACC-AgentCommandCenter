@@ -1,8 +1,8 @@
 # ACC Android · build 3
 
-Current personal test: [ACC Android Build 7](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-7/ACC-Android-build-7.apk). Install over the existing app and keep the current sign-in. Start **New conversation** and send a short message. Build7 fixes the direct-route missing response Content-Type compatibility case and explicitly requests an event stream. A reply still requires terminal completion; actual live provider access remains unverified. If it fails report only the safe `ACC-CHAT-…` diagnostic and request ID. Native phone/tablet checks, 23 native unit tests and packaging/signing checks pass; OTA remains off. Simple Claude subscription onboarding remains unfinished. [Current continuation packet](session-notes/android-build7-20261021/handoff.md).
+Current personal test: [ACC Android Build 8](https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/releases/download/android-build-8/ACC-Android-build-8.apk). Install over the existing app and keep the current sign-in. Start **New conversation** and send a short message. Build8 collects reply chunks through terminal completion, accepts compact completed events and fixes SSE framing compatibility. Actual completed live provider access remains unverified. If it fails report only the safe `ACC-CHAT-…` diagnostic and request ID. Native phone/tablet checks,36 native units and packaging/signing checks pass; OTA remains off. Simple Claude subscription onboarding remains unfinished. [Current continuation packet](session-notes/android-build8-20261021/handoff.md).
 
-Previous Build5/6 sign-in/reply diagnostics are included and superseded by Build7.
+Previous Build5/6/7 sign-in/reply diagnostics are included and superseded by Build8.
 
 React Native + Expo standalone Android workspace. APK iterations are the primary feedback loop. OTA updates are disabled. The existing Python ACC and desktop/web surfaces remain intact.
 
@@ -64,5 +64,3 @@ Browser export is a UI/persistence preview and cannot validate Android SAF or na
 ## Reuse
 
 See [REUSE.md](REUSE.md) for observed source candidates. No external application source was copied into build1. Existing code informs the boundaries; runtime/native bridges can be ported as useful app slices rather than requiring whole-project migration.
-
-Build8 is in preparation: assemble streamed text through terminal completion and support the official stream framing. [Build8 continuation](session-notes/android-build8-20261021/handoff.md).
