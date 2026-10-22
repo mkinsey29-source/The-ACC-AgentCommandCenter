@@ -90,7 +90,7 @@ jobs:
             cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/builds/ACC-Android-build-9.apk
           fi
           acc_candidate_tag="android-build-9-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh release create "$acc_candidate_tag" mobile/builds/ACC-Android-build-9.apk --target "$GITHUB_SHA" --draft --prerelease --title "Unverified Build 9 candidate ${GITHUB_SHA}" --notes 'Raw recovery APK. Packaging, signing identity and Android UI validation pending.'
+          gh release create "$acc_candidate_tag" mobile/builds/ACC-Android-build-9.apk --target "$ACC_APK_SOURCE_SHA" --draft --prerelease --title "Unverified Build 9 candidate ${GITHUB_SHA}" --notes 'Raw recovery APK. Packaging, signing identity and Android UI validation pending.'
       - name: Verify numbered APK and upgrade signing identity
         run: |
           unset TYPESAFE_API_KEY
