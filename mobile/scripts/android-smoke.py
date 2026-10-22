@@ -44,8 +44,13 @@ def tap(label, scroll=False):
         time.sleep(.5)
     raise AssertionError("UI control not found: " + label)
 
+def enter(label, value):
+    tap(label, scroll=True)
+    adb("shell", "input", "text", value)
+    time.sleep(.5)
+
 def expect(label, scroll=False):
-    for _ in range(5 if scroll else 1):
+    for _ in range(15 if scroll else 1):
         healthy()
         tree = hierarchy()
         if any(label in n.get("text", "") or label in n.get("content-desc", "") for n in tree.iter("node")):
@@ -59,9 +64,11 @@ adb("logcat", "-c")
 adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity")
 time.sleep(5)
 try:
-    # The precise owner-reported trigger, from the Claude tab.
     tap("Claude Code")
-    tap("Set up connections")
+    expect("Claude Code in the browser")
+    expect("Open Claude Code in browser", scroll=True)
+    print("PASS: Claude tab presents supported browser handoff without claiming sign-in")
+    tap("Set up connections", scroll=True)
     expect("Provider connections")
     print("PASS: Claude Set up connections opens native panel")
     tap("Close")
@@ -69,8 +76,6 @@ try:
     tap("Connect ChatGPT")
     expect("Provider connections")
     print("PASS: ChatGPT Connect ChatGPT opens native panel")
-    # A local validation error exercises the status Text which crashed Android
-    # with accessibilityRole="status". No real pairing secret or network needed.
     tap("Advanced: use an existing runtime", scroll=True)
     tap("Pair and check both", scroll=True)
     expect("Invalid saved connection", scroll=True)
@@ -80,8 +85,25 @@ try:
     healthy()
     expect("Connect ChatGPT")
     print("PASS: Android Back dismisses the panel without leaving ACC")
+    tap("GITHUB")
+    expect("Connect private repositories")
+    enter("GitHub repository", "mkinsey29-source/The-ACC-AgentCommandCenter")
+    adb("shell", "input", "keyevent", "4")
+    tap("Open repository")
+    time.sleep(4)
+    expect("Repository read verified", scroll=True)
+    print("PASS: native GitHub reads actual public repository through fixed API")
+    tap("Open GitHub file: README.md", scroll=True)
+    expect("Attach to next ChatGPT message", scroll=True)
+    tap("Attach to next ChatGPT message", scroll=True)
+    expect("Next message:")
+    tap("Remove attachment")
+    print("PASS: pinned public file previews, attaches to ChatGPT and can be removed")
     tap("Connect ChatGPT")
     expect("Provider connections")
+    expect("Create GitHub token in browser", scroll=True)
+    expect("GitHub access token", scroll=True)
+    print("PASS: native GitHub credential setup visible without any account data")
     tap("Close")
     for _ in range(3):
         tap("Connections")

@@ -1,6 +1,6 @@
 {
   "name": "acc-android",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/metro-runtime": "~58.0.14",
@@ -38,7 +38,8 @@
     "android:prebuild": "expo prebuild --platform android",
     "lint": "expo lint",
     "test:providers": "node scripts/test-providers.cjs",
-    "test:native-props": "node scripts/test-native-props.cjs"
+    "test:native-props": "node scripts/test-native-props.cjs",
+    "test:github": "node scripts/test-github.cjs"
   },
   "private": true
 }

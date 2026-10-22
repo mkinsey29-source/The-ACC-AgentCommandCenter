@@ -1,3 +1,5 @@
+import { GitHubAttachment, hasGitHubToken } from '../github';
+import { GitHubPanel } from '../GitHubPanel';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
@@ -12,7 +14,7 @@ import { chooseFolder, openVault, readNote, saveNote, Vault } from '../vault';
 
 const C = { bg: '#10151d', panel: '#19212d', line: '#2d3a4e', text: '#e5edf8', muted: '#9aabc2', blue: '#a7cff9', fill: '#243d5c', green: '#a8e0c0', amber: '#f0d39a' };
 const key = 'acc.workspace.v1';
-type Tab = 'Chat' | 'Agents' | 'Tasks' | 'Terminal' | 'Memory';
+type Tab = 'Chat' | 'Agents' | 'Tasks' | 'Terminal' | 'Memory' | 'GitHub';
 function Button({ title, onPress, active = false, disabled = false }: { title: string; onPress: () => void; active?: boolean; disabled?: boolean }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ selected: active, disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [s.button, active && s.buttonActive, (pressed || disabled) && { opacity: 0.55 }]}><Text style={[s.buttonText, active && { color: C.blue }]}>{title}</Text></Pressable>;
 }
@@ -31,6 +33,11 @@ export default function WorkspaceScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<'project' | 'providers' | null>(null);
   const [connection, setConnection] = useState<Connection | null>(null);
+  const [githubConnected, setGitHubConnected] = useState(false);
+  const [githubGeneration, setGitHubGeneration] = useState(0);
+  const [repository, setRepository] = useState('');
+  const [attachment, setAttachment] = useState<(GitHubAttachment & { accountId: string }) | null>(null);
+  async function refreshGitHub() { setGitHubConnected(await hasGitHubToken()); setGitHubGeneration(v => v + 1); setAttachment(null); }
   const [chatGPT, setChatGPT] = useState<ChatGPTStatus>(emptyChatGPT);
   async function refreshChatGPT() { setChatGPT(await chatGPTStatus()); }
   const [projectDraft, setProjectDraft] = useState('');
@@ -41,7 +48,7 @@ export default function WorkspaceScreen() {
   const [noteReady, setNoteReady] = useState(false);
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteError, setNoteError] = useState('');
-  const [terminal, setTerminal] = useState(['ACC local console · build 8', 'Type help for workspace commands. Shell execution is not connected.']);
+  const [terminal, setTerminal] = useState(['ACC local console · build 9', 'Type help for workspace commands. Shell execution is not connected.']);
   const [command, setCommand] = useState('');
   const writeQueue = useRef(Promise.resolve());
   const noteQueue = useRef(0);
@@ -53,6 +60,7 @@ export default function WorkspaceScreen() {
       const loaded = raw ? parseWorkspace(raw) : initialWorkspace;
       setWorkspace(loaded); setProject(loaded.projects[0].id); setSaveStatus('Saving on device…'); setReady(true);
     }).catch(() => { if (alive) setError('Saved workspace could not be opened. It has been preserved.'); });
+    hasGitHubToken().then(value => { if (alive) setGitHubConnected(value); }).catch(() => { if (alive) setError('GitHub credential storage could not be opened. Its data was preserved.'); });
     loadConnection().then(value => { if (alive) setConnection(value); }).catch(() => { if (alive) setError('Runtime pairing could not be opened. Reconnect through Connections.'); });
     openVault().then(v => { if (alive) setVault(v); }).catch(() => { if (alive) setNoteError('Cannot open the saved vault. Check the folder permission in Android settings.'); });
     return () => { alive = false; };
@@ -143,15 +151,15 @@ export default function WorkspaceScreen() {
   return <SafeAreaView style={s.safe}>
     <KeyboardAvoidingView style={s.grow} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={s.grow} accessibilityElementsHidden={modal !== null || chatGPT.welcomePending} importantForAccessibility={modal !== null || chatGPT.welcomePending ? 'no-hide-descendants' : 'auto'}>
-      <View style={s.header}><View style={s.brandMark}><Text style={s.brandIcon}>A</Text></View><View style={s.grow}><Text style={s.brand}>ACC <Text style={s.brandSub}>/ COMMAND CENTER</Text></Text><Text style={s.muted}>{currentProject?.name || 'Workspace'} · Android build 8</Text></View><Button title="Connections" onPress={() => setModal('providers')} /></View>
-      <View style={s.projectRow}><ScrollView horizontal contentContainerStyle={{ gap: 6, alignItems: 'center' }}>{workspace.projects.map(p => <Button key={p.id} title={p.name} active={p.id === project} onPress={() => { setProject(p.id); setSelected(null); }} />)}<Button title="+ Project" disabled={!ready} onPress={() => setModal('project')} /></ScrollView></View>
+      <View style={s.header}><View style={s.brandMark}><Text style={s.brandIcon}>A</Text></View><View style={s.grow}><Text style={s.brand}>ACC <Text style={s.brandSub}>/ COMMAND CENTER</Text></Text><Text style={s.muted}>{currentProject?.name || 'Workspace'} · Android build 9</Text></View><Button title="Connections" onPress={() => setModal('providers')} /></View>
+      <View style={s.projectRow}><ScrollView horizontal contentContainerStyle={{ gap: 6, alignItems: 'center' }}>{workspace.projects.map(p => <Button key={p.id} title={p.name} active={p.id === project} onPress={() => { setProject(p.id); setSelected(null); setAttachment(null); setRepository(''); }} />)}<Button title="+ Project" disabled={!ready} onPress={() => setModal('project')} /></ScrollView></View>
       {error ? <Text accessibilityRole="alert" style={s.warning}>{error}</Text> : null}
       {!ready ? <ActivityIndicator color={C.blue} style={{ margin: 10 }} /> : null}
       <View style={s.body}>
         {wide && tab !== 'Terminal' && <View style={s.leftRail}><Label>WORKSPACE</Label><Text style={s.heading}>{currentProject?.name}</Text><Text style={s.muted}>Local project · chat and planning</Text><View style={s.divider} /><Label>NEEDS ATTENTION</Label><Pressable accessibilityRole="button" onPress={() => setModal('providers')} style={s.attention}><Text style={s.amber}>{connection || chatGPT.accounts.some(a => a.signedIn) ? 'Open provider connections' : 'Connect your first provider'}</Text><Text style={s.muted}>ChatGPT account · optional runtimes</Text></Pressable><View style={s.divider} /><Label>PROGRESS</Label><Text style={s.bigNumber}>{done}<Text style={s.smallNumber}> / {tasks.length}</Text></Text><Text style={s.muted}>Tasks marked done</Text><View style={s.progress}><View style={[s.progressFill, { width: `${tasks.length ? done / tasks.length * 100 : 0}%` }]} /></View><View style={s.divider} /><Label>LOCAL MEMORY</Label><Text style={s.muted}>Readable Markdown. Your decisions, lessons and handoffs stay on this device.</Text><Button title="Open Sentry" onPress={() => setTab('Memory')} /></View>}
         <View style={s.center}>
-          <View style={s.tabs}>{(['Chat', 'Agents', 'Tasks', 'Terminal', 'Memory'] as Tab[]).map(name => <Pressable key={name} accessibilityRole="tab" accessibilityState={{ selected: tab === name }} onPress={() => setTab(name)} style={[s.tab, tab === name && s.tabActive]}><Text style={[s.tabText, tab === name && { color: C.blue }]}>{name.toUpperCase()}</Text></Pressable>)}</View>
-          {tab === 'Chat' ? <Chat account={chatGPT.accounts.find(a => a.id === chatGPT.active)} connection={connection} project={project} openConnections={() => setModal('providers')} /> : tab === 'Memory' ? memory : tab === 'Tasks' ? <>
+          <View style={s.tabs}>{(['Chat', 'GitHub', 'Agents', 'Tasks', 'Terminal', 'Memory'] as Tab[]).map(name => <Pressable key={name} accessibilityRole="tab" accessibilityState={{ selected: tab === name }} onPress={() => setTab(name)} style={[s.tab, tab === name && s.tabActive]}><Text style={[s.tabText, tab === name && { color: C.blue }]}>{name.toUpperCase()}</Text></Pressable>)}</View>
+          {tab === 'Chat' ? <Chat key={project} attachment={attachment?.accountId === chatGPT.active ? attachment : null} clearAttachment={() => setAttachment(null)} repository={repository} account={chatGPT.accounts.find(a => a.id === chatGPT.active)} connection={connection} project={project} openConnections={() => setModal('providers')} /> : tab === 'GitHub' ? <GitHubPanel key={`${project}:${githubGeneration}`} project={project} connected={githubConnected} openConnections={() => setModal('providers')} onRepository={setRepository} attach={file => { setAttachment({ ...file, accountId: chatGPT.active }); setTab('Chat'); }} /> : tab === 'Memory' ? memory : tab === 'Tasks' ? <>
             <View style={s.sectionHeader}><View><Text style={s.heading}>Task board</Text><Text style={s.muted}>{tasks.length} tasks · {done} done · saved locally</Text></View><Text style={s.badge}>MANUAL</Text></View>
             <ScrollView style={s.grow} contentContainerStyle={{ padding: 14, gap: 10 }}>
               {tasks.map((task, i) => <Pressable accessibilityRole="button" accessibilityLabel={`Select task: ${task.title}`} key={task.id} onPress={() => setSelected(task.id)} style={[s.task, selected === task.id && s.taskSelected]}><View style={[s.row, { gap: 12 }]}><Text style={s.taskNumber}>{String(i + 1).padStart(2, '0')}</Text><View style={s.grow}><Text style={s.taskTitle}>{task.title}</Text><Text style={s.muted}>{currentProject.name} · Unassigned</Text></View></View><View style={[s.row, { justifyContent: 'space-between', marginTop: 10 }]}><Text style={[s.status, { color: task.status === 'Done' ? C.green : task.status === 'Review' ? C.amber : C.blue }]}>{task.status}</Text><Button title="Change status" disabled={!ready} onPress={() => advance(task)} /></View></Pressable>)}
@@ -163,7 +171,7 @@ export default function WorkspaceScreen() {
       </View>
       {tab === 'Tasks' && <View style={s.bottomRail}><View style={[s.row, { gap: 8 }]}><View style={s.dot} /><Text style={s.label}>ADD A TASK</Text><Text style={[s.muted, s.grow]} numberOfLines={1}>{saveStatus}</Text></View><View style={s.composer}><TextInput accessibilityLabel="New task" editable={ready} value={draft} maxLength={500} onChangeText={setDraft} onSubmitEditing={addTask} style={s.input} placeholder="Enter a new task…" placeholderTextColor={C.muted} /><Button title="Add task" active disabled={!draft.trim() || !ready} onPress={addTask} /></View>{!wide && <Text numberOfLines={1} style={s.muted}>{workspace.events[0]}</Text>}</View>}
       </View>
-      <Overlay visible={modal !== null || chatGPT.welcomePending} onRequestClose={() => { if (chatGPT.welcomePending) void acknowledgeChatGPTPlan().then(setChatGPT).catch(() => setError('Could not save the plan notice.')); else setModal(null); }}><View style={s.modalBackdrop}><View style={s.modal}>{chatGPT.welcomePending ? <><Text style={s.heading}>You’re using your ChatGPT plan</Text><Text style={s.muted}>Eligible AI requests in ACC use your ChatGPT plan or credits allowance. Manage ACC’s access and usage limits in ChatGPT settings.</Text><Button title="Got it" active onPress={() => acknowledgeChatGPTPlan().then(setChatGPT).catch(() => setError('Could not save the plan notice.'))} /></> : <><View style={s.sectionHeader}><Text style={s.heading}>{modal === 'project' ? 'New project' : 'Provider connections'}</Text><Button title="Close" onPress={() => setModal(null)} /></View>{modal === 'project' ? <><TextInput accessibilityLabel="Project name" autoFocus value={projectDraft} maxLength={80} onChangeText={setProjectDraft} placeholder="Project name" placeholderTextColor={C.muted} style={s.projectInput} /><Button title="Create project" active disabled={!projectDraft.trim()} onPress={() => { const name = projectDraft.trim(); const id = Date.now().toString(36); change(w => ({ ...w, projects: [...w.projects, { id, name }] }), `Project created: ${name}`); setProject(id); setProjectDraft(''); setModal(null); }} /></> : modal === 'providers' ? <Connections connection={connection} onChange={setConnection} chatGPT={chatGPT} refreshChatGPT={refreshChatGPT} /> : null}</>}</View></View></Overlay>
+      <Overlay visible={modal !== null || chatGPT.welcomePending} onRequestClose={() => { if (chatGPT.welcomePending) void acknowledgeChatGPTPlan().then(setChatGPT).catch(() => setError('Could not save the plan notice.')); else setModal(null); }}><View style={s.modalBackdrop}><View style={s.modal}>{chatGPT.welcomePending ? <><Text style={s.heading}>You’re using your ChatGPT plan</Text><Text style={s.muted}>Eligible AI requests in ACC use your ChatGPT plan or credits allowance. Manage ACC’s access and usage limits in ChatGPT settings.</Text><Button title="Got it" active onPress={() => acknowledgeChatGPTPlan().then(setChatGPT).catch(() => setError('Could not save the plan notice.'))} /></> : <><View style={s.sectionHeader}><Text style={s.heading}>{modal === 'project' ? 'New project' : 'Provider connections'}</Text><Button title="Close" onPress={() => setModal(null)} /></View>{modal === 'project' ? <><TextInput accessibilityLabel="Project name" autoFocus value={projectDraft} maxLength={80} onChangeText={setProjectDraft} placeholder="Project name" placeholderTextColor={C.muted} style={s.projectInput} /><Button title="Create project" active disabled={!projectDraft.trim()} onPress={() => { const name = projectDraft.trim(); const id = Date.now().toString(36); change(w => ({ ...w, projects: [...w.projects, { id, name }] }), `Project created: ${name}`); setProject(id); setAttachment(null); setRepository(''); setProjectDraft(''); setModal(null); }} /></> : modal === 'providers' ? <Connections connection={connection} onChange={setConnection} chatGPT={chatGPT} refreshChatGPT={refreshChatGPT} githubConnected={githubConnected} refreshGitHub={refreshGitHub} repository={repository} /> : null}</>}</View></View></Overlay>
     </KeyboardAvoidingView>
   </SafeAreaView>;
 }
