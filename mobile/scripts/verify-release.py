@@ -27,7 +27,7 @@ metadata['packaging_verified'] = True
 reports = [p for p in Path('mobile').rglob('TEST-*.xml') if 'test-results/testDebugUnitTest' in p.as_posix()]
 assert reports, 'Native unit test reports missing'
 metadata['native_unit_tests'] = {key: sum(int(ET.parse(p).getroot().get(key, '0')) for p in reports) for key in ['tests', 'failures', 'errors', 'skipped']}
-assert metadata['native_unit_tests']['tests'] >= 35
+assert metadata['native_unit_tests']['tests'] >= 36
 assert all(metadata['native_unit_tests'][key] == 0 for key in ['failures', 'errors', 'skipped'])
 with zipfile.ZipFile(apk) as z:
     metadata['abis'] = sorted({p.split('/')[1] for p in z.namelist() if p.startswith('lib/') and p.endswith('.so')})

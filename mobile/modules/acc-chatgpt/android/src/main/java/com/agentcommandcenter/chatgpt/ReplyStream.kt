@@ -3,6 +3,7 @@ package com.agentcommandcenter.chatgpt
 import java.io.Reader
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 
 // Wire framing and reply assembly only. No credentials, raw errors or prompt logging.
 internal object ReplyStream {
@@ -26,7 +27,11 @@ internal object ReplyStream {
       val namedError = eventName == "error"
       data = StringBuilder(); eventName = null; hasData = false
       if (raw == "[DONE]") reject("INTERRUPTED")
-      val event = try { JSONObject(raw) } catch (_: Exception) { reject("EVENT_JSON") }
+      val value = try { JSONTokener(raw).nextValue() } catch (_: Exception) { reject("EVENT_JSON") }
+      if (namedError && value !is JSONObject) reject("FAILED")
+      // Match the devkit: valid scalar/array records carry no response event.
+      // They cannot supply reply text or a completion marker.
+      val event = value as? JSONObject ?: return null
       // The SDK treats a named error or top-level error payload as failure even
       // when the JSON omits its type field. Never let a later completion hide it.
       if (namedError || (event.has("error") && !event.isNull("error"))) {

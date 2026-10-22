@@ -29,6 +29,11 @@ class ReplyStreamTest {
   @Test fun devkitTypeOnlyCompletionDoesNotRequireRepeatedSnapshot() {
     assertEquals("Hello", read(record(delta("Hello")) + record(event("response.completed"))))
   }
+  @Test fun validNonObjectJsonRecordsNeverSupplyTextOrCompletion() {
+    val records = listOf("null", "true", "123", "[]", "\"$secret\"").joinToString("") { "data: $it\n\n" }
+    assertEquals("Hello", read(records + record(delta("Hello")) + record(terminal())))
+    val e = failure(records); assertEquals("INTERRUPTED", e.reason); assertFalse(e.userMessage().contains(secret))
+  }
   @Test fun fullSnapshotIsAuthoritativeAndNeverDuplicatedWithDeltas() {
     assertEquals("Final", read(record(delta("Partial")) + record(full("Final"))))
     assertEquals("Final", read(record(full("Final"))))
@@ -79,6 +84,7 @@ class ReplyStreamTest {
     val raw = record(delta("partial")) + "event: error\ndata: $error\n\n" + record(terminal())
     val e = failure(raw); assertEquals("server_error", e.providerCode); assertFalse(e.userMessage().contains(secret))
     assertEquals("FAILED", failure(record(JSONObject().put("error", error)) + record(full("must not return"))).reason)
+    assertEquals("FAILED", failure("event: error\ndata: \"$secret\"\n\n" + record(full("must not return"))).reason)
     assertEquals("FAILED", failure(record(delta("partial")) + record(terminal().put("response", JSONObject().put("error", error)))).reason)
   }
   @Test fun cancellationAndNetworkFailureNeverReturnBufferedPartialText() {
