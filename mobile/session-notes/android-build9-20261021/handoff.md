@@ -1,3 +1,11 @@
+## Current stopping point — retry compiling
+
+Source99376eb0d33f528a1e8f5aae9dd81af480413fc9, retry https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/actions/runs/39711591714 ; job119603949797. Initial39709812635/3ed compiled then raw-preservation403; no APK retained, packaging/UI/publication skipped. Retry adds recoverable one-day Actions fallback (one APK copy) and post-native validated metadata, without removing gates. Connected account prepared candidate tag android-build-9-candidate-39711591714-1 at exact source; no APK claim yet.
+
+Next: wait for compile, raw preservation, packaging and both actual native smoke layouts. If raw draft release works, retain its asset and metadata; otherwise obtain raw artifact and the separate validated metadata record from the same successful run. Publish through authorized connected GitHub account only after gates. If final workflow release creation403, this is API permission failure, not app validation success or platform review rejection; promote the tested private candidate through the connected account, then independently download/hash/inspect public APK. Do not recreate or distribute the lost first APK or call the first run native-UI passing.
+
+Current source CI39711593451 passed553/version (one3.10skip). Actual public TypeScript client read13 root entries and12649-char README at66db9181dc6ac01f267cd00dd4e9b71c23af2b6f with key unset; Android/private-account/Claude cloud task checks remain separate. PR52 draft/unmerged. Local code/tests and earlier required acceptance checklist retained below. GitHub is read-only browsing/context, not autonomous tools.
+
 # Build 9 continuation
 
 Codex implementer, task ACC-APK9-20261021-01; October21,2026 America/New_York. Branch feature/android-build9-claude-github-20261021, base e77d4020c98150819fea761524fb4253da78360d / draft PR51, stacked and unmerged. Repository owns code; Drive continuity will point to this record. Repo3.2/module Android/Drive root3.2/ACC3.3 policies read. Routine Android development and personal-test delivery authorized; no separate-review prerequisite, no subagents/independent review claimed. Actual platform checks and PR35/production/store gates retained.
