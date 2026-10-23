@@ -1,5 +1,15 @@
 ## Second Brain — repository execution and Drive entry
-Version: 3.2 — 2026-10-03 approved summary roles and orchestrator reporting
+Version: 3.4 — 2026-10-23; owner-approved ACC single-agent exception and verified PR35 status; original summary/reporting protocol retained
+
+## ACC single-agent review exception — owner instruction 2026-10-21
+
+Marvin is currently using one agent and has suspended mandatory automatic, independent or second-agent review for ACC development and personal testing until he explicitly reinstates it. Do not automatically dispatch a reviewer or block authorized implementation, workflow updates, focused tests, feature-branch commits/draft PRs or numbered personal-test APK delivery waiting for another agent. The implementing agent performs and records the applicable checks; call this self-validation, never independent review.
+
+This explicit ACC-only owner exception takes precedence over inherited generic review prerequisites in Drive-root policy, this file, module instructions and historical review/handoff records for the stated development/personal-test scope. Review is optional when Marvin requests it, not an automatic prerequisite. It changes no other project's rules and does not close unresolved findings or convert unrun checks into passes.
+
+Preserve tests, security checks, artifact/signing/package/data/OTA validation, honest evidence, isolated ownership and all separate production, store publication, commercial/provider-access and permission gates. This exception does not authorize unrelated application merges or production-runtime integration. Historical review findings remain evidence and must be addressed where relevant. Platform tool-approval checks and repository access/security protections are separate and are not disabled by this policy.
+
+Authorization: Marvin's direct request in ChatGPT, 2026-10-21 23:53:06 UTC, message Sentinel_f130754a73a08191ac42fcf10e217fe6. Current source of this exception: ACC Drive AGENTS.md (file 1DShX5lan_mvZhgMeXVofd21z4RGGNmk0) and repository AGENTS.md. Retain the exception in new development branches; older branch instructions do not reinstate the suspended review requirement.
 
 ### Entry and source of truth
 Read Drive-root [AGENTS.md](https://drive.google.com/file/d/1BPuaOz5tZ3wDrhoGuBmgWEgQ4evGI35U/view) once per session. Read [ACC-Agent Command Center/AGENTS.md](https://drive.google.com/file/d/1DShX5lan_mvZhgMeXVofd21z4RGGNmk0/view?usp=drivesdk). Project folder: https://drive.google.com/drive/folders/1yozjqM3sAt9ySZUPIj77PVZ1cOj3uPIf. Locate the authorized project's existing folder under 50_Projects through live listings and verified IDs; do not create duplicates or assume similarly named repositories share a Drive project. Read the applicable project/parent AGENTS.md, consolidated_summary.md, current handoff.md and relevant lessons.md, then newer session_summary.md and local review evidence to identify progress after the baseline.
@@ -24,4 +34,4 @@ At 10 a.m. and 10 p.m. Central (America/Chicago), the orchestrator checks every 
 The separate timestamped orchestrator report in /Orchestrator_Reports/ is Marvin's concise Drive-wide overview of today's work, current project positions, blockers, reviews and decisions; retain earlier reports without overwriting. No separate Drive-root summary is required.
 At 10 p.m., the orchestrator reviews repository/module, Drive-root and project AGENTS.md files. Its report records coverage/gaps and proposed changes with affected file, evidence, concrete reason/benefit and tradeoffs. Valid project-specific differences are allowed. Suggestions do not authorize policy changes; user-approved changes may proceed. A documented schedule is not proof that a run occurred.
 
-ACC-specific retained gate: PR #35 production-runtime integration requires Marvin's explicit authorization. Updating this policy does not merge or authorize that application PR.
+ACC-specific verified status and retained safeguards: PR #35 merged on 2026-10-17 at 18:10:39 UTC (merge commit 66db9181dc6ac01f267cd00dd4e9b71c23af2b6f; https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/pull/35). It is not a pending draft/integration prerequisite. That merge does not establish production acceptance or authorize deployment, runtime restart, store publication or additional integration; those safeguards and any unresolved findings retain their separate requirements.
