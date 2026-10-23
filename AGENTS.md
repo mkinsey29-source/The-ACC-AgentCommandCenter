@@ -1,5 +1,5 @@
 ## Second Brain — repository execution and Drive entry
-Version: 3.2 — 2026-10-03 approved summary roles and orchestrator reporting
+Version: 3.4 — 2026-10-23; owner-approved ACC single-agent exception and verified PR35 status; original summary/reporting protocol retained
 
 ## ACC single-agent review exception — owner instruction 2026-10-21
 
@@ -34,4 +34,4 @@ At 10 a.m. and 10 p.m. Central (America/Chicago), the orchestrator checks every 
 The separate timestamped orchestrator report in /Orchestrator_Reports/ is Marvin's concise Drive-wide overview of today's work, current project positions, blockers, reviews and decisions; retain earlier reports without overwriting. No separate Drive-root summary is required.
 At 10 p.m., the orchestrator reviews repository/module, Drive-root and project AGENTS.md files. Its report records coverage/gaps and proposed changes with affected file, evidence, concrete reason/benefit and tradeoffs. Valid project-specific differences are allowed. Suggestions do not authorize policy changes; user-approved changes may proceed. A documented schedule is not proof that a run occurred.
 
-ACC-specific retained gate: PR #35 production-runtime integration requires Marvin's explicit authorization. Updating this policy does not merge or authorize that application PR.
+ACC-specific verified status and retained safeguards: PR #35 merged on 2026-10-17 at 18:10:39 UTC (merge commit 66db9181dc6ac01f267cd00dd4e9b71c23af2b6f; https://github.com/mkinsey29-source/The-ACC-AgentCommandCenter/pull/35). It is not a pending draft/integration prerequisite. That merge does not establish production acceptance or authorize deployment, runtime restart, store publication or additional integration; those safeguards and any unresolved findings retain their separate requirements.
