@@ -1,0 +1,2 @@
+# Optional server-side sideband transport; not installed by the working ACC app.
+websockets>=14,<16

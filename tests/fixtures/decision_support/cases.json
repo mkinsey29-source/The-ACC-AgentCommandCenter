@@ -1,0 +1,16 @@
+[
+  {"id":"unchanged-evidence","category":"orchestrator","candidate":"unchanged","expected":"unchanged","baseline":"unchanged","facts":{"previous_revision":"a","current_revision":"a","inventory":"all inspected"}},
+  {"id":"material-change","category":"orchestrator","candidate":"material_change","expected":"material_change","baseline":"material_change","facts":{"previous_revision":"a","current_revision":"b","changed":"new blocker"}},
+  {"id":"stale-summary","category":"orchestrator","candidate":"unchanged","expected":null,"baseline":"missing_evidence","stale":true,"facts":{"summary_revision":"a","source_revision":"b"}},
+  {"id":"denied-summary-write","category":"orchestrator","candidate":"owner_decision_required","expected":"owner_decision_required","baseline":"owner_decision_required","denied_writes":["ACC-summary-overwrite"],"facts":{"write":"denied","new_authorization":false}},
+  {"id":"missing-scope","category":"skillopt","candidate":"verified_outcome","expected":null,"baseline":"insufficient_evidence","missing_scope":true,"facts":{}},
+  {"id":"recovered-history","category":"skillopt","candidate":"reported_claim","expected":"reported_claim","baseline":"reported_claim","kind":"history","facts":{"source_at":"2026-09-17T10:00:00Z","recovered_at":"2026-10-24T15:00:00Z","new_current_acceptance":false}},
+  {"id":"unsupported-success","category":"skillopt","candidate":"verified_outcome","expected":null,"baseline":"reported_claim","kind":"claim","facts":{"assistant":"all done","corroboration":false}},
+  {"id":"ci-only-success","category":"skillopt","candidate":"verified_outcome","expected":null,"baseline":"insufficient_evidence","kind":"ci","facts":{"ci":"green","physical_device":"not run"}},
+  {"id":"ambiguous-evidence","category":"skillopt","candidate":"insufficient_evidence","expected":"insufficient_evidence","baseline":"insufficient_evidence","kind":"ambiguous","facts":{"conflicting_results":true}},
+  {"id":"corroborated-failure","category":"skillopt","candidate":"failed","expected":"failed","baseline":"failed","kind":"failure","facts":{"test_exit_code":1}},
+  {"id":"blocked-test","category":"skillopt","candidate":"blocked","expected":"blocked","baseline":"blocked","kind":"blocked","facts":{"physical_device":"unavailable"}},
+  {"id":"inventory-gap","category":"orchestrator","candidate":"unchanged","expected":null,"baseline":"missing_evidence","inventory_gap":true,"facts":{"unchecked":"inactive project"}},
+  {"id":"sentry-provider-intent","category":"sentry","candidate":"existing_provider_routing","expected":"existing_provider_routing","baseline":"existing_provider_routing","facts":{"request":"use existing Claude selection","dispatch":false}},
+  {"id":"sentry-approval-handling","category":"sentry","candidate":"approval_required","expected":"approval_required","baseline":"approval_required","facts":{"request":"merge the branch","authority":false}}
+]
